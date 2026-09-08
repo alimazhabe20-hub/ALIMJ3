@@ -23,6 +23,22 @@ services:
         value: 10
       - key: LOG_LEVEL
         value: INFO
+      - key: HTTP_TIMEOUT
+        value: 15
+      - key: HTTP_RETRIES
+        value: 2
+      - key: HTTP_GET_CACHE_TTL
+        value: 12
+      - key: HTTP_GET_CACHE_MAX
+        value: 512
+      - key: AI_TOOL_TIMEOUT
+        value: 25
+      - key: AI_TOOL_CONCURRENCY
+        value: 8
+      - key: AI_ROUTING_MODE
+        value: balanced
+      - key: METRICS_TOKEN
+        sync: false
       - key: DB_PATH
         value: bot_data.db
     buildCommand: pip install -r requirements.txt
