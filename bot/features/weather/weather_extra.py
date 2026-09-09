@@ -68,10 +68,12 @@ def _get_coords(city: str):
 
 
 
-async def weather_forecast(city: str) -> str:
-    """پیش‌بینی ۷ روزه — اول Open-Meteo حرفه‌ای، بعد wttr"""
+async def weather_forecast(city: str, days: int = 7, start_day: int = 0) -> str:
+    """پیش‌بینی هوا با بازه انتخابی؛ پیش‌فرض همان ۷ روز قبلی است."""
     city = _norm_city(city) or "تهران"
-    key = f"fc7_{city}"
+    days = max(1, min(int(days or 7), 7))
+    start_day = max(0, min(int(start_day or 0), 6))
+    key = f"fc7_{city}_{days}_{start_day}"
     now = datetime.now().timestamp()
     if key in _cache and now - _cache_t.get(key, 0) < getattr(config, "CACHE_TTL", 300):
         return _cache[key]
@@ -158,14 +160,15 @@ async def weather_forecast(city: str) -> str:
         cur_desc = WEATHER_CODES.get(cur_code, "نامشخص")
 
         lines = [
-            f"🌤 پیش‌بینی هوای {city} (۷ روزه)",
+            f"🌤 پیش‌بینی هوای {city}" + (" (۷ روزه)" if days == 7 and start_day == 0 else ""),
             "",
             f"📍 الان: {pn(cur_temp)}°C  {cur_desc}",
             f"💧 رطوبت: {pn(cur_hum)}%  |  💨 باد: {pn(cur_wind)} km/h",
             "━━━━━━━━━━━━━━━━━━━━",
         ]
         day_names = ["امروز", "فردا", "پس‌فردا", "روز ۴", "روز ۵", "روز ۶", "روز ۷"]
-        for i in range(min(7, len(times))):
+        end_day = min(start_day + days, len(times), 7)
+        for i in range(start_day, end_day):
             d = times[i][5:] if times[i] else ""
             mx = tmax[i] if i < len(tmax) else "?"
             mn = tmin[i] if i < len(tmin) else "?"
@@ -210,14 +213,15 @@ async def weather_forecast(city: str) -> str:
                     cur_desc = cur.get("weatherDesc", [{}])[0].get("value", "")
                 cur_desc = EN2FA.get(cur_desc, cur_desc)
                 lines = [
-                    f"🌤 پیش‌بینی هوای {city}",
+                    f"🌤 پیش‌بینی هوای {city}" + (" (۷ روزه)" if days == 7 and start_day == 0 else ""),
                     "",
                     f"📍 الان: {pn(cur.get('temp_C','?'))}°C — {cur_desc}",
                     f"💧 رطوبت: {pn(cur.get('humidity','?'))}%",
                     "━━━━━━━━━━━━━━━━━━━━",
                 ]
                 names = ["امروز", "فردا", "پس‌فردا", "روز ۴", "روز ۵", "روز ۶", "روز ۷"]
-                for i, d in enumerate(days):
+                selected_days = days[start_day:start_day + days] if isinstance(days, list) else []
+                for i, d in enumerate(selected_days, start_day):
                     mx, mn = d.get("maxtempC", "?"), d.get("mintempC", "?")
                     desc = ""
                     try:
