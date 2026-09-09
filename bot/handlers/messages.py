@@ -45,12 +45,13 @@ from bot.features.fonts.styles import FONT_NAMES
 from bot.features.fonts.converter import EN_STYLES, FA_STYLES
 import re
 import time
+import asyncio
 from datetime import datetime, timedelta
 import pytz
 from bot.config import config
 from bot.services.ai_extras import (
     store_answer, get_last_answer, get_ai_result_keyboard, parse_chart_request, make_chart_image,
-    web_search, parse_natural_reminder, enhance_ocr_prompt,
+    web_search, parse_natural_reminder, parse_natural_weather, enhance_ocr_prompt,
 )
 from bot.services.visual_search import visual_search, looks_like_visual_search
 from bot.services.ai_service import (
@@ -118,6 +119,33 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
     import re
     from io import BytesIO
     from bot.database import add_reminder
+
+    # هواشناسی طبیعی — قبل از AI عمومی، از قابلیت داخلی Weather استفاده کن.
+    weather = parse_natural_weather(text)
+    if weather:
+        city, forecast = weather
+        try:
+            if forecast:
+                result = await weather_forecast(city) if city else await weather_forecast(get_user_city(user_id) or "تهران")
+            else:
+                from bot.api.weather import get_weather
+                actual_city = city or (get_user_city(user_id) or "تهران")
+                data = await asyncio.to_thread(get_weather, actual_city)
+                if not data:
+                    result = f"آب‌وهوای «{actual_city}» پیدا نشد."
+                else:
+                    result = (
+                        f"🌤 آب‌وهوای {actual_city}:\n"
+                        f"دما: {data.get('temp')}°C\n"
+                        f"وضعیت: {data.get('condition')}\n"
+                        f"رطوبت: {data.get('humidity')}%"
+                    )
+            await update.message.reply_text(result, reply_markup=get_ai_keyboard(user_id))
+        except Exception as exc:
+            # اگر مسیر طبیعی Weather به هر دلیل شکست خورد، پیام عمومی AI هنوز می‌تواند fallback باشد.
+            logger.warning("natural weather intent failed: %s", exc)
+            return False
+        return True
 
     # یادآوری
     rem = parse_natural_reminder(text)
