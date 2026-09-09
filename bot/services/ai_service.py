@@ -228,6 +228,7 @@ async def _gemini_with_media(
         raise RuntimeError("هیچ کلید Gemini تنظیم نشده")
 
     from bot.services.ai_tools import get_tool_definitions, execute_tool, parse_tool_arguments
+    from bot.services.tool_runtime import select_capability_tool
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     contents = []
@@ -270,6 +271,14 @@ async def _gemini_with_media(
                 }
                 if gemini_tools and round_no < 3:
                     payload["tools"] = gemini_tools
+                    forced_tool = select_capability_tool(prompt)
+                    if forced_tool:
+                        payload["toolConfig"] = {
+                            "functionCallingConfig": {
+                                "mode": "ANY",
+                                "allowedFunctionNames": [forced_tool],
+                            }
+                        }
 
                 status, data = await _post_json(url, params={"key": key}, json=payload)
                 if status >= 400:

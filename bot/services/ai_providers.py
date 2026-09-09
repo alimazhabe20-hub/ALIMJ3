@@ -19,6 +19,7 @@ from bot.services.ai_runtime import (
     _advance_rr, _get_http, _record_provider, _provider_available,
 )
 from bot.services.ai_tools import get_tool_definitions, execute_tool
+from bot.services.tool_runtime import select_capability_tool
 from bot.utils.http_client import request_with_retry
 
 
@@ -86,6 +87,7 @@ async def _gemini(
         raise RuntimeError("هیچ کلید Gemini تنظیم نشده")
 
     from bot.services.ai_tools import get_tool_definitions, execute_tool, parse_tool_arguments
+    from bot.services.tool_runtime import select_capability_tool
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
@@ -129,6 +131,14 @@ async def _gemini(
                 }
                 if gemini_tools and _round < max_tool_rounds:
                     payload["tools"] = gemini_tools
+                    forced_tool = select_capability_tool(prompt)
+                    if forced_tool:
+                        payload["toolConfig"] = {
+                            "functionCallingConfig": {
+                                "mode": "ANY",
+                                "allowedFunctionNames": [forced_tool],
+                            }
+                        }
 
                 status, data = await _post_json(
                     url, params={"key": key}, json=payload
@@ -268,16 +278,30 @@ async def _openai_compatible(
                     tools = get_tool_definitions()
                     if tools:
                         payload["tools"] = tools
-                        payload["tool_choice"] = "auto"
+                        forced_tool = select_capability_tool(prompt)
+                        if forced_tool:
+                            payload["tool_choice"] = {
+                                "type": "function",
+                                "function": {"name": forced_tool},
+                            }
+                        else:
+                            payload["tool_choice"] = "auto"
 
                 status, data = await _post_json(url, headers=headers, json=payload)
                 if status >= 400:
                     # بعضی مدل‌ها tools را پشتیبانی نمی‌کنند → بدون tool دوباره امتحان
                     err_text = str(data).lower()
-                    if use_tools and any(
+                    if use_tools and "tool_choice" in err_text and payload.get("tools"):
+                        # بعضی endpointها tools را می‌پذیرند ولی tool_choice اجباری را نه؛
+                        # در این حالت ابزارها را نگه می‌داریم و به انتخاب خودکار برمی‌گردیم.
+                        payload["tool_choice"] = "auto"
+                        status, data = await _post_json(
+                            url, headers=headers, json=payload
+                        )
+                    elif use_tools and any(
                         marker in err_text
                         for marker in (
-                            "tool_calls", "tool call", "tool_choice",
+                            "tool_calls", "tool call",
                             "function calling", "function_call",
                             "function calls", "unsupported parameter",
                         )

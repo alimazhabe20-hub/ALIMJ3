@@ -340,7 +340,7 @@ def _tool_reminder(
     return f"یادآوری ثبت شد: {text} در {remind_at}"
 
 def _register_builtin_tools() -> None:
-    if _REGISTRY:
+    if "get_weather" in _REGISTRY:
         return
 
     register_tool(
@@ -365,7 +365,7 @@ def _register_builtin_tools() -> None:
             },
         },
         handler=_get_weather_forecast,
-        keywords=[r"پیش\s*بینی\s*هوا|هوای\s*فردا|هوای\s*هفته"],
+        keywords=[r"پیش\s*بینی\s*هوا|هوا(?:ی)?\s*(?:فردا|پس\s*فردا|هفته)|(?:فردا|پس\s*فردا).*هوا"],
     )
     register_tool(
         name="get_air_quality",
