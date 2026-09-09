@@ -3,13 +3,15 @@
 Kept separate from the feature repositories so the public bot.database API
 remains backwards compatible while the database layer can evolve independently.
 """
-import sqlite3
-import shutil
 import os
-import time
-from pathlib import Path
+import shutil
+import sqlite3
 import sys
+import time
+from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
+from typing import Any, TypeVar
 from bot.logger import logger
 from bot.config import config
 
@@ -20,31 +22,22 @@ BACKUP_KEEP = getattr(config, "BACKUP_KEEP", 14)
 DB_BUSY_RETRIES = max(1, int(os.getenv("DB_BUSY_RETRIES", "4")))
 DB_BUSY_BACKOFF = max(0.02, float(os.getenv("DB_BUSY_BACKOFF", "0.08")))
 
-def _current_db_path():
+_T = TypeVar("_T")
+
+def _current_db_path() -> Path:
     mod = sys.modules.get("bot.database")
     return getattr(mod, "DB_PATH", DB_PATH) if mod is not None else DB_PATH
 
-def _current_backup_dir():
+def _current_backup_dir() -> Path:
     mod = sys.modules.get("bot.database")
     return Path(getattr(mod, "BACKUP_DIR", BACKUP_DIR)) if mod is not None else BACKUP_DIR
 
-def _ensure_parent(path):
+
+def _ensure_parent(path: str | Path) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
 
-DB_BUSY_RETRIES = max(1, int(os.getenv("DB_BUSY_RETRIES", "4")))
-DB_BUSY_BACKOFF = max(0.02, float(os.getenv("DB_BUSY_BACKOFF", "0.08")))
-
-def _current_db_path():
-    mod = sys.modules.get("bot.database")
-    return getattr(mod, "DB_PATH", DB_PATH) if mod is not None else DB_PATH
-
-def _current_backup_dir():
-    mod = sys.modules.get("bot.database")
-    return Path(getattr(mod, "BACKUP_DIR", BACKUP_DIR)) if mod is not None else BACKUP_DIR
-
-
-def get_db_connection():
+def get_db_connection() -> sqlite3.Connection:
     _ensure_parent(_current_db_path())
     conn = sqlite3.connect(_current_db_path(), check_same_thread=False, timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -55,7 +48,7 @@ def get_db_connection():
     return conn
 
 
-def run_db_transaction(operation, retries=DB_BUSY_RETRIES):
+def run_db_transaction(operation: Callable[[sqlite3.Connection], _T], retries: int = DB_BUSY_RETRIES) -> _T:
     """Run one short transaction and retry only transient SQLite lock errors."""
     last_exc = None
     for attempt in range(max(0, retries) + 1):
@@ -78,12 +71,12 @@ def run_db_transaction(operation, retries=DB_BUSY_RETRIES):
         raise last_exc
 
 
-def _execute_write(sql, params=()):
+def _execute_write(sql: str, params: tuple[Any, ...] = ()) -> None:
     run_db_transaction(lambda conn: conn.execute(sql, params))
 
 
 
-def _user_count(db_file) -> int:
+def _user_count(db_file: str | Path) -> int:
     """تعداد کاربران یک فایل دیتابیس — اگر خراب باشد 0"""
     try:
         p = Path(db_file)
@@ -96,11 +89,11 @@ def _user_count(db_file) -> int:
             return int(c.fetchone()[0] or 0)
         finally:
             conn.close()
-    except Exception:
+    except (sqlite3.Error, OSError, ValueError):
         return 0
 
 
-def restore_from_backup_if_needed():
+def restore_from_backup_if_needed() -> None:
     """
     اگر دیتابیس اصلی خالی/ناموجود باشد ولی بکاپ داشته باشیم،
     آخرین بکاپ معتبر را برمی‌گرداند تا داده کاربران از بین نرود.
@@ -133,13 +126,13 @@ def restore_from_backup_if_needed():
             logger.warning(
                 f"Restored DB from backup {best.name} ({best_count} users) -> {_current_db_path()}"
             )
-        except Exception as e:
-            logger.error(f"Restore failed: {e}")
+        except (OSError, shutil.Error) as exc:
+            logger.error("Restore failed: %s", exc)
     else:
         logger.info(f"No backup to restore — fresh DB at {_current_db_path()}")
 
 
-def backup_db():
+def backup_db() -> None:
     """
     بکاپ روی همان دیسک پایدار:
     - backups/bot_YYYYMMDD_HHMMSS.db
@@ -174,11 +167,11 @@ def backup_db():
         for f in old[:-BACKUP_KEEP]:
             try:
                 f.unlink()
-            except Exception:
+            except OSError:
                 pass
 
         logger.info(f"DB backed up ({users} users) -> {backup_path.name}")
-    except Exception as e:
-        logger.error(f"Backup failed: {e}")
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        logger.error("Backup failed: %s", exc)
 
 

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from bot.logger import logger
+from bot.utils.exceptions import DatabaseError
 
 SCHEMA_VERSION = 1
 MIGRATION_LOCK_RETRIES = 4
@@ -57,7 +58,7 @@ def _read_version(conn: sqlite3.Connection) -> int:
     try:
         return int(row[0])
     except (TypeError, ValueError):
-        raise RuntimeError("Invalid database schema_version metadata")
+        raise DatabaseError("Invalid database schema_version metadata") from None
 
 
 def _write_version(conn: sqlite3.Connection, version: int) -> None:
@@ -106,7 +107,7 @@ def ensure_schema_version(conn: sqlite3.Connection, db_path: str | Path | None =
     _create_tracking_tables(conn)
     current = _read_version(conn)
     if current > SCHEMA_VERSION:
-        raise RuntimeError(
+        raise DatabaseError(
             f"Database schema version {current} is newer than supported {SCHEMA_VERSION}"
         )
 
@@ -123,8 +124,8 @@ def ensure_schema_version(conn: sqlite3.Connection, db_path: str | Path | None =
             try:
                 backup = _backup_before_migration(conn, db_path)
                 logger.info("Pre-migration DB backup created: %s", backup.name)
-            except Exception as exc:
-                raise RuntimeError(f"Pre-migration database backup failed: {exc}") from exc
+            except (sqlite3.Error, OSError) as exc:
+                raise DatabaseError(f"Pre-migration database backup failed: {exc}") from exc
         _apply_baseline(conn)
         conn.commit()
         logger.info("Database schema baseline registered at V1")
@@ -134,7 +135,7 @@ def ensure_schema_version(conn: sqlite3.Connection, db_path: str | Path | None =
     # gap never advances schema metadata without a real migration.
     for migration in MIGRATIONS:
         if current < migration.version:
-            raise RuntimeError(f"Missing migration implementation for V{migration.version}")
+            raise DatabaseError(f"Missing migration implementation for V{migration.version}")
 
     conn.commit()
     return current

@@ -7,6 +7,7 @@ import sqlite3
 import os
 import time
 from datetime import datetime
+from typing import Any
 from pathlib import Path
 from bot.logger import logger
 from bot.config import config
@@ -22,7 +23,7 @@ from bot.database_core import (
 DB_PATH = config.DB_PATH
 BACKUP_DIR = Path(config.BACKUP_DIR)
 
-def init_db():
+def init_db() -> None:
     logger.info(f"Initializing database at {DB_PATH} ...")
     restore_from_backup_if_needed()
     # ریستور خودکار از GitHub (اگر DB خالی و تنظیمات موجود باشد)
@@ -73,7 +74,7 @@ def init_db():
     ):
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col} {default}")
-        except Exception:
+        except sqlite3.OperationalError:
             pass
     conn.commit()
     conn.close()
@@ -110,7 +111,7 @@ def init_db():
 
 
 
-def get_schema_status():
+def get_schema_status() -> dict[str, object]:
     """Return safe database schema metadata for diagnostics and tests."""
     conn = get_db_connection()
     try:
@@ -119,7 +120,7 @@ def get_schema_status():
         conn.close()
 
 
-def get_user(user_id):
+def get_user(user_id: int) -> tuple[Any, ...] | None:
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
@@ -127,7 +128,7 @@ def get_user(user_id):
     conn.close()
     return result
 
-def save_user(user_id, first_name, city="قم", country="Iran", language="fa"):
+def save_user(user_id: int, first_name: str | None, city: str = "قم", country: str = "Iran", language: str = "fa") -> None:
     """ثبت/به‌روزرسانی کاربر با retry محدود در صورت lock دیتابیس."""
     _execute_write(
         "INSERT INTO users "
@@ -140,7 +141,7 @@ def save_user(user_id, first_name, city="قم", country="Iran", language="fa"):
         (user_id, first_name, city, country, language),
     )
 
-def update_user_field(user_id, field, value):
+def update_user_field(user_id: int, field: str, value: Any) -> None:
     allowed_fields = {
         "city", "country", "language", "subscribed",
         "notification_enabled", "notify_fajr", "notify_dhuhr",
@@ -154,7 +155,7 @@ def update_user_field(user_id, field, value):
         (value, user_id),
     )
 
-def get_all_users():
+def get_all_users() -> list[tuple[Any, ...]]:
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT user_id, first_name, city, language FROM users WHERE subscribed = 1")
@@ -162,7 +163,7 @@ def get_all_users():
     conn.close()
     return result
 
-def get_active_users_today():
+def get_active_users_today() -> int:
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM users WHERE date(last_active) = date('now')")
@@ -170,7 +171,7 @@ def get_active_users_today():
     conn.close()
     return result
 
-def update_stats():
+def update_stats() -> None:
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM users")
@@ -181,15 +182,15 @@ def update_stats():
     conn.close()
     logger.info(f"Stats updated: total={total}, active={active}")
 
-def get_user_city(user_id):
+def get_user_city(user_id: int) -> str:
     user = get_user(user_id)
     return user[2] if user else "قم"
 
-def get_user_country(user_id):
+def get_user_country(user_id: int) -> str:
     user = get_user(user_id)
     return user[3] if user else "Iran"
 
-def get_user_language(user_id):
+def get_user_language(user_id: int) -> str:
     user = get_user(user_id)
     return user[4] if user else "fa"
 
