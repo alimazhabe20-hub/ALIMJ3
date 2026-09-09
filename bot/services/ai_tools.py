@@ -4,6 +4,7 @@ Generic registry/execution machinery lives in tool_runtime.py. This facade
 re-exports the historical public functions so existing imports are stable.
 """
 from __future__ import annotations
+import asyncio
 from typing import Any, List
 
 from bot.services.tool_runtime import (
