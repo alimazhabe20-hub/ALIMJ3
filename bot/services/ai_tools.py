@@ -34,12 +34,12 @@ async def _get_weather(city: str = "", user_id: int = 0) -> str:
     )
 
 
-async def _get_weather_forecast(city: str = "", user_id: int = 0) -> str:
+async def _get_weather_forecast(city: str = "", days: int = 7, start_day: int = 0, user_id: int = 0) -> str:
     from bot.features.weather.weather_extra import weather_forecast
     from bot.database import get_user_city
 
     city = (city or "").strip() or (get_user_city(user_id) or "تهران")
-    return await weather_forecast(city)
+    return await weather_forecast(city, days=int(days or 7), start_day=int(start_day or 0))
 
 
 async def _get_air_quality(city: str = "", user_id: int = 0) -> str:
@@ -83,6 +83,11 @@ async def _search_shopping(query: str = "", source: str = "all", max_results: in
 def _shopping_price_history(query: str = "", days: int = 30) -> str:
     from bot.features.market.shopping import shopping_price_history
     return shopping_price_history(query=query, days=int(days or 30))
+
+
+async def _get_crypto_price(symbol: str = "btc", user_id: int = 0) -> str:
+    from bot.features.market.finance import get_crypto_price
+    return await get_crypto_price(symbol)
 
 
 async def _get_top_crypto(limit: int = 10) -> str:
@@ -350,8 +355,15 @@ def _register_builtin_tools() -> None:
     )
     register_tool(
         name="get_weather_forecast",
-        description="پیش‌بینی آب‌وهوای چندروزه.",
-        parameters={"type": "object", "properties": {"city": {"type": "string"}}},
+        description="پیش‌بینی آب‌وهوا برای بازه درخواستی. برای «فردا» فقط همان روز را بگیر (days=1 و start_day=1)؛ برای «پس‌فردا» days=1 و start_day=2؛ اگر کاربر صریحاً پیش‌بینی چندروزه/هفتگی خواست، از بازه بزرگ‌تر استفاده کن.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "city": {"type": "string"},
+                "days": {"type": "integer", "minimum": 1, "maximum": 7, "description": "تعداد روزهای خروجی"},
+                "start_day": {"type": "integer", "minimum": 0, "maximum": 6, "description": "۰ امروز، ۱ فردا، ۲ پس‌فردا"},
+            },
+        },
         handler=_get_weather_forecast,
         keywords=[r"پیش\s*بینی\s*هوا|هوای\s*فردا|هوای\s*هفته"],
     )
@@ -408,6 +420,17 @@ def _register_builtin_tools() -> None:
         keywords=[r"تاریخچه قیمت|قیمت هفته قبل|قیمت ماه قبل|روند قیمت محصول|افت قیمت محصول"],
     )
 
+    register_tool(
+        name="get_crypto_price",
+        description="قیمت لحظه‌ای یک رمزارز مشخص مثل بیت‌کوین، اتریوم یا تتر را از منابع زنده ربات می‌گیرد و هرگز قیمت حدسی نمی‌دهد.",
+        parameters={
+            "type": "object",
+            "properties": {"symbol": {"type": "string", "description": "نماد رمزارز مثل btc یا eth"}},
+            "required": ["symbol"],
+        },
+        handler=_get_crypto_price,
+        keywords=[r"قیمت\s*(بیت\s*کوین|اتریوم|تتر|سولانا|ارز|کریپتو|رمزارز)|بیت\s*کوین.*قیمت|bitcoin.*price|crypto.*price"],
+    )
     register_tool(
         name="get_top_crypto",
         description="برترین رمزارزها.",

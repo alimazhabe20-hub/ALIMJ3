@@ -59,6 +59,27 @@ def parse_natural_weather(text: str) -> Optional[Tuple[str, bool]]:
     return city, forecast
 
 
+def parse_natural_crypto_price(text: str) -> Optional[str]:
+    """تشخیص درخواست قیمت زنده یک رمزارز مشخص برای جلوگیری از پاسخ حدسی AI."""
+    normalized = (text or "").strip().replace("ي", "ی").replace("ك", "ک").replace("‌", " ")
+    if not re.search(r"قیمت|نرخ|چنده|چقدر|price", normalized, re.I):
+        return None
+    aliases = [
+        (r"بیت\s*کوین|بیتکویین|bitcoin|btc", "btc"),
+        (r"اتریوم|ethereum|eth", "eth"),
+        (r"تتر|tether|usdt", "usdt"),
+        (r"سولانا|solana|sol", "sol"),
+        (r"ریپل|xrp", "xrp"),
+        (r"دوج\s*کوین|dogecoin|doge", "doge"),
+        (r"bnb|بایننس", "bnb"),
+        (r"کاردانو|cardano|ada", "ada"),
+    ]
+    for pattern, symbol in aliases:
+        if re.search(pattern, normalized, re.I):
+            return symbol
+    return None
+
+
 def store_answer(user_id: int, text: str) -> str:
     """ذخیره جواب برای دکمه ویس و درخواست «ویس بفرست»."""
     aid = hashlib.md5(f"{user_id}:{time.time()}:{text[:80]}".encode()).hexdigest()[:12]
