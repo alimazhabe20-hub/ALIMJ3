@@ -546,8 +546,9 @@ async def _cloudflare(user_id: int, prompt: str, model: str) -> str:
             text = result.get("response") or result.get("text")
             if not text:
                 raise RuntimeError(f"Cloudflare empty response: {str(data)[:900]}")
+            text = _normalize_final_text(str(text))
             _advance_rr("cloudflare")
-            return str(text).strip()
+            return text
         except RuntimeError as exc:
             errors.append(str(exc)[:200])
             continue
