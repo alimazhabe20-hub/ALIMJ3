@@ -122,7 +122,7 @@ async def _gemini(
         try:
             working_contents = list(contents)
 
-            for _round in range(max_tool_rounds + 1 if use_tools else 1):
+            for _round in range(max_tool_rounds + 2 if use_tools else 1):
                 payload = {
                     "systemInstruction": {"parts": [{"text": _legacy_ai_context()[0]}]},
                     "contents": working_contents,
