@@ -159,17 +159,20 @@ async def _gemini(
 
     errors = []
     for key in keys:
+        # Keep tool capability local to this key/attempt. A Gemini key that
+        # rejects/leaks function calls must not disable tools for later keys.
+        tools_enabled = bool(use_tools)
         try:
             working_contents = list(contents)
 
-            for _round in range(max_tool_rounds + 2 if use_tools else 1):
+            for _round in range(max_tool_rounds + 2 if tools_enabled else 1):
                 payload = {
                     "systemInstruction": {"parts": [{"text": _legacy_ai_context()[0]}]},
                     "contents": working_contents,
                     "generationConfig": {"maxOutputTokens": MAX_OUTPUT},
                     "safetySettings": GEMINI_SAFETY_SETTINGS,
                 }
-                if gemini_tools and _round < max_tool_rounds:
+                if tools_enabled and gemini_tools and _round < max_tool_rounds:
                     payload["tools"] = gemini_tools
                     forced_tool = select_capability_tool(prompt)
                     if forced_tool:
@@ -210,7 +213,7 @@ async def _gemini(
                     if p.get("functionCall") or p.get("function_call")
                 ]
 
-                if function_calls and use_tools and _round < max_tool_rounds:
+                if function_calls and tools_enabled and _round < max_tool_rounds:
                     # پاسخ مدل را عیناً به history موقت اضافه کن.
                     working_contents.append({
                         "role": "model",
@@ -267,7 +270,7 @@ async def _gemini(
                             )
                         }],
                     })
-                    use_tools = False
+                    tools_enabled = False
                     continue
 
                 text = "".join(
