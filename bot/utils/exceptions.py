@@ -46,7 +46,7 @@ class AIQuotaError(AIProviderError):
     """An AI provider reported quota/rate exhaustion."""
 
 
-class DatabaseError(ALIMJError):
+class DatabaseError(ALIMJError, RuntimeError):
     """Database operation failed."""
 
 
