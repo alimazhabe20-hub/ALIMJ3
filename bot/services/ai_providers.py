@@ -255,6 +255,9 @@ async def _openai_compatible(
 
     errors = []
     for key in keys:
+        # Keep tool capability local to this key/attempt; one incompatible endpoint
+        # must not disable tools for every fallback provider key.
+        tools_enabled = bool(use_tools)
         headers = {
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
@@ -264,10 +267,10 @@ async def _openai_compatible(
 
         messages = _legacy_ai_context()[1](user_id, prompt)
         # حداکثر ۲ دور tool calling تا گیر نکند
-        max_tool_rounds = 2 if use_tools else 0
+        max_tool_rounds = 2 if tools_enabled else 0
         # یک دور اضافه فقط برای synthesis نهایی است؛ اگر مدل در آخرین دور
         # دوباره tool-call بدهد، نتیجه ابزار را می‌گیرد و پاسخ طبیعی را می‌سازد.
-        total_rounds = max_tool_rounds + 2 if use_tools else 1
+        total_rounds = max_tool_rounds + 2 if tools_enabled else 1
 
         try:
             for _round in range(total_rounds):
@@ -277,7 +280,7 @@ async def _openai_compatible(
                     "max_tokens": MAX_OUTPUT,
                     "temperature": 0.6,
                 }
-                if use_tools and _round < max_tool_rounds:
+                if tools_enabled and _round < max_tool_rounds:
                     tools = get_tool_definitions()
                     if tools:
                         payload["tools"] = tools
@@ -294,14 +297,14 @@ async def _openai_compatible(
                 if status >= 400:
                     # بعضی مدل‌ها tools را پشتیبانی نمی‌کنند → بدون tool دوباره امتحان
                     err_text = str(data).lower()
-                    if use_tools and "tool_choice" in err_text and payload.get("tools"):
+                    if tools_enabled and "tool_choice" in err_text and payload.get("tools"):
                         # بعضی endpointها tools را می‌پذیرند ولی tool_choice اجباری را نه؛
                         # در این حالت ابزارها را نگه می‌داریم و به انتخاب خودکار برمی‌گردیم.
                         payload["tool_choice"] = "auto"
                         status, data = await _post_json(
                             url, headers=headers, json=payload
                         )
-                    elif use_tools and any(
+                    elif tools_enabled and any(
                         marker in err_text
                         for marker in (
                             "tool_calls", "tool call",
@@ -309,7 +312,7 @@ async def _openai_compatible(
                             "function calls", "unsupported parameter",
                         )
                     ):
-                        use_tools = False
+                        tools_enabled = False
                         payload.pop("tools", None)
                         payload.pop("tool_choice", None)
                         status, data = await _post_json(
@@ -338,7 +341,7 @@ async def _openai_compatible(
                 message = choices[0].get("message") or {}
                 tool_calls = message.get("tool_calls") or []
 
-                if tool_calls and use_tools and _round < max_tool_rounds:
+                if tool_calls and tools_enabled and _round < max_tool_rounds:
                     # پاسخ assistant با tool_calls را به تاریخچه اضافه کن
                     messages.append(message)
                     for tc in tool_calls:
