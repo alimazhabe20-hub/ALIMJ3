@@ -824,6 +824,43 @@ register_tool(
 
 _register_builtin_tools()
 
+def _provider_health() -> str:
+    from bot.services.ai_runtime import provider_health_snapshot
+
+    snapshot = provider_health_snapshot()
+    if not snapshot:
+        return "هنوز داده‌ای از سلامت Providerها ثبت نشده است."
+    lines = ["وضعیت سلامت Providerهای AI (بر اساس اجرای واقعی اخیر):"]
+    for name, item in snapshot.items():
+        status = item["status"]
+        if status == "healthy":
+            label = "سالم"
+        elif status == "cooldown":
+            label = f"در cooldown ({item['cooldown_remaining_sec']}s)"
+        else:
+            label = "بدون داده کافی"
+        rate = item["success_rate"]
+        rate_text = f"{round(rate * 100)}%" if isinstance(rate, (int, float)) else "—"
+        latency = f"{item['avg_latency_ms']}ms" if item["avg_latency_ms"] is not None else "—"
+        lines.append(
+            f"- {name}: {label} | موفقیت {rate_text} | latency میانگین {latency} | "
+            f"ok={item['ok']} fail={item['fail']}"
+        )
+    return "\n".join(lines)[:4500]
+
+
+register_tool(
+    name="get_provider_health",
+    description=(
+        "گزارش داخلی و بدون کلید از سلامت Providerهای AI بر اساس موفقیت، خطا، latency و cooldown اخیر. "
+        "برای عیب‌یابی و تشخیص اینکه کدام Provider مشکل دارد استفاده کن؛ هیچ درخواست آزمایشی شبکه‌ای ارسال نمی‌کند."
+    ),
+    parameters={"type": "object", "properties": {}},
+    handler=_provider_health,
+    keywords=[r"سلامت.*(?:provider|پرووایدر|مدل)", r"وضعیت.*(?:ai|هوش مصنوعی|مدل)", r"عیب.?یابی.*(?:ai|هوش مصنوعی)", r"provider health", r"diagnostic"],
+)
+
+
 
 def _knowledge_search(query: str = "", limit: int = 5) -> str:
     from bot.services.knowledge_base import format_knowledge_results

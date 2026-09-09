@@ -153,6 +153,36 @@ def _provider_rank(provider: str) -> float:
     recent_penalty = 2.0 if h["last_fail"] and now - h["last_fail"] < 20 else 0.0
     return (fail * 2.5) + recent_penalty + min(latency, 8.0) * 0.15 - min(ok, 20.0) * 0.02
 
+def provider_health_snapshot() -> dict[str, dict[str, object]]:
+    """Return a secret-free snapshot of adaptive provider health.
+
+    This is local runtime state only; it never probes providers or exposes API keys.
+    """
+    now = time.time()
+    out: dict[str, dict[str, object]] = {}
+    providers = set(_DEFAULT_ORDER) | set(_PROVIDER_HEALTH)
+    for provider in sorted(providers):
+        h = _PROVIDER_HEALTH[provider]
+        ok = int(h["ok"])
+        fail = int(h["fail"])
+        total = ok + fail
+        avg_ms = round((h["latency"] / ok) * 1000, 1) if ok else None
+        cooldown = max(0.0, h["cooldown_until"] - now)
+        out[provider] = {
+            "status": "cooldown" if cooldown > 0 else ("healthy" if ok and fail <= ok else "unknown"),
+            "ok": ok,
+            "fail": fail,
+            "total": total,
+            "success_rate": round(ok / total, 3) if total else None,
+            "avg_latency_ms": avg_ms,
+            "consecutive_fail": int(h["consecutive_fail"]),
+            "cooldown_remaining_sec": round(cooldown, 1),
+            "last_ok_age_sec": round(max(0.0, now - h["last_ok"]), 1) if h["last_ok"] else None,
+            "last_fail_age_sec": round(max(0.0, now - h["last_fail"]), 1) if h["last_fail"] else None,
+        }
+    return out
+
+
 def _provider_available(provider: str, *, explicit: bool = False) -> bool:
     """Return whether a provider is currently eligible for automatic routing."""
     if explicit:
