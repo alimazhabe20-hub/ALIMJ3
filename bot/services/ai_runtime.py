@@ -332,9 +332,11 @@ def _is_quota_error(status: int, data) -> bool:
 
 
 def _next_keys(provider: str) -> List[str]:
-    """
-    لیست کلیدهای قابل استفاده به ترتیب round-robin.
-    کلیدهای در حال cooldown آخر می‌آیند (اگر همه تمام باشند باز هم امتحان می‌شوند).
+    """Return usable keys in round-robin order without hammering cooled keys.
+
+    A key that is still in cooldown is no longer retried automatically while
+    another usable key exists. If every key is cooling down, keep the previous
+    fail-open behaviour and return the cooled pool as a last-resort fallback.
     """
     keys = _provider_keys(provider)
     if not keys:
@@ -343,8 +345,9 @@ def _next_keys(provider: str) -> List[str]:
     start = _KEY_RR[provider] % n
     ordered = keys[start:] + keys[:start]
     available = [k for k in ordered if _is_key_available(_key_id(provider, k))]
-    cooled = [k for k in ordered if not _is_key_available(_key_id(provider, k))]
-    return available + cooled
+    if available:
+        return available
+    return ordered
 
 
 def _advance_rr(provider: str) -> None:
