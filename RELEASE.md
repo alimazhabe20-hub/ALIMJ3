@@ -1,11 +1,5 @@
-# Rooze Ziba / ALIMJ — V39
+# Rooze Ziba / ALIMJ — V40
 
-Version: `39.0.0`
+Version: `40.0.0`
 
-V39 strengthens the built-in plugin system with dependency-aware loading, safe lifecycle management, health diagnostics, idempotent start/stop behavior, and isolated hook failures.
-
-## Compatibility
-- Existing plugin registry API is preserved.
-- `PLUGINS_DISABLED` remains supported.
-- No changes to `requirements.txt`.
-- `jokes_data.json` remains unchanged.
+V40 upgrades the local knowledge layer into a bounded, deterministic RAG pipeline. Project documentation is chunked and ranked with a BM25-style lexical scorer, phrase and coverage boosts, bounded context assembly, index refresh, and safe source/chunk attribution. The existing knowledge-base API remains compatible. `jokes_data.json`, tests, and `requirements.txt` are unchanged.

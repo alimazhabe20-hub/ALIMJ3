@@ -52,7 +52,7 @@ Important deployment variables:
 - `ADMIN_IDS`
 - `DB_PATH` / persistent disk path when persistence is available
 - `METRICS_TOKEN` if `/metrics` is exposed
-- `RELEASE_VERSION=36.0.0`
+- `RELEASE_VERSION=40.0.0`
 - `STARTUP_CHECK=true`
 
 The startup self-check runs before polling and validates important handler/keyboard contracts.
@@ -120,3 +120,7 @@ Existing providers, fallbacks, handlers, tools and user-facing features are pres
 ### Database schema (V36)
 
 The SQLite layer now tracks its schema version in `schema_meta` and applied migrations in `schema_migrations`. Existing databases are adopted safely at the V1 baseline after the normal schema initialization; user data is not dropped. Future schema changes must be added as numbered, idempotent migrations.
+
+## V40 RAG
+
+The local knowledge layer uses a bounded RAG index: approved project documents are chunked and ranked with a deterministic BM25-style lexical scorer. Results include source/chunk attribution and are capped before entering AI context. `jokes_data.json` is never indexed.
