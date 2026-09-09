@@ -14,6 +14,7 @@ V58 combines the V56 Enterprise packaging/operations baseline with the V57 Pro h
 - Database backup/restore validation and schema safety.
 - Non-root Docker image, healthcheck and startup self-check.
 - Enterprise CI, Makefile, architecture, security and proprietary licensing assets.
+- Release package includes `.env.example`, `.dockerignore` and `.gitignore`; runtime assets remain available to Docker.
 - Professional rotating application logging.
 
 ## Compatibility
@@ -32,6 +33,7 @@ Existing providers, handlers, tools, market/weather fallbacks, backup/restore fl
 10. Start with `python -m bot.main` or Docker / `render.yaml`.
 
 ## Release acceptance
+- Release archive is sanitized: no `.env`, bytecode, Python caches, test caches or runtime databases are included.
 - Python source compilation: required to pass.
 - Archive integrity: required to pass.
 - Unit/regression tests: pass when project dependencies from `requirements.txt` are installed; dependency-only skips in a stripped test container are environmental, not release defects.

@@ -95,6 +95,9 @@ rooze-ziba/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── render.yaml
+├── .github/workflows/ci.yml
+├── .dockerignore
+├── .gitignore
 └── .env.example
 ```
 

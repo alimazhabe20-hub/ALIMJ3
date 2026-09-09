@@ -1,0 +1,44 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# VCS / CI metadata
+.git
+.gitignore
+.github
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# Runtime data and logs
+data/
+logs/
+backups/
+*.db
+*.sqlite
+*.sqlite3
+
+# Tests and developer-only artifacts
+tests/
+*.coverage
+coverage.xml
+htmlcov/
+
+# Immutable/large application data: keep it out of the Docker build context.
+
+# Archives and temporary files
+*.zip
+*.tar
+*.tar.gz
+*.tmp
+*.swp
+.DS_Store

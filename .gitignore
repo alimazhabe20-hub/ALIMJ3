@@ -1,0 +1,47 @@
+# Secrets / local configuration
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Test / lint / type-check caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Runtime state
+/data/
+data/
+logs/
+backups/
+*.db
+*.sqlite
+*.sqlite3
+
+# Local model/cache artifacts
+*.bin
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
