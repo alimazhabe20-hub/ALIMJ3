@@ -8,9 +8,10 @@ from __future__ import annotations
 import asyncio
 import re
 from datetime import datetime
-from typing import Optional
+from typing import Any
 
 from bs4 import BeautifulSoup
+import httpx
 
 from bot.logger import logger
 from bot.utils.http_client import pooled_async_client, request_with_retry, safe_json
@@ -57,14 +58,14 @@ SYMBOL_TO_ID = {
     "ordi": "ordinals", "sats": "sats-ordinals",
 }
 
-async def _get_usd_rial():
+async def _get_usd_rial() -> int | None:
     return await _tgju_price("price_dollar_rl")
 
-def pn(n):
+def pn(n: Any) -> str:
     return str(n).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
 
 
-def _parse_price(raw) -> int | None:
+def _parse_price(raw: Any) -> int | None:
     if raw is None:
         return None
     if isinstance(raw, (int, float)):
@@ -74,11 +75,11 @@ def _parse_price(raw) -> int | None:
         return None
     try:
         return int(float(text))
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
-async def _fetch_tgju_bulk() -> dict:
+async def _fetch_tgju_bulk() -> dict[str, Any]:
     now = datetime.now().timestamp()
     if _BULK_CACHE_KEY in _cache and now - _cache_t.get(_BULK_CACHE_KEY, 0) < _BULK_TTL:
         return _cache[_BULK_CACHE_KEY]
@@ -93,8 +94,8 @@ async def _fetch_tgju_bulk() -> dict:
                     current = data.get("current") or {}
                     if current:
                         break
-            except Exception as e:
-                logger.warning(f"tgju ajax {url}: {e}")
+            except (httpx.HTTPError, OSError, RuntimeError) as exc:
+                logger.warning("tgju ajax %s: %s", url, exc)
 
     if current:
         _cache[_BULK_CACHE_KEY] = current
@@ -104,7 +105,7 @@ async def _fetch_tgju_bulk() -> dict:
     return _cache.get(_BULK_CACHE_KEY, {})
 
 
-async def _tgju_price(slug: str):
+async def _tgju_price(slug: str) -> int | None:
     key = f"tgju_{slug}"
     now = datetime.now().timestamp()
     if key in _cache and now - _cache_t.get(key, 0) < _BULK_TTL:
@@ -175,7 +176,7 @@ async def resolve_coin_id(symbol: str) -> Optional[str]:
     return None
 
 
-async def _crypto_simple(ids: list):
+async def _crypto_simple(ids: list[str]) -> dict[str, Any]:
     key = "cg_" + ",".join(sorted(ids))
     now = datetime.now().timestamp()
     if key in _cache and now - _cache_t.get(key, 0) < 60:
@@ -229,7 +230,7 @@ async def _crypto_simple(ids: list):
     return {}
 
 
-async def _top_from_coinlore(limit: int = 20):
+async def _top_from_coinlore(limit: int = 20) -> list[dict[str, Any]]:
     try:
         async with pooled_async_client() as client:
             r = await request_with_retry("GET", f"https://api.coinlore.net/api/tickers/?start=0&limit={limit}", retries=0)
@@ -249,7 +250,7 @@ async def _top_from_coinlore(limit: int = 20):
         return []
 
 
-async def _top_from_paprika(limit: int = 20):
+async def _top_from_paprika(limit: int = 20) -> list[dict[str, Any]]:
     try:
         async with pooled_async_client() as client:
             r = await request_with_retry("GET", "https://api.coinpaprika.com/v1/tickers", retries=0)
@@ -421,7 +422,7 @@ async def full_market_prices() -> str:
 
     lines = ["💰 **قیمت بازار** (بدون کریپتو)\n"]
 
-    def fmt(label, key, unit="ریال"):
+    def fmt(label: str, key: str, unit: str = "ریال") -> str:
         v = data.get(key)
         if v is None:
             return f"{label}: —"
@@ -449,7 +450,7 @@ async def full_market_prices() -> str:
     return "\n".join(lines)
 
 
-def rial_toman(amount: float, to_toman=True) -> str:
+def rial_toman(amount: float, to_toman: bool = True) -> str:
     if to_toman:
         return f"💵 {pn(f'{amount:,.0f}')} ریال = **{pn(f'{amount/10:,.0f}')} تومان**"
     return f"💵 {pn(f'{amount:,.0f}')} تومان = **{pn(f'{amount*10:,.0f}')} ریال**"
@@ -571,7 +572,7 @@ def profit_loss(buy: float, sell: float, qty: float = 1.0) -> str:
     )
 
 
-def parse_profit(text: str):
+def parse_profit(text: str) -> tuple[float, float, float] | None:
     t = text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
     nums = re.findall(r"[\d]+(?:\.\d+)?", t)
     nums = [float(n) for n in nums]
@@ -580,7 +581,7 @@ def parse_profit(text: str):
     return None
 
 
-def parse_currency_input(text: str):
+def parse_currency_input(text: str) -> tuple[float, str, str] | None:
     """پارس هوشمند: عدد + ارز مبدا + ارز مقصد (فارسی/انگلیسی)"""
     if not text:
         return None
