@@ -138,6 +138,7 @@ _PROVIDER_HEALTH: Dict[str, Dict[str, float]] = defaultdict(
         "ok": 0.0, "fail": 0.0, "latency": 0.0,
         "last_fail": 0.0, "last_ok": 0.0,
         "consecutive_fail": 0.0, "cooldown_until": 0.0,
+        "probe_inflight": 0.0,
     }
 )
 
@@ -169,7 +170,7 @@ def provider_health_snapshot() -> dict[str, dict[str, object]]:
         avg_ms = round((h["latency"] / ok) * 1000, 1) if ok else None
         cooldown = max(0.0, h["cooldown_until"] - now)
         out[provider] = {
-            "status": "cooldown" if cooldown > 0 else ("healthy" if ok and fail <= ok else "unknown"),
+            "status": "recovering" if h["probe_inflight"] else ("cooldown" if cooldown > 0 else ("healthy" if ok and fail <= ok else "unknown")),
             "ok": ok,
             "fail": fail,
             "total": total,
@@ -184,14 +185,29 @@ def provider_health_snapshot() -> dict[str, dict[str, object]]:
 
 
 def _provider_available(provider: str, *, explicit: bool = False) -> bool:
-    """Return whether a provider is currently eligible for automatic routing."""
+    """Return whether a provider may be used by automatic routing.
+
+    After a circuit cooldown expires, allow exactly one half-open probe.
+    Concurrent requests do not stampede a recovering provider; they fall back
+    to the next healthy provider while the probe is in flight.
+    """
     if explicit:
         return True
-    return time.time() >= _PROVIDER_HEALTH[provider]["cooldown_until"]
+    h = _PROVIDER_HEALTH[provider]
+    now = time.time()
+    if now < h["cooldown_until"]:
+        return False
+    if h["probe_inflight"]:
+        return False
+    if h["consecutive_fail"] >= AI_PROVIDER_FAILURE_THRESHOLD:
+        h["probe_inflight"] = 1.0
+        logger.info("AI provider %s entering half-open recovery probe", provider)
+    return True
 
 def _record_provider(provider: str, *, ok: bool, latency: float) -> None:
     h = _PROVIDER_HEALTH[provider]
     now = time.time()
+    h["probe_inflight"] = 0.0
     if ok:
         h["ok"] += 1
         h["latency"] += max(0.0, latency)
