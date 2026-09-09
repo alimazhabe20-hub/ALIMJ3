@@ -29,8 +29,8 @@ def test_dockerignore_protects_local_and_immutable_content():
 
 
 def test_release_is_38():
-    assert 'VERSION = "38.0.0"' in (ROOT / "bot/release.py").read_text()
-    assert 'RELEASE_VERSION\n        value: "38.0.0"' in (ROOT / "render.yaml").read_text()
+    assert 'VERSION = "39.0.0"' in (ROOT / "bot/release.py").read_text()
+    assert 'RELEASE_VERSION\n        value: "39.0.0"' in (ROOT / "render.yaml").read_text()
 
 
 def test_requirements_and_jokes_are_untouched():
