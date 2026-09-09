@@ -1,30 +1,22 @@
-# ALIMJ V37 — Database Schema Versioning
+# ALIMJ V38 — Docker & Deployment Hardening
 
 ## Release
-- Version: `37.0.0`
-- Channel: `production`
-- Focus: `bot/utils` contracts, reproducible dependencies, documentation and regression hardening.
 
-## V37 changes
-- Added a small application exception hierarchy in `bot/utils/exceptions.py`.
-- Hardened `bot/utils/http_client.py` with typed settings, defensive environment parsing, bounded host diagnostics and explicit timeout classification while preserving the existing response/fallback contract.
-- Kept `http_resilience.py` as the compatibility facade over the shared HTTP client/cache.
-- Added stable language APIs to `bot/utils/texts.py` without changing the existing text registry.
-- Added stable Persian/Hijri event accessors to `bot/utils/events.py`.
-- Made motivation selection accept an optional sequence while preserving the existing corpus and no-repeat behavior.
-- Added pinned runtime dependencies in `requirements.txt`.
-- Added `pyproject.toml` with Ruff and mypy baseline configuration.
-- Added a complete `.env.example` covering known configuration groups.
-- Added `README.md` with local installation, deployment, diagnostics, testing and architecture instructions.
-- Added V37 database schema tracking and migration regression tests.
+- Version: 38.0.0
+- Focus: reproducible container runtime and deployment hardening
 
-## Regression guarantees
-- Existing features/providers/fallbacks are preserved.
-- `bot/features/fun/jokes_data.json` is intentionally untouched and remains immutable.
-- Release metadata and Render deployment pin are synchronized at `37.0.0`.
+## Changes
 
-## Validation checklist
-1. `python -m compileall -q bot`
-2. `python -m unittest discover -s tests -v`
-3. Verify the jokes-data SHA256 against the protected baseline.
-4. Deploy with `STARTUP_CHECK=true` and `RELEASE_VERSION=37.0.0`.
+- Added a Python 3.11 slim Docker image.
+- Runs the application as a non-root user.
+- Added container-level `/health` healthcheck.
+- Added Docker Compose configuration with persistent data/log volumes.
+- Added `init: true`, graceful stop period, and `no-new-privileges`.
+- Added `.dockerignore` to keep secrets, caches, local databases, tests, and the immutable jokes corpus out of the image context.
+- Render release pin updated to 38.0.0.
+
+## Compatibility
+
+- Existing application entrypoint remains `python -m bot.main`.
+- `requirements.txt` is intentionally unchanged in this release.
+- `jokes_data.json` is intentionally unchanged and excluded from Docker build context.
