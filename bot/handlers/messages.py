@@ -49,6 +49,7 @@ import asyncio
 from datetime import datetime, timedelta
 import pytz
 from bot.config import config
+from bot.logger import logger
 from bot.services.ai_extras import (
     store_answer, get_last_answer, get_ai_result_keyboard, parse_chart_request, make_chart_image,
     web_search, parse_natural_reminder, enhance_ocr_prompt,
@@ -325,7 +326,6 @@ async def _ask_ai_with_typing(update, context, user_id, text):
             context.user_data["_ai_already_sent"] = True
             return result
         except Exception as stream_error:
-            from bot.logger import logger
             logger.warning("AI chunked stream failed, using canonical fallback: %s", stream_error)
             context.user_data["_ai_already_sent"] = False
             return await ask_ai(user_id, text)
@@ -364,7 +364,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await _text_handler_inner(update, context)
     except Exception as e:
-        from bot.logger import logger
         logger.error(f"text_handler error: {e}", exc_info=True)
         try:
             await update.message.reply_text("⚠️ این بخش موقتاً در دسترس نیست. کمی بعد دوباره امتحان کنید.")
@@ -538,7 +537,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 try:
                     await fn(update, context, text, user_id)
                 except Exception as e:
-                    from bot.logger import logger
                     logger.error(f"waiting handler {waiting}: {e}", exc_info=True)
                     context.user_data.pop("waiting_for", None)
                     await update.message.reply_text(
