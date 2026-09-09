@@ -246,6 +246,30 @@ async def _gemini(
                         })
                         continue
 
+                # If Gemini leaks another functionCall after the allowed tool
+                # rounds, do not expose the protocol artifact or immediately
+                # fall back to another provider. Force one clean, no-tools
+                # synthesis turn so the current provider can turn the gathered
+                # tool data into a normal user-facing answer.
+                if function_calls and _round < max_tool_rounds + 1:
+                    working_contents.append({
+                        "role": "model",
+                        "parts": parts,
+                    })
+                    working_contents.append({
+                        "role": "user",
+                        "parts": [{
+                            "text": (
+                                "Provide the final answer to the user now. "
+                                "Do not call any function or expose tool/function "
+                                "protocol. Use the tool results already available "
+                                "in this conversation and answer naturally and concisely."
+                            )
+                        }],
+                    })
+                    use_tools = False
+                    continue
+
                 text = "".join(
                     p.get("text", "")
                     for p in parts
