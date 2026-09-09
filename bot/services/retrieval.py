@@ -63,6 +63,12 @@ def build_local_context(user_id: int, query: str) -> str:
     return format_context(retrieve_local(user_id, query), query)
 
 
+def build_rag_context(query: str, limit: int = 5) -> str:
+    """Return chunked, ranked project documentation for grounded AI context."""
+    from bot.services.rag import build_context
+    return build_context(query, limit=limit)
+
+
 async def hybrid_search(user_id: int, query: str, *, include_web: bool = False) -> str:
     query = (query or "").strip()
     if not query:
