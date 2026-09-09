@@ -22,10 +22,13 @@ def test_compose_hardening_contract():
     assert "8080:8080" in text
 
 
-def test_dockerignore_protects_local_and_immutable_content():
+def test_dockerignore_protects_local_content_without_dropping_runtime_assets():
     text = (ROOT / ".dockerignore").read_text()
-    for item in [".env", "tests", "__pycache__", "bot/features/fun/jokes_data.json"]:
+    for item in [".env", "tests", "__pycache__"]:
         assert item in text
+    # jokes_data.json is a runtime asset used by fun_tools.py and must remain in the image.
+    assert "bot/features/fun/jokes_data.json" not in text
+    assert (ROOT / "bot/features/fun/jokes_data.json").exists()
 
 
 def test_release_is_38():
