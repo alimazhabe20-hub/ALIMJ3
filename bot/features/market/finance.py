@@ -35,7 +35,7 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0
 from bot.features.market.finance_core import (
     TGJU_SLUGS, SYMBOL_TO_ID, pn, _parse_price, _fetch_tgju_bulk, _tgju_price,
     _get_usd_rial, resolve_coin_id, _crypto_simple, _top_from_coinlore,
-    _top_from_paprika, get_top_crypto, convert_crypto, full_market_prices,
+    _top_from_paprika, get_crypto_price, get_top_crypto, convert_crypto, full_market_prices,
     rial_toman, convert_currency, profit_loss, parse_profit, parse_currency_input,
 )
 
