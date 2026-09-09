@@ -34,7 +34,7 @@ from bot.features.date.date_tools import (
 )
 from bot.features.date.converters import calculate_age, parse_birth_datetime
 from bot.features.religious import qibla_direction, daily_adhkar, daily_verse_hadith, religious_countdown, istikhara, istikhara_intro
-from bot.features.market.finance import full_market_prices, convert_currency, profit_loss, parse_profit, get_top_crypto, convert_crypto, get_crypto_chart, analyze_crypto, parse_currency_input, get_crypto_analysis_keyboard, trading_recommendation, derivatives_radar, risk_scenarios, position_size_guide, calc_position_size, entry_alert_text, register_price_alert
+from bot.features.market.finance import full_market_prices, convert_currency, profit_loss, parse_profit, get_top_crypto, convert_crypto, get_crypto_chart, analyze_crypto, parse_currency_input, get_crypto_analysis_keyboard, get_crypto_price, trading_recommendation, derivatives_radar, risk_scenarios, position_size_guide, calc_position_size, entry_alert_text, register_price_alert
 from bot.features.tools.app_tools import calculator, generate_password, count_text, world_distance
 from bot.features.fun.fun_tools import hafez_fal, joke_of_day, fact_of_day, daily_challenge, random_joke, get_joke_categories
 from bot.features.weather.weather_extra import weather_forecast, air_quality
@@ -51,7 +51,7 @@ import pytz
 from bot.config import config
 from bot.services.ai_extras import (
     store_answer, get_last_answer, get_ai_result_keyboard, parse_chart_request, make_chart_image,
-    web_search, parse_natural_reminder, parse_natural_weather, enhance_ocr_prompt,
+    web_search, parse_natural_reminder, parse_natural_weather, parse_natural_crypto_price, enhance_ocr_prompt,
 )
 from bot.services.visual_search import visual_search, looks_like_visual_search
 from bot.services.ai_service import (
@@ -120,33 +120,6 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
     from io import BytesIO
     from bot.database import add_reminder
 
-    # هواشناسی طبیعی — قبل از AI عمومی، از قابلیت داخلی Weather استفاده کن.
-    weather = parse_natural_weather(text)
-    if weather:
-        city, forecast = weather
-        try:
-            if forecast:
-                result = await weather_forecast(city) if city else await weather_forecast(get_user_city(user_id) or "تهران")
-            else:
-                from bot.api.weather import get_weather
-                actual_city = city or (get_user_city(user_id) or "تهران")
-                data = await asyncio.to_thread(get_weather, actual_city)
-                if not data:
-                    result = f"آب‌وهوای «{actual_city}» پیدا نشد."
-                else:
-                    result = (
-                        f"🌤 آب‌وهوای {actual_city}:\n"
-                        f"دما: {data.get('temp')}°C\n"
-                        f"وضعیت: {data.get('condition')}\n"
-                        f"رطوبت: {data.get('humidity')}%"
-                    )
-            await update.message.reply_text(result, reply_markup=get_ai_keyboard(user_id))
-        except Exception as exc:
-            # اگر مسیر طبیعی Weather به هر دلیل شکست خورد، پیام عمومی AI هنوز می‌تواند fallback باشد.
-            logger.warning("natural weather intent failed: %s", exc)
-            return False
-        return True
-
     # یادآوری
     rem = parse_natural_reminder(text)
     if rem:
@@ -169,6 +142,51 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
             f"⏰ یادآوری ثبت شد.\nموضوع: {body}\nزمان: {when.strftime('%Y-%m-%d %H:%M')}\nتکرار: {repeat_label}",
             reply_markup=get_ai_keyboard(user_id),
         )
+        return True
+
+    # قیمت زنده کریپتو — قبل از AI عمومی، ابزار واقعی ربات را اجرا کن.
+    crypto_symbol = parse_natural_crypto_price(text)
+    if crypto_symbol:
+        try:
+            result = await get_crypto_price(crypto_symbol)
+            await update.message.reply_text(result, reply_markup=get_ai_keyboard(user_id))
+            return True
+        except Exception as exc:
+            logger.warning("natural crypto price intent failed: %s", exc)
+            return False
+
+    # هواشناسی طبیعی — قبل از AI عمومی، از قابلیت داخلی Weather استفاده کن.
+    weather = parse_natural_weather(text)
+    if weather:
+        city, forecast = weather
+        try:
+            if forecast:
+                actual_city = city or (get_user_city(user_id) or "تهران")
+                # برای «فردا/پس‌فردا» فقط همان روز را نشان بده؛ منوی «پیش‌بینی هوا» همچنان ۷ روزه می‌ماند.
+                if re.search(r"پس\s*فردا", text, re.I):
+                    result = await weather_forecast(actual_city, days=1, start_day=2)
+                elif re.search(r"فردا", text, re.I):
+                    result = await weather_forecast(actual_city, days=1, start_day=1)
+                else:
+                    result = await weather_forecast(actual_city)
+            else:
+                from bot.api.weather import get_weather
+                actual_city = city or (get_user_city(user_id) or "تهران")
+                data = await asyncio.to_thread(get_weather, actual_city)
+                if not data:
+                    result = f"آب‌وهوای «{actual_city}» پیدا نشد."
+                else:
+                    result = (
+                        f"🌤 آب‌وهوای {actual_city}:\n"
+                        f"دما: {data.get('temp')}°C\n"
+                        f"وضعیت: {data.get('condition')}\n"
+                        f"رطوبت: {data.get('humidity')}%"
+                    )
+            await update.message.reply_text(result, reply_markup=get_ai_keyboard(user_id))
+        except Exception as exc:
+            # اگر مسیر طبیعی Weather به هر دلیل شکست خورد، پیام عمومی AI هنوز می‌تواند fallback باشد.
+            logger.warning("natural weather intent failed: %s", exc)
+            return False
         return True
 
     # جستجوی وب
