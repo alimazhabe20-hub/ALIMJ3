@@ -169,43 +169,72 @@ async def execute_tool(name: str, arguments: dict, *, user_id: int = 0) -> str:
 
 
 def select_capability_tool(prompt: str) -> Optional[str]:
-    """انتخاب قطعی ابزار برای درخواست‌هایی که با کلیدواژه‌های ابزار هم‌خوانی قوی دارند.
+    """انتخاب ابزار فقط وقتی تطبیق به‌اندازه کافی قوی و غیرمبهم باشد.
 
-    این مرحله قبل از tool-calling مدل انجام می‌شود تا اگر مدل در انتخاب ابزار مردد بود،
-    capability واقعی ربات از دست نرود. ابزارهای دارای side effect عمداً فقط در صورت داشتن
-    keyword صریح و قابل‌اعتماد وارد این مسیر می‌شوند؛ create_reminder چون keyword ندارد
-    هیچ‌وقت خودکار اجرا/تحمیل نمی‌شود.
+    امتیازدهی چندمرحله‌ای است: عبارت‌های بلندتر و تطبیق‌های چندکلمه‌ای وزن بیشتری
+    دارند. اگر دو قابلیت هم‌زمان امتیاز نزدیک داشته باشند، هیچ ابزاری به‌صورت اجباری
+    انتخاب نمی‌شود تا مدل بتواند درخواست چندبخشی را با چند Tool مدیریت کند.
     """
-    text = (prompt or '').strip()
+    text = _normalize_capability_text(prompt)
     if not text:
         return None
 
-    best_name = None
-    best_score = 0
+    ranked = []
     for name, entry in _REGISTRY.items():
-        score = 0
-        for kw in entry.get('keywords') or []:
+        score = 0.0
+        hits = 0
+        longest = 0
+        for kw in entry.get("keywords") or []:
             try:
                 m = re.search(kw, text, re.I)
             except re.error:
                 continue
             if not m:
                 continue
-            matched = m.group(0) or kw
-            # عبارت‌های دقیق‌تر امتیاز بیشتری می‌گیرند؛ «قیمت» به‌تنهایی
-            # نباید بر «قیمت بیت‌کوین» یا «قیمت گوشی» غلبه کند.
-            score += 1 + min(len(matched), 48) / 24.0
+            matched = (m.group(0) or kw).strip()
+            length = len(re.sub(r"\\s+", "", matched))
+            # تطبیق‌های مشخص‌تر از keywordهای عمومی مثل «قیمت» مهم‌ترند.
+            score += 1.0 + min(length, 64) / 16.0
+            hits += 1
+            longest = max(longest, length)
 
-        if not score:
+        if not hits:
             continue
-
-        # ابزارهای صرفاً توضیحی/زنجیره‌ای را فقط وقتی صریحاً خواسته شده‌اند انتخاب کن.
-        if name == 'run_agent' and score < 2.0:
+        if name == "run_agent" and score < 2.0:
             continue
-        if score > best_score:
-            best_name, best_score = name, score
+        ranked.append((score, hits, longest, name))
 
-    return best_name
+    if not ranked:
+        return None
+
+    ranked.sort(reverse=True)
+    best = ranked[0]
+    if len(ranked) > 1:
+        second = ranked[1]
+        # درخواست‌های چندقابلیتی را به یک Tool قفل نکن.
+        if (best[0] < second[0] * 1.10 and
+                best[2] <= second[2] + 2 and
+                best[1] <= second[1] + 1):
+            return None
+        # اگر دو قابلیت متفاوت در یک درخواست با «و» حضور دارند، یک Tool را force نکن.
+        if second[3] != best[3] and second[0] >= 1.25 and re.search(r"\sو\s", text):
+            return None
+
+    # تطبیق تک‌کلمه‌ای ضعیف، به‌تنهایی مجوز force کردن Tool نیست.
+    if best[0] < 1.25 or (best[2] < 5 and len(text.split()) <= 1):
+        return None
+    if best[2] == 5 and len(text.split()) <= 1:
+        return None
+    return best[3]
+
+
+def _normalize_capability_text(text: str) -> str:
+    """نرمال‌سازی سبک برای Router بدون تغییر متن اصلی ارسالی به مدل."""
+    text = (text or "").strip().lower()
+    text = text.replace("ي", "ی").replace("ك", "ک")
+    text = re.sub(r"[ـ‌‍]+", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text
 
 
 async def gather_context_for_prompt(user_id: int, prompt: str) -> str:
