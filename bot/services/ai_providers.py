@@ -265,9 +265,12 @@ async def _openai_compatible(
         messages = _legacy_ai_context()[1](user_id, prompt)
         # حداکثر ۲ دور tool calling تا گیر نکند
         max_tool_rounds = 2 if use_tools else 0
+        # یک دور اضافه فقط برای synthesis نهایی است؛ اگر مدل در آخرین دور
+        # دوباره tool-call بدهد، نتیجه ابزار را می‌گیرد و پاسخ طبیعی را می‌سازد.
+        total_rounds = max_tool_rounds + 2 if use_tools else 1
 
         try:
-            for _round in range(max_tool_rounds + 1):
+            for _round in range(total_rounds):
                 payload = {
                     "model": model,
                     "messages": messages,
@@ -335,7 +338,7 @@ async def _openai_compatible(
                 message = choices[0].get("message") or {}
                 tool_calls = message.get("tool_calls") or []
 
-                if tool_calls and use_tools:
+                if tool_calls and use_tools and _round < max_tool_rounds:
                     # پاسخ assistant با tool_calls را به تاریخچه اضافه کن
                     messages.append(message)
                     for tc in tool_calls:
