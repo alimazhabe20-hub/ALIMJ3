@@ -35,7 +35,7 @@ def home():
 
 def _metrics_authorized():
     """Protect operational telemetry; fail closed when a token is configured."""
-    token = getattr(config, "METRICS_TOKEN", "")
+    token = (getattr(config, "METRICS_TOKEN", "") or os.getenv("METRICS_TOKEN", "")).strip()
     if not token:
         return False
     supplied = request.headers.get("X-Metrics-Token", "")
