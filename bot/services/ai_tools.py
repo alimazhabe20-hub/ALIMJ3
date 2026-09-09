@@ -716,7 +716,7 @@ def _register_builtin_tools() -> None:
     )
     register_tool(
         name="create_reminder",
-        description="ثبت یادآوری برای کاربر. remind_at باید ISO زمان تهران باشد.",
+        description="فقط با درخواست صریح کاربر برای یادآوری/آلارم/یادم بنداز/خبرم کن استفاده شود؛ صرفاً وجود زمان، فردا، امروز یا ساعت هرگز مجوز ساخت یادآوری نیست. remind_at باید ISO زمان تهران باشد.",
         parameters={
             "type": "object",
             "properties": {

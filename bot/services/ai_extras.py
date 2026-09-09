@@ -186,14 +186,14 @@ def parse_natural_reminder(text: str) -> Optional[Tuple[str, datetime, str, int]
     normalized = t.replace("‌", " ")
 
     reminder_hint = re.search(
-        r"یادآوری|یادم\s*بیار|یادم\s*باشه|یادآوری\s*کن|ریمایندر|آلارم|خبرم\s*کن|پیام\s*بده|یاد\s*بده",
+        r"یادآوری|یادم\s*(?:بیار|باشه|بنداز)|یادآوری\s*کن|ریمایندر|آلارم|خبرم\s*کن|پیام\s*بده|یاد\s*بده",
         normalized, re.I,
     )
-    time_hint = re.search(
-        r"فردا|پس\s*فردا|امروز|ساعت\s*\d|\d+\s*دقیقه\s*(?:دیگه|دیگر)|\d+\s*ساعت\s*(?:دیگه|دیگر)|هر\s*(?:روز|هفته|ماه|\d+\s*(?:دقیقه|ساعت))",
-        normalized, re.I,
-    )
-    if not reminder_hint and not time_hint:
+    # مهم: صرفِ وجود زمان («فردا»، «ساعت ۹»، ...) به معنی درخواست یادآوری نیست.
+    # این شرط جلوی تبدیل درخواست‌هایی مثل «فردا هوا قم چطوره؟» به Reminder را می‌گیرد.
+    # فقط وقتی وارد parser می‌شویم که کاربر صریحاً قصد یادآوری/اطلاع‌رسانی زمان‌بندی‌شده را
+    # بیان کرده باشد.
+    if not reminder_hint:
         return None
 
     now = datetime.now(TEHRAN)
@@ -257,7 +257,7 @@ def parse_natural_reminder(text: str) -> Optional[Tuple[str, datetime, str, int]
         return None
 
     body = normalized
-    body = re.sub(r"یادآوری(?:\s*کن)?|یادم\s*(?:بیار|باشه)|ریمایندر|آلارم|خبرم\s*کن|یاد\s*بده", "", body, flags=re.I)
+    body = re.sub(r"یادآوری(?:\s*کن)?|یادم\s*(?:بیار|باشه|بنداز)|ریمایندر|آلارم|خبرم\s*کن|یاد\s*بده", "", body, flags=re.I)
     body = re.sub(
         r"(?:\d+\s*دقیقه\s*(?:دیگه|دیگر)|\d+\s*ساعت\s*(?:دیگه|دیگر)|فردا|پس\s*فردا|امروز|ساعت\s*\d{1,2}(?:\s*[:：]\s*\d{1,2})?|هر\s*روز|روزانه|هر\s*هفته|هفتگی|هر\s*ماه|ماهانه|هر\s*\d+\s*دقیقه|هر\s*\d+\s*ساعت|daily|weekly|monthly)",
         "", body, flags=re.I,
