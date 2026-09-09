@@ -1,0 +1,49 @@
+[project]
+name = "rooze-ziba"
+version = "58.0.0"
+description = "Production-grade Persian Telegram assistant with AI, tools, memory, and agents"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Rooze Ziba Engineering" }]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = ["bot/features/fun/jokes_data.json"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"bot/handlers/messages.py" = ["E402"]
+"bot/handlers/feature_handlers.py" = ["E402"]
+
+[tool.mypy-bot.database_core]
+disallow_untyped_defs = true
+warn_return_any = true
+
+[tool.mypy-bot.database_migrations]
+disallow_untyped_defs = true
+warn_return_any = true
+
+[tool.mypy-bot.features.market.finance_core]
+disallow_untyped_defs = true
+warn_return_any = true
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+ignore_missing_imports = true
+warn_unused_ignores = true
+no_implicit_optional = true
+exclude = "tests_v13|tests_v14|tests_v15|tests_v19"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
