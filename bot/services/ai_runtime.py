@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+import hashlib
 from collections import defaultdict, deque
 from typing import Deque, Dict, List, Optional, Tuple
 
@@ -285,9 +286,14 @@ def _provider_keys(provider: str) -> List[str]:
 
 
 def _key_id(provider: str, key: str) -> str:
-    # فقط چند کاراکتر آخر برای لاگ امن
-    tail = key[-6:] if len(key) >= 6 else key
-    return f"{provider}:{tail}"
+    """Return a collision-resistant, secret-free identity for a provider key.
+
+    The previous tail-only identity could collide when two credentials shared
+    the same final characters, causing one key's cooldown to affect another.
+    A short SHA-256 fingerprint keeps logs safe while isolating every key.
+    """
+    digest = hashlib.sha256(key.encode("utf-8", "ignore")).hexdigest()[:12]
+    return f"{provider}:{digest}"
 
 
 def _is_key_available(kid: str) -> bool:
