@@ -82,6 +82,20 @@ def _normalize_final_text(text: str) -> str:
     return value
 
 
+def _safe_parse_tool_arguments(parse_tool_arguments, raw_arguments):
+    """Parse model tool arguments without aborting the provider attempt.
+
+    A malformed function-call payload should be reported back to the model as
+    tool data so the model gets a chance to correct its arguments during the
+    remaining synthesis/tool round, instead of unnecessarily triggering a
+    provider fallback.
+    """
+    try:
+        return parse_tool_arguments(raw_arguments), None
+    except Exception as exc:
+        return {}, f"Invalid tool arguments: {str(exc)[:500]}"
+
+
 def _extract_openai(data: dict) -> str:
     choices = data.get("choices") or []
     if not choices:
@@ -224,10 +238,15 @@ async def _gemini(
                     for call in function_calls:
                         name = call.get("name") or ""
                         args = call.get("args") or call.get("arguments") or {}
-                        args = parse_tool_arguments(args)
-                        result = await execute_tool(
-                            name, args, user_id=user_id
+                        args, parse_error = _safe_parse_tool_arguments(
+                            parse_tool_arguments, args
                         )
+                        if parse_error:
+                            result = parse_error
+                        else:
+                            result = await execute_tool(
+                                name, args, user_id=user_id
+                            )
                         call_id = (
                             call.get("id")
                             or call.get("callId")
@@ -415,10 +434,15 @@ async def _openai_compatible(
                     for tc in tool_calls:
                         fn = tc.get("function") or {}
                         fname = fn.get("name") or ""
-                        fargs = parse_tool_arguments(fn.get("arguments"))
-                        result = await execute_tool(
-                            fname, fargs, user_id=user_id
+                        fargs, parse_error = _safe_parse_tool_arguments(
+                            parse_tool_arguments, fn.get("arguments")
                         )
+                        if parse_error:
+                            result = parse_error
+                        else:
+                            result = await execute_tool(
+                                fname, fargs, user_id=user_id
+                            )
                         messages.append(
                             {
                                 "role": "tool",
