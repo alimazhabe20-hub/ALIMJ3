@@ -100,7 +100,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             get_calendar_for_user, calendar_text, get_calendar_keyboard,
             get_settings_keyboard, get_lead_keyboard, get_tz_keyboard,
             get_event_keyboard, get_event, refresh_calendar, event_detail,
-            ai_context, is_speech_event,
+            ai_context, is_speech_event, fetch_speech_context, fetch_speech_context,
         )
         from bot.database import get_economic_calendar_preferences, set_economic_calendar_preferences
 
@@ -617,37 +617,64 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await msg_target.reply_text("⚠️ این سخنرانی در فهرست فعلی نیست.")
                         return
                     from bot.services.ai_service import ask_ai
-                    import requests as _rq
-                    extra = ""
                     title = str(e.get("title") or "")
-                    # تلاش برای دریافت تیتر خبری مرتبط (اختیاری)
+                    source_txt = ""
                     try:
-                        q = _rq.utils.quote(f"{title} ECB OR Fed OR central bank speech summary")
-                        # منبع عمومی خبری؛ اگر در دسترس نبود نادیده گرفته می‌شود
-                        pass
-                    except Exception:
-                        pass
+                        source_txt = await asyncio.to_thread(
+                            fetch_speech_context, title, str(e.get("country") or "")
+                        )
+                    except Exception as fe:
+                        logger.debug("speech fetch failed: %s", fe)
                     prompt = (
                         "تو خبرنگار اقتصادی هستی. فقط فارسی بنویس.\n"
                         f"رویداد: {title} | ارز: {e.get('country')} | زمان: {e.get('utc')}\n"
-                        "اگر متن رسمی سخنرانی در اختیار نداری، بر اساس نقش سخنران و زمینه تقویم اقتصادی "
-                        "بگو «متن کامل سخنرانی در دسترس ربات نیست» و بعد نکات احتمالی مورد انتظار بازار را "
-                        "به‌صورت محتاطانه و بدون جعل نقل‌قول بنویس.\n"
-                        "ساختار پاسخ:\n"
-                        "۱) موضوع سخنرانی\n۲) نکات کلیدی (اگر موجود)\n۳) پیام برای بازار\n۴) جمع‌بندی کوتاه\n"
+                    )
+                    if source_txt:
+                        prompt += (
+                            "متن/خلاصه منبع عمومی زیر را مبنا قرار بده و نقل‌قول جعلی نساز:\n"
+                            + source_txt[:1800]
+                            + "\n\n"
+                        )
+                    else:
+                        prompt += (
+                            "متن کامل سخنرانی در دسترس نبود. صریحاً بگو متن رسمی پیدا نشد "
+                            "و فقط زمینه مورد انتظار بازار را محتاطانه بنویس؛ نقل‌قول جعلی نساز.\n\n"
+                        )
+                    prompt += (
+                        "ساختار:\n"
+                        "۱) موضوع سخنرانی\n"
+                        "۲) نکات کلیدی\n"
+                        "۳) پیام برای طلا و کریپتو و دلار\n"
+                        "۴) جمع‌بندی\n"
                         "حداکثر ۱۸۰۰ کاراکتر. بدون Markdown."
                     )
                     try:
                         answer, _ = await ask_ai(user_id, prompt)
                     except Exception as ai_err:
-                        await msg_target.reply_text("⚠️ خلاصه سخنرانی الان ممکن نیست.\n" + str(ai_err)[:300])
+                        await msg_target.reply_text(
+                            "⚠️ خلاصه سخنرانی الان ممکن نیست.\n" + str(ai_err)[:300]
+                        )
                         return
-                    text_out = "🗣 خلاصه سخنرانی\n━━━━━━━━━━━━━━━━━━━━\n" + (answer or "").strip()
-                    if len(text_out) <= 4000:
-                        await msg_target.reply_text(text_out)
-                    else:
-                        await msg_target.reply_text(text_out[:3800])
-                        await msg_target.reply_text("🗣 ادامه\n" + text_out[3800:7600])
+                    detail = event_detail(e, tz_name)
+                    body = (answer or "").strip() or "خلاصه در دسترس نیست."
+                    combined = (
+                        detail
+                        + "\n\n🗣 <b>خلاصه سخنرانی</b>\n━━━━━━━━━━━━━━━━━━━━\n"
+                        + "<blockquote>"
+                        + __import__("html").escape(body, quote=False)
+                        + "</blockquote>"
+                    )
+                    kb = get_event_keyboard(e.get("id") or event_id, e)
+                    if len(combined) > 4000:
+                        combined = combined[:3990] + "…"
+                    try:
+                        await query.edit_message_text(
+                            combined, parse_mode="HTML", reply_markup=kb
+                        )
+                    except Exception:
+                        await msg_target.reply_text(
+                            "🗣 خلاصه سخنرانی\n━━━━━━━━━━━━━━━━━━━━\n" + body[:3500]
+                        )
                     return
                 except Exception as err:
                     logger.error("ec speech summary failed: %s", err, exc_info=True)
@@ -662,7 +689,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 _set_ec_view(context, mode="today", impact="all")
                 events, tz_name = await _ec_load(user_id, "today", "all")
                 await _safe_answer(query)
-                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", events=events, selected_date=datetime_now_date(tz_name)))
+                await query.edit_message_text(
+                    calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name),
+                    parse_mode="HTML",
+                    reply_markup=get_calendar_keyboard(
+                        user_id, mode="today", impact="all", events=events,
+                        selected_date=datetime_now_date(tz_name),
+                    ),
+                )
                 return
         except Exception as e:
             logger.error("economic calendar callback failed: %s", e, exc_info=True)
