@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
 import hashlib
 import html
 import re
@@ -30,15 +31,15 @@ FF_FALLBACK_URLS = (
 )
 CACHE_TTL = 5 * 60
 HISTORICAL_HTML_URLS = (
-    "https://calendar.forexfactory.com/calendar?day={day}",
-    "https://www.forexfactory.com/calendar?day={day}",
-    "https://mds-wss.forexfactory.com/calendar?day={day}",
     "https://calendar.forexfactory.com/calendar?week={slug}",
     "https://www.forexfactory.com/calendar?week={slug}",
     "https://calendar.forexfactory.com/calendar/",
     "https://www.forexfactory.com/calendar/",
 )
 HISTORICAL_TZ = pytz.timezone("Europe/London")
+TRADINGVIEW_CALENDAR_URL = "https://economic-calendar.tradingview.com/events"
+TRADINGVIEW_COUNTRIES = ("AR", "AU", "BR", "CA", "CN", "FR", "DE", "IN", "ID", "IT", "JP", "KR", "MX", "RU", "SA", "ZA", "TR", "GB", "US", "EU")
+TRADINGVIEW_COUNTRY_TO_CURRENCY = {"US": "USD", "EU": "EUR", "GB": "GBP", "AU": "AUD", "CA": "CAD", "JP": "JPY", "CH": "CHF", "NZ": "NZD", "CN": "CNY", "NO": "NOK", "SE": "SEK", "HK": "HKD", "SG": "SGD", "MX": "MXN", "IN": "INR", "TR": "TRY", "ZA": "ZAR"}
 _MAX_EVENTS = 600
 
 _cache: list[dict[str, Any]] = []
@@ -231,11 +232,11 @@ def _parse_ff_historical_html(text: str, year_hint: int) -> list[dict[str, Any]]
     out: list[dict[str, Any]] = []
     current_date: datetime | None = None
 
-    rows = soup.select("tr.calendar__row.calendar_row, tr.calendar_row, tr.calendar__row")
+    rows = soup.select("tr.calendar__row.calendar_row, tr.calendar_row")
     for tr in rows:
         # The date cell is often populated only on the first event of a day;
         # subsequent rows inherit it through current_date.
-        date_cell = tr.select_one("td.calendar__cell.calendar__date.date, .calendar__date")
+        date_cell = tr.select_one(".calendar__date")
         if date_cell:
             parsed_day = _parse_ff_date(date_cell.get_text(" ", strip=True), year_hint)
             if parsed_day:
@@ -249,14 +250,14 @@ def _parse_ff_historical_html(text: str, year_hint: int) -> list[dict[str, Any]]
                 current_date = parsed_day
             continue
 
-        cur = tr.select_one("td.calendar__cell.calendar__currency.currency, .calendar__currency, td.currency")
-        event = tr.select_one("td.calendar__cell.calendar__event.event, .calendar__event, .calendar__event-title")
+        cur = tr.select_one(".calendar__currency")
+        event = tr.select_one(".calendar__event")
         if not cur or not event or not current_date:
             continue
 
         currency = cur.get_text(" ", strip=True).upper()
         title = event.get_text(" ", strip=True)
-        time_cell = tr.select_one("td.calendar__cell.calendar__time.time, .calendar__time, td.time")
+        time_cell = tr.select_one(".calendar__time")
         parsed_time = _parse_ff_time(time_cell.get_text(" ", strip=True) if time_cell else "")
         if parsed_time:
             dt_local = HISTORICAL_TZ.localize(
@@ -278,9 +279,9 @@ def _parse_ff_historical_html(text: str, year_hint: int) -> list[dict[str, Any]]
             "utc": dt_local.astimezone(timezone.utc),
             "country": currency,
             "title": title,
-            "actual": cell_value("td.calendar__cell.calendar__actual.actual", ".calendar__actual", ".calendar-actual"),
-            "forecast": cell_value("td.calendar__cell.calendar__forecast.forecast", ".calendar__forecast", ".calendar-forecast"),
-            "previous": cell_value("td.calendar__cell.calendar__previous.previous", ".calendar__previous", ".calendar-previous"),
+            "actual": cell_value(".calendar__actual", ".calendar-actual"),
+            "forecast": cell_value(".calendar__forecast", ".calendar-forecast"),
+            "previous": cell_value(".calendar__previous", ".calendar-previous"),
         })
     return out
 
@@ -353,6 +354,69 @@ def _fetch_json(url: str) -> list[dict[str, Any]]:
     return data
 
 
+def _tv_title_key(value: Any) -> str:
+    text = str(value or "").lower()
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _fetch_tradingview_actuals(start_utc: datetime, end_utc: datetime) -> list[dict[str, Any]]:
+    params = {
+        "from": start_utc.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "to": end_utc.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "countries": ",".join(TRADINGVIEW_COUNTRIES),
+    }
+    headers = {
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.8",
+        "Cache-Control": "no-cache",
+        "Origin": "https://www.tradingview.com",
+        "Referer": "https://www.tradingview.com/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36",
+    }
+    r = requests.get(TRADINGVIEW_CALENDAR_URL, params=params, headers=headers, timeout=18)
+    r.raise_for_status()
+    payload = r.json()
+    rows = payload.get("result", []) if isinstance(payload, dict) else []
+    out = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or row.get("actual") in (None, ""):
+            continue
+        dt = _parse_dt(str(row.get("date") or ""))
+        country = TRADINGVIEW_COUNTRY_TO_CURRENCY.get(str(row.get("country") or "").upper().strip(), str(row.get("country") or "").upper().strip())
+        title = str(row.get("title") or row.get("indicator") or "").strip()
+        if dt and country and title:
+            out.append({"utc": dt, "country": country, "title": title, "actual": row.get("actual")})
+    return out
+
+
+def _merge_tradingview_actuals(events: list[dict[str, Any]], rows: list[dict[str, Any]]) -> int:
+    merged = 0
+    for row in rows:
+        rkey = _tv_title_key(row.get("title"))
+        candidates = []
+        for event in events:
+            if event.get("country") != row.get("country") or event["utc"].date() != row["utc"].date():
+                continue
+            diff = abs((event["utc"] - row["utc"]).total_seconds())
+            if diff > 4 * 3600:
+                continue
+            ekey = _tv_title_key(event.get("title"))
+            ratio = difflib.SequenceMatcher(None, ekey, rkey).ratio()
+            rt, et = set(rkey.split()), set(ekey.split())
+            overlap = len(rt & et) / max(1, len(rt | et))
+            if ratio >= 0.62 or (overlap >= 0.5 and ratio >= 0.5):
+                score = ratio * 0.75 + overlap * 0.25 - min(diff / 3600, 4) * 0.02
+                candidates.append((score, event))
+        if candidates:
+            _, event = max(candidates, key=lambda x: x[0])
+            value = str(row.get("actual") or "").strip()
+            if value and not str(event.get("actual") or "").strip():
+                event["actual"] = value
+                merged += 1
+    return merged
+
+
 async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
     global _cache, _cache_expires, _cache_fetched_at, _cache_lock
     now = time.monotonic()
@@ -380,6 +444,16 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
                     errors.append(f"fallback: {exc2}")
         normalized = [e for e in (_normalize(x) for x in all_rows) if e]
 
+        if normalized:
+            try:
+                now_utc = datetime.now(timezone.utc)
+                tv_rows = await asyncio.to_thread(_fetch_tradingview_actuals, now_utc - timedelta(days=2), now_utc + timedelta(days=8))
+                merged_count = _merge_tradingview_actuals(normalized, tv_rows)
+                if merged_count:
+                    logger.info("economic calendar TradingView actuals merged: %s", merged_count)
+            except Exception as exc:
+                logger.debug("economic calendar TradingView actual enrichment failed: %s", exc)
+
         # The JSON export is convenient but can be unavailable/blocked. The public
         # Forex Factory calendar page is a reliable fallback and also contains the
         # already-published Actual values. When JSON is empty, build the calendar
@@ -390,11 +464,10 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
             # Current week first; yesterday/previous week is only needed for
             # history enrichment and is intentionally best-effort.
             current_slug = _week_slug(now_utc)
-            current_day = now_utc.strftime("%b%-d.%Y").lower()
             current_errors = []
             for template in HISTORICAL_HTML_URLS:
                 try:
-                    url = template.format(slug=current_slug, day=current_day)
+                    url = template.format(slug=current_slug)
                     current_html = await asyncio.to_thread(_fetch_historical_html, url)
                     parsed = _parse_ff_historical_html(current_html, now_utc.year)
                     if parsed:
@@ -410,9 +483,7 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
                 previous_errors = []
                 for template in HISTORICAL_HTML_URLS:
                     try:
-                        previous_slug = _week_slug(previous_dt)
-                        previous_day = previous_dt.strftime("%b%-d.%Y").lower()
-                        url = template.format(slug=previous_slug, day=previous_day)
+                        url = template.format(slug=_week_slug(previous_dt))
                         previous_html = await asyncio.to_thread(_fetch_historical_html, url)
                         parsed = _parse_ff_historical_html(previous_html, previous_dt.year)
                         if parsed:
