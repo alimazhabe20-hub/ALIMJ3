@@ -226,69 +226,26 @@ def _score_timeframe(ta: dict) -> tuple:
 
 
 async def _mtf_bundle(pair: str) -> dict:
-    """تحلیل موازی 1H / 4H / 1D + تضاد"""
-    k1, k4, kd = await asyncio.gather(
-        _fetch_klines_interval(pair, "1h", 120),
-        _fetch_klines_interval(pair, "4h", 120),
-        _fetch_klines_interval(pair, "1d", 120),
-    )
-
+    """تحلیل موازی 15M/1H/4H/1D/1W + تضاد و همگرایی."""
+    specs=[("15M","15m"),("1H","1h"),("4H","4h"),("1D","1d"),("1W","1w")]
+    ks=await asyncio.gather(*[_fetch_klines_interval(pair,iv,160) for _,iv in specs], return_exceptions=True)
     def pack(klines):
-        opens, highs, lows, closes, vols = [], [], [], [], []
+        if isinstance(klines,Exception): klines=[]
+        o=[];h=[];l=[];c=[];v=[]
         for k in klines or []:
-            try:
-                opens.append(float(k[1])); highs.append(float(k[2]))
-                lows.append(float(k[3])); closes.append(float(k[4]))
-                vols.append(float(k[5]))
-            except Exception:
-                continue
-        if len(closes) < 30:
-            return {}, opens, highs, lows, closes
-        ta = _compute_ta(closes, highs, lows, vols)
-        ta["atr"] = _atr(highs, lows, closes, 14)
-        ta["patterns"] = _detect_candle_patterns(opens, highs, lows, closes)
-        score, direction, adx = _score_timeframe(ta)
-        ta["tf_score"] = score
-        ta["tf_dir"] = direction
-        return ta, opens, highs, lows, closes
-
-    t1, *_ = pack(k1)
-    t4, *_ = pack(k4)
-    td, o_d, h_d, l_d, c_d = pack(kd)
-
-    dirs = {
-        "1H": (t1 or {}).get("tf_dir", "—"),
-        "4H": (t4 or {}).get("tf_dir", "—"),
-        "1D": (td or {}).get("tf_dir", "—"),
-    }
-    scores = {
-        "1H": (t1 or {}).get("tf_score"),
-        "4H": (t4 or {}).get("tf_score"),
-        "1D": (td or {}).get("tf_score"),
-    }
-
-    # تضاد
-    conflict = False
-    bull = sum(1 for d in dirs.values() if d == "صعودی")
-    bear = sum(1 for d in dirs.values() if d == "نزولی")
-    if bull >= 1 and bear >= 1:
-        conflict = True
-
-    daily_adx = (td or {}).get("adx") or 0
-    force_wait = daily_adx < 18 if td else False
-
-    return {
-        "1h": t1 or {},
-        "4h": t4 or {},
-        "1d": td or {},
-        "dirs": dirs,
-        "scores": scores,
-        "conflict": conflict,
-        "force_wait": force_wait,
-        "daily_adx": daily_adx,
-        "daily_klines": (o_d, h_d, l_d, c_d),
-    }
-
+            try:o.append(float(k[1]));h.append(float(k[2]));l.append(float(k[3]));c.append(float(k[4]));v.append(float(k[5]))
+            except Exception: continue
+        if len(c)<30:return {},o,h,l,c
+        ta=_compute_ta(c,h,l,v);ta["atr"]=_atr(h,l,c,14);ta["patterns"]=_detect_candle_patterns(o,h,l,c)
+        sc,di,adx=_score_timeframe(ta);ta.update(tf_score=sc,tf_dir=di)
+        return ta,o,h,l,c
+    ps=[pack(k) for k in ks];tfs={n:ps[i][0] for i,(n,_) in enumerate(specs)}
+    dirs={n:(tfs[n] or {}).get("tf_dir","—") for n,_ in specs};scores={n:(tfs[n] or {}).get("tf_score") for n,_ in specs}
+    bull=sum(x=="صعودی" for x in dirs.values());bear=sum(x=="نزولی" for x in dirs.values())
+    weights={"15M":.10,"1H":.15,"4H":.25,"1D":.30,"1W":.20}
+    bias=sum(weights[n]*(1 if dirs[n]=="صعودی" else -1 if dirs[n]=="نزولی" else 0) for n in weights)
+    daily_adx=(tfs.get("1D") or {}).get("adx") or 0
+    return {"15m":tfs.get("15M",{}),"1h":tfs.get("1H",{}),"4h":tfs.get("4H",{}),"1d":tfs.get("1D",{}),"1w":tfs.get("1W",{}),"dirs":dirs,"scores":scores,"conflict":bull>0 and bear>0,"force_wait":bool(tfs.get("1D")) and daily_adx<18,"daily_adx":daily_adx,"bias":bias,"weekly":tfs.get("1W",{}),"daily_klines":ps[3][1:]}
 
 
 def _market_structure(highs, lows, closes) -> dict:
@@ -382,126 +339,35 @@ def _demand_supply_zone(highs, lows, closes) -> tuple:
 
 
 def _mtf_convergence(mtf: dict) -> tuple:
-    """(متن همگرایی، قدرت 1-10)"""
-    dirs = mtf.get("dirs") or {}
-    scores = mtf.get("scores") or {}
-    vals = [dirs.get(k) for k in ("1H", "4H", "1D")]
-    bull = sum(1 for d in vals if d == "صعودی")
-    bear = sum(1 for d in vals if d == "نزولی")
-    avg_sc = [scores.get(k) for k in ("1H", "4H", "1D") if scores.get(k)]
-    avg = sum(avg_sc) / len(avg_sc) if avg_sc else 5
-    if bull == 3:
-        return "همگرایی کامل صعودی ۳/۳", min(10, int(avg + 2))
-    if bear == 3:
-        return "همگرایی کامل نزولی ۳/۳", min(10, int(avg + 2))
-    if bull == 2 and bear == 0:
-        return "همگرایی جزئی صعودی ۲/۳", int(avg)
-    if bear == 2 and bull == 0:
-        return "همگرایی جزئی نزولی ۲/۳", int(avg)
-    if bull and bear:
-        return "عدم همگرایی — تضاد تایم‌فریم‌ها", max(1, int(avg - 2))
-    return "همگرایی ضعیف / رنج", max(1, int(avg - 1))
+    dirs=mtf.get("dirs") or {}; scores=mtf.get("scores") or {}
+    vals=[dirs.get(k) for k in ("15M","1H","4H","1D","1W")]
+    bull=sum(d=="صعودی" for d in vals);bear=sum(d=="نزولی" for d in vals);valid=sum(d in ("صعودی","نزولی") for d in vals)
+    if not valid:return "داده MTF ناکافی",0
+    if bull==valid:return "همگرایی کامل صعودی",10
+    if bear==valid:return "همگرایی کامل نزولی",10
+    power=round(max(bull,bear)/valid*10)
+    return ("تمایل صعودی با تضاد تایم‌فریم" if bull>bear else "تمایل نزولی با تضاد تایم‌فریم"),power
 
 
+def _professional_score(ta, mtf=None, structure=None, binance=None, fg=None, current=None, support=None, resistance=None, market=None):
+    """0-100 multi-factor score; missing data lowers confidence instead of inventing facts."""
+    ta=ta or {};mtf=mtf or {};structure=structure or {};binance=binance or {};market=market or {}
+    f={k:50.0 for k in ("trend","momentum","volume","structure","derivatives","sentiment","macro","market","onchain")}
+    trend=ta.get("trend");f["trend"]=78 if trend=="صعودی" else 22 if trend=="نزولی" else 50
+    rsi=ta.get("rsi");f["momentum"]=max(15,min(85,50+(float(rsi)-50)*1.4)) if rsi is not None else 50
+    vr=ta.get("vol_ratio");f["volume"]=max(20,min(80,50+(float(vr)-1)*25)) if vr is not None else 50
+    st=str(structure.get("structure","")).lower();f["structure"]=75 if "صعود" in st else 25 if "نزول" in st else 50
+    fr=binance.get("funding_rate");f["derivatives"]=max(20,min(80,50-float(fr)*180)) if fr is not None else 50
+    if fg and fg.get("value") is not None:f["sentiment"]=max(20,min(80,50+(float(fg["value"])-50)*.7))
+    ns=float((market.get("news") or {}).get("score") or 0);f["sentiment"]=max(15,min(85,f["sentiment"]+ns*4))
+    dxy=((market.get("macro") or {}).get("DXY") or {}).get("change_pct");f["macro"]=max(20,min(80,50-float(dxy)*12)) if dxy is not None else 50
+    dom=market.get("btc_dominance");f["market"]=max(25,min(75,50+(float(dom)-50)*1.2)) if dom is not None else 50
+    f["trend"]=max(10,min(90,f["trend"]+float(mtf.get("bias") or 0)*20))
+    if market.get("onchain_score") is not None:f["onchain"]=float(market["onchain_score"])
+    weights={"trend":.18,"momentum":.12,"volume":.10,"structure":.14,"derivatives":.12,"sentiment":.08,"macro":.08,"market":.10,"onchain":.08}
+    score=round(sum(f[k]*weights[k] for k in weights))
+    vals=[trend,rsi,vr,fr,fg,mtf.get("scores"),market.get("btc_dominance"),market.get("macro"),market.get("news"),market.get("onchain_score")]
+    avail=sum(x is not None and x!={} for x in vals)
+    confidence=min(96,max(35,45+avail*5-(12 if mtf.get("conflict") else 0)))
+    return {"score":max(0,min(100,score)),"confidence":confidence,"direction":"صعودی" if score>=60 else "نزولی" if score<=40 else "خنثی","factors":f}
 
-
-def _advanced_levels(closes, highs, lows, current=None, max_levels=3):
-    """Clustered support/resistance zones with strength scoring."""
-    if not closes or not highs or not lows:
-        return {"supports": [], "resistances": []}
-    price = float(current if current is not None else closes[-1])
-    atr = _atr(highs, lows, closes, 14) or (price * 0.01)
-    tol = max(atr * 0.45, price * 0.0025)
-    pivots = []
-    for i in range(2, len(closes) - 2):
-        if highs[i] >= max(highs[i-2:i+3]):
-            pivots.append((float(highs[i]), "R", i))
-        if lows[i] <= min(lows[i-2:i+3]):
-            pivots.append((float(lows[i]), "S", i))
-    def cluster(kind):
-        vals = sorted([(p, i) for p, k, i in pivots if k == kind], key=lambda x: x[0])
-        groups = []
-        for p, idx in vals:
-            if not groups or abs(p - groups[-1]["center"]) > tol:
-                groups.append({"prices": [p], "idx": [idx], "center": p})
-            else:
-                groups[-1]["prices"].append(p); groups[-1]["idx"].append(idx)
-                groups[-1]["center"] = sum(groups[-1]["prices"]) / len(groups[-1]["prices"])
-        out = []
-        for g in groups:
-            center = g["center"]
-            touches = len(g["prices"])
-            recency = max(g["idx"] or [0]) / max(1, len(closes)-1)
-            strength = min(100, 35 + touches * 12 + recency * 25)
-            out.append({"price": center, "low": min(g["prices"]), "high": max(g["prices"]), "touches": touches, "strength": round(strength)})
-        return out
-    supports = [x for x in cluster("S") if x["price"] < price * 0.999]
-    resistances = [x for x in cluster("R") if x["price"] > price * 1.001]
-    supports.sort(key=lambda x: (abs(price-x["price"]), -x["strength"]))
-    resistances.sort(key=lambda x: (abs(price-x["price"]), -x["strength"]))
-    return {"supports": supports[:max_levels], "resistances": resistances[:max_levels], "atr": atr}
-
-
-def _market_regime(ta, mtf=None, vol_ratio=None):
-    """Rule-based regime; deterministic and safe when data is partial."""
-    adx = float(ta.get("adx") or 0)
-    trend = ta.get("trend") or "خنثی"
-    vr = float(vol_ratio if vol_ratio is not None else ta.get("vol_ratio") or 1)
-    if adx >= 30 and trend == "صعودی": return "روند صعودی قوی"
-    if adx >= 30 and trend == "نزولی": return "روند نزولی قوی"
-    if vr >= 1.8 and adx >= 25: return "نوسان/شوک بالا"
-    if adx < 18: return "رنج / کم‌قدرت"
-    if trend == "صعودی": return "صعودی در حال شکل‌گیری"
-    if trend == "نزولی": return "نزولی در حال شکل‌گیری"
-    return "تراکم / انتقالی"
-
-
-def _professional_score(ta, mtf=None, structure=None, binance=None, fg=None, current=None, support=None, resistance=None):
-    """0-100 composite score while preserving explicit LONG/SHORT signals."""
-    mtf = mtf or {}; structure = structure or {}; binance = binance or {}
-    bull = bear = 0.0; components = 0; available = 0
-    trend = ta.get("trend")
-    if trend in ("صعودی", "نزولی"):
-        components += 25; available += 25
-        bull += 25 if trend == "صعودی" else 0; bear += 25 if trend == "نزولی" else 0
-    rsi = ta.get("rsi")
-    if rsi is not None:
-        available += 15
-        if 50 <= rsi <= 68: bull += 15
-        elif 32 <= rsi < 50: bear += 15
-        elif rsi < 30: bull += 8
-        elif rsi > 70: bear += 8
-        components += 15
-    adx = float(ta.get("adx") or 0)
-    if adx:
-        available += 10; components += 10
-        if adx >= 25:
-            if trend == "صعودی": bull += 10
-            elif trend == "نزولی": bear += 10
-    vr = float(ta.get("vol_ratio") or 1)
-    available += 10; components += 10
-    if vr >= 1.2:
-        if trend == "صعودی": bull += 10
-        elif trend == "نزولی": bear += 10
-    dirs = mtf.get("dirs") or {}
-    vals = [v for v in dirs.values() if v in ("صعودی", "نزولی")]
-    if vals:
-        available += 20; components += 20
-        bull += 20 * vals.count("صعودی") / len(vals); bear += 20 * vals.count("نزولی") / len(vals)
-    fr = binance.get("funding_rate")
-    if fr is not None:
-        available += 10; components += 10
-        if fr < 0: bull += 5
-        elif fr > 0: bear += 5
-        if abs(fr) <= 0.03: bull += 2.5; bear += 2.5
-    if structure.get("structure"):
-        available += 10; components += 10
-        st = structure.get("structure", "")
-        if "صعودی" in st: bull += 10
-        elif "نزولی" in st: bear += 10
-    total = max(0, min(100, round(50 + bull - bear)))
-    confidence = round((available / 100) * 100)
-    if mtf.get("conflict"): confidence = max(0, confidence - 15)
-    if adx < 18: confidence = max(0, confidence - 10)
-    direction = "صعودی" if total >= 60 else ("نزولی" if total <= 40 else "خنثی")
-    return {"score": total, "confidence": confidence, "direction": direction, "bull": round(bull,1), "bear": round(bear,1), "available": available}

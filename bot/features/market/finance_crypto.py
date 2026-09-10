@@ -104,7 +104,7 @@ async def analyze_gold(timeframe: str = "4h") -> str:
     if supply: lines.append(f"🔴 ناحیه عرضه: ${f(supply[0])} – ${f(supply[1])}")
     sc, di = mtf.get('scores') or {}, mtf.get('dirs') or {}
     lines += ["", "⏱ همگرایی تایم‌فریم‌ها:"]
-    for k in ("1H", "4H", "1D"):
+    for k in ("15M", "1H", "4H", "1D", "1W"):
         lines.append(f"• {k}: {sc.get(k,'—')}/10 | {di.get(k,'—')}")
     if resistance and cur > resistance:
         lines.append("🟢 سناریو صعودی: تثبیت بالای مقاومت و تبدیل آن به حمایت، ادامه حرکت را معتبرتر می‌کند.")
@@ -172,9 +172,10 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
     fg_t = _fetch_fear_greed()
     klines_t = _fetch_klines_interval(pair, tf, klimit)
     fund_t = _fetch_fundamentals(coin_id, base)
+    market_t = _f._fetch_market_context(base)
 
-    detail, binance, fg, klines, fund = await __import__("asyncio").gather(
-        detail_t, binance_t, fg_t, klines_t, fund_t
+    detail, binance, fg, klines, fund, market = await __import__("asyncio").gather(
+        detail_t, binance_t, fg_t, klines_t, fund_t, market_t
     )
 
     md = (detail.get("market_data") or {}) if isinstance(detail, dict) else {}
@@ -306,7 +307,7 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
     lines.append("▎2. ⏱ امتیاز و همگرایی تایم‌فریم")
     sc = mtf.get("scores") or {}
     di = mtf.get("dirs") or {}
-    for k in ("1H", "4H", "1D"):
+    for k in ("15M", "1H", "4H", "1D", "1W"):
         s = sc.get(k)
         d = di.get(k, "—")
         arrow = {"صعودی": "↗️", "نزولی": "↘️", "رنج/ضعیف": "↔️"}.get(d, "·")
@@ -323,7 +324,7 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
 
     # ساختار بازار
     struct = _market_structure(highs, lows, closes) if len(closes) >= 20 else {}
-    pro = _professional_score(ta, mtf, struct, binance or {}, fg, current, support, resistance)
+    pro = _professional_score(ta, mtf, struct, binance or {}, fg, current, support, resistance, market)
     regime = _market_regime(ta, mtf, ta.get("vol_ratio"))
     lines.append("")
     lines.append("▎3. 🧠 امتیاز حرفه‌ای و وضعیت بازار")
@@ -335,6 +336,27 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
         lines.append("🛡 حمایت‌ها: " + " | ".join(f"{x['price']:,.2f} ({x['strength']}/100)" for x in levels['supports'][:3]))
     if levels.get("resistances"):
         lines.append("🧱 مقاومت‌ها: " + " | ".join(f"{x['price']:,.2f} ({x['strength']}/100)" for x in levels['resistances'][:3]))
+    lines.append(f"🧩 عوامل امتیاز: روند {pro['factors']['trend']:.0f} | مومنتوم {pro['factors']['momentum']:.0f} | حجم {pro['factors']['volume']:.0f} | ساختار {pro['factors']['structure']:.0f}")
+    lines.append(f"📈 مشتقات: {'Funding ' + format(float(binance.get('funding_rate')), '+.3f') + '%' if binance.get('funding_rate') is not None else '—'} | Basis {float(binance.get('basis_pct') or 0):+.3f}%")
+    if binance.get("liquidations_total") is not None:
+        lines.append(f"💥 لیکوئیدیشن اخیر: کل {float(binance['liquidations_total']):,.0f} | لانگ {float(binance.get('liquidations_long') or 0):,.0f} | شورت {float(binance.get('liquidations_short') or 0):,.0f}")
+    dom=market.get("btc_dominance")
+    if dom is not None:
+        lines.append(f"₿ BTC.D: {float(dom):.2f}% | ETH/BTC: {float(market.get('eth_btc') or 0):.6f}")
+    if market.get("total2_market_cap_usd") is not None:
+        lines.append(f"🌐 TOTAL2: ${float(market['total2_market_cap_usd'])/1e9:,.1f}B | TOTAL3: ${float(market.get('total3_market_cap_usd') or 0)/1e9:,.1f}B | Altseason: {market.get('altseason_proxy','نامشخص')}")
+    macro=market.get("macro") or {}
+    macro_bits=[]
+    for k,label in (("DXY","DXY"),("GOLD","Gold"),("NASDAQ","Nasdaq"),("SPX","S&P500"),("US10Y","US10Y")):
+        v=macro.get(k) or {}
+        if v.get("price") is not None: macro_bits.append(f"{label} {float(v['change_pct'] or 0):+.2f}%")
+    if macro_bits: lines.append("🌍 ماکرو: " + " | ".join(macro_bits))
+    cor=market.get("correlations") or {}
+    if cor:
+        lines.append("🔗 همبستگی 30روزه با BTC: " + " | ".join(f"{k} {float(v):+.2f}" for k,v in cor.items()))
+    news=market.get("news") or {}
+    lines.append(f"📰 Sentiment اخبار: {news.get('label','نامشخص')} | تیترهای بررسی‌شده: {news.get('count',0)}")
+    lines.append(f"🧪 کیفیت داده: {market.get('data_quality',0)}%")
     lines.append("")
     lines.append("▎4. 📊 ساختار و حجم")
     if struct:

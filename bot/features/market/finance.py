@@ -419,6 +419,138 @@ async def _fetch_coingecko_detail(coin_id: str) -> dict:
     return {}
 
 
+
+async def _fetch_market_context(base: str = "BTC") -> dict:
+    """Market-wide context: dominance, total caps, macro proxies and lightweight news sentiment."""
+    key = "market_context:v2"
+    now = asyncio.get_running_loop().time()
+    cached = _HTTP_DATA_CACHE.get(key)
+    if cached is not None and now - _HTTP_DATA_CACHE_T.get(key, 0) < 120:
+        return dict(cached)
+    out = {"sources": [], "news": {"label": "نامشخص", "score": 0, "count": 0}, "macro": {}}
+    retries = max(0, int(__import__('os').getenv("MARKET_HTTP_RETRIES", "0")))
+
+    async def get(url, params=None, headers=None):
+        try:
+            r = await request_with_retry("GET", url, retries=retries, params=params, headers=headers or HEADERS)
+            return r if getattr(r, "status_code", 0) == 200 else None
+        except Exception:
+            return None
+
+    # CoinGecko global: BTC dominance + TOTAL market caps.
+    cg = await get("https://api.coingecko.com/api/v3/global")
+    if cg:
+        try:
+            d = safe_json(cg) or {}
+            md = d.get("data") or {}
+            pct = md.get("market_cap_percentage") or {}
+            total = md.get("total_market_cap") or {}
+            out["btc_dominance"] = float(pct.get("btc")) if pct.get("btc") is not None else None
+            out["eth_dominance"] = float(pct.get("eth")) if pct.get("eth") is not None else None
+            out["total_market_cap_usd"] = float(total.get("usd")) if total.get("usd") is not None else None
+            out["sources"].append("CoinGecko Global")
+            # TOTAL2/TOTAL3 are derived transparently from the same global market-cap snapshot.
+            try:
+                rr = await get("https://api.coingecko.com/api/v3/coins/markets", {"vs_currency":"usd","ids":"bitcoin,ethereum","price_change_percentage":"7d"})
+                if rr:
+                    rows = safe_json(rr) or []
+                    caps = {str(x.get("id")): float(x.get("market_cap") or 0) for x in rows}
+                    out["btc_market_cap_usd"] = caps.get("bitcoin")
+                    out["eth_market_cap_usd"] = caps.get("ethereum")
+                    if out.get("total_market_cap_usd") is not None:
+                        out["total2_market_cap_usd"] = out["total_market_cap_usd"] - (out.get("btc_market_cap_usd") or 0)
+                        out["total3_market_cap_usd"] = out["total2_market_cap_usd"] - (out.get("eth_market_cap_usd") or 0)
+                    out["btc_7d"] = next((float(x.get("price_change_percentage_7d_in_currency") or 0) for x in rows if x.get("id")=="bitcoin"), None)
+                    out["eth_7d"] = next((float(x.get("price_change_percentage_7d_in_currency") or 0) for x in rows if x.get("id")=="ethereum"), None)
+                    if out.get("eth_7d") is not None and out.get("btc_7d") is not None:
+                        out["altseason_proxy"] = "فعال‌تر" if out["eth_7d"] > out["btc_7d"] + 2 else "ضعیف‌تر" if out["eth_7d"] < out["btc_7d"] - 2 else "خنثی"
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    # Binance spot: ETH/BTC relationship and BTC/USDT reference.
+    try:
+        rows = await asyncio.gather(
+            get("https://api.binance.com/api/v3/ticker/price", {"symbol": "ETHBTC"}),
+            get("https://api.binance.com/api/v3/ticker/24hr", {"symbol": "BTCUSDT"}),
+        )
+        if rows[0]:
+            out["eth_btc"] = float((safe_json(rows[0]) or {}).get("price") or 0) or None
+        if rows[1]:
+            d = safe_json(rows[1]) or {}
+            out["btc_change_24h"] = float(d.get("priceChangePercent") or 0)
+        if rows[0] or rows[1]:
+            out["sources"].append("Binance Spot")
+    except Exception:
+        pass
+
+    # Yahoo Finance chart endpoint, public market-data proxy for DXY, gold, Nasdaq, S&P and US10Y.
+    symbols = {"DXY":"DX-Y.NYB", "GOLD":"GC=F", "NASDAQ":"^IXIC", "SPX":"^GSPC", "US10Y":"^TNX"}
+    async def yahoo(name, ticker):
+        r = await get(f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}", {"range":"30d", "interval":"1d"})
+        if not r:
+            return name, None
+        try:
+            d = safe_json(r) or {}
+            result=((d.get("chart") or {}).get("result") or [None])[0]
+            meta=(result or {}).get("meta") or {}
+            price=meta.get("regularMarketPrice") or meta.get("previousClose")
+            prev=meta.get("previousClose")
+            chg=((float(price)-float(prev))/float(prev)*100) if price is not None and prev not in (None,0) else None
+            series=((result.get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
+            return name, {"price": float(price) if price is not None else None, "change_pct": chg, "series":[float(x) for x in series if x is not None]}
+        except Exception:
+            return name, None
+    try:
+        macro_rows = await asyncio.gather(*[yahoo(n,t) for n,t in symbols.items()])
+        for n,v in macro_rows:
+            if v: out["macro"][n]=v
+        if out["macro"]: out["sources"].append("Yahoo Finance")
+        # 30-day return correlations versus BTC. Pearson is used only when enough observations exist.
+        try:
+            btc_r = await yahoo("BTCUSD", "BTC-USD")
+            bser=(btc_r[1] or {}).get("series") or []
+            def ret(a): return [(a[i]-a[i-1])/a[i-1] for i in range(1,len(a)) if a[i-1] not in (0,None) and a[i] is not None]
+            br=ret(bser)
+            import math
+            for k,v in list(out["macro"].items()):
+                ar=ret(v.get("series") or [])
+                n=min(len(br),len(ar))
+                if n>=8:
+                    x=br[-n:];y=ar[-n:];mx=sum(x)/n;my=sum(y)/n
+                    den=math.sqrt(sum((z-mx)**2 for z in x)*sum((z-my)**2 for z in y))
+                    out.setdefault("correlations",{})[k]=round(sum((x[i]-mx)*(y[i]-my) for i in range(n))/den,2) if den else 0.0
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # Lightweight news sentiment from Google News RSS. It is explicitly labelled as headline sentiment.
+    try:
+        q = (base or "BTC").upper() + " crypto market"
+        r = await get("https://news.google.com/rss/search", {"q": q, "hl":"en-US", "gl":"US", "ceid":"US:en"})
+        if r:
+            xml = r.text or ""
+            soup = BeautifulSoup(xml, "xml")
+            titles=[x.get_text(" ", strip=True) for x in soup.find_all("title")[1:16]]
+            bull_words=("surge","rally","bullish","gain","gains","rise","rises","breakout","approval","inflow","record high","adoption","optimistic","soars")
+            bear_words=("crash","drop","falls","fall","bearish","selloff","outflow","hack","ban","lawsuit","liquidation","fear","risk-off","plunge","slump")
+            score=0
+            for t in titles:
+                lo=t.lower()
+                score += sum(1 for w in bull_words if w in lo)
+                score -= sum(1 for w in bear_words if w in lo)
+            label="مثبت" if score>=3 else ("منفی" if score<=-3 else "خنثی")
+            out["news"]={"label":label,"score":score,"count":len(titles),"headlines":titles[:8]}
+            out["sources"].append("Google News RSS")
+    except Exception:
+        pass
+
+    out["data_quality"] = min(100, 35 + len(out["sources"])*13 + (15 if out.get("btc_dominance") is not None else 0) + (10 if out.get("macro") else 0))
+    _HTTP_DATA_CACHE[key]=dict(out); _HTTP_DATA_CACHE_T[key]=now; _trim_http_data_cache()
+    return out
+
 async def _fetch_binance_futures(symbol: str) -> dict:
     """Funding/OI/volume + long/short ratios, fetched in parallel."""
     sym = (symbol or "").upper().replace("USDT", "").replace("-", "") + "USDT"
@@ -432,6 +564,7 @@ async def _fetch_binance_futures(symbol: str) -> dict:
     try:
         urls = [
             ("premium", "https://fapi.binance.com/fapi/v1/premiumIndex", {"symbol": sym}),
+            ("force", "https://fapi.binance.com/fapi/v1/allForceOrders", {"symbol": sym, "limit": 100}),
             ("oi", "https://fapi.binance.com/fapi/v1/openInterest", {"symbol": sym}),
             ("ticker", "https://fapi.binance.com/fapi/v1/ticker/24hr", {"symbol": sym}),
             ("global", "https://fapi.binance.com/futures/data/globalLongShortAccountRatio", {"symbol": sym, "period": "1h", "limit": 1}),
@@ -450,6 +583,16 @@ async def _fetch_binance_futures(symbol: str) -> dict:
                 if name == "premium":
                     out["funding_rate"] = float(data.get("lastFundingRate") or 0) * 100
                     out["mark_price"] = float(data.get("markPrice") or 0)
+                    out["index_price"] = float(data.get("indexPrice") or 0)
+                    if out.get("index_price"):
+                        out["basis_pct"] = (out["mark_price"] - out["index_price"]) / out["index_price"] * 100
+                elif name == "force":
+                    arr = data or []
+                    buy_notional = sum(float(x.get("origQty") or 0) * float(x.get("price") or 0) for x in arr if str(x.get("side")).upper() == "SELL")
+                    sell_notional = sum(float(x.get("origQty") or 0) * float(x.get("price") or 0) for x in arr if str(x.get("side")).upper() == "BUY")
+                    out["liquidations_total"] = buy_notional + sell_notional
+                    out["liquidations_long"] = buy_notional
+                    out["liquidations_short"] = sell_notional
                 elif name == "oi":
                     out["open_interest"] = float(data.get("openInterest") or 0)
                 elif name == "ticker":
