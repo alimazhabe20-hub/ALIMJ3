@@ -37,6 +37,15 @@ HISTORICAL_HTML_URLS = (
     "https://www.forexfactory.com/calendar/",
 )
 HISTORICAL_TZ = pytz.timezone("Europe/London")
+BIQUOTE_CALENDAR_URL = "https://biquote.io/api/calendar"
+BIQUOTE_COUNTRY_TO_CURRENCY = {
+    "US": "USD", "EU": "EUR", "GB": "GBP", "AU": "AUD", "CA": "CAD",
+    "JP": "JPY", "CH": "CHF", "NZ": "NZD", "CN": "CNY", "NO": "NOK",
+    "SE": "SEK", "HK": "HKD", "SG": "SGD", "MX": "MXN", "IN": "INR",
+    "TR": "TRY", "ZA": "ZAR", "BR": "BRL", "KR": "KRW", "ID": "IDR",
+    "RU": "RUB", "SA": "SAR", "AR": "ARS", "PL": "PLN", "CZ": "CZK",
+    "HU": "HUF", "DK": "DKK", "IL": "ILS", "AE": "AED", "TW": "TWD",
+}
 TRADINGVIEW_CALENDAR_URL = "https://economic-calendar.tradingview.com/events"
 TRADINGVIEW_COUNTRIES = ("AR", "AU", "BR", "CA", "CN", "FR", "DE", "IN", "ID", "IT", "JP", "KR", "MX", "RU", "SA", "ZA", "TR", "GB", "US", "EU")
 TRADINGVIEW_COUNTRY_TO_CURRENCY = {"US": "USD", "EU": "EUR", "GB": "GBP", "AU": "AUD", "CA": "CAD", "JP": "JPY", "CH": "CHF", "NZ": "NZD", "CN": "CNY", "NO": "NOK", "SE": "SEK", "HK": "HKD", "SG": "SGD", "MX": "MXN", "IN": "INR", "TR": "TRY", "ZA": "ZAR"}
@@ -323,6 +332,139 @@ def _html_rows_to_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def _fetch_biquote_calendar(start_utc: datetime, end_utc: datetime) -> list[dict[str, Any]]:
+    """Fetch published macro values from Biquote's public calendar API.
+
+    Biquote exposes actual/forecast/previous directly and requires no API key.
+    The function is intentionally best-effort: Forex Factory remains the
+    preferred event/impact source when available.
+    """
+    params = {
+        "from": start_utc.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "to": end_utc.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "limit": 500,
+    }
+    r = requests.get(
+        BIQUOTE_CALENDAR_URL,
+        params=params,
+        timeout=15,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "ALIMJ-EconomicCalendar/1.0",
+        },
+    )
+    r.raise_for_status()
+    payload = r.json()
+    if not isinstance(payload, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        dt = _parse_dt(str(row.get("time") or row.get("date") or ""))
+        if not dt:
+            continue
+        code = str(row.get("currency") or row.get("countryCode") or "").upper().strip()
+        currency = BIQUOTE_COUNTRY_TO_CURRENCY.get(code, code)
+        title = str(row.get("name") or row.get("title") or "").strip()
+        if not currency or not title:
+            continue
+        out.append({
+            "utc": dt,
+            "country": currency,
+            "title": title,
+            "actual": _raw_value(row, "actual"),
+            "forecast": _raw_value(row, "forecast"),
+            "previous": _raw_value(row, "previous"),
+            "importance": str(row.get("importance") or "").strip().title(),
+            "id": str(row.get("eventId") or row.get("id") or "").strip(),
+        })
+    return out
+
+
+def _normalize_biquote_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build calendar events from Biquote when Forex Factory is unavailable."""
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        raw = {
+            "date": row.get("utc", ""),
+            "country": row.get("country", ""),
+            "title": row.get("title", ""),
+            "impact": row.get("importance", ""),
+            "actual": row.get("actual", ""),
+            "forecast": row.get("forecast", ""),
+            "previous": row.get("previous", ""),
+        }
+        if isinstance(raw["date"], datetime):
+            raw["date"] = raw["date"].isoformat()
+        event = _normalize(raw)
+        if event:
+            event["source"] = "Biqoute"
+            # Keep the provider identifier as an additional hint, while the
+            # database/event id remains stable for the bot's callbacks.
+            if row.get("id"):
+                event["provider_id"] = row["id"]
+            out.append(event)
+    return out
+
+
+def _merge_biquote_values(events: list[dict[str, Any]], rows: list[dict[str, Any]]) -> int:
+    """Conservatively enrich FF events with Biquote's published values.
+
+    A value is accepted only when currency/date/time and title agree strongly.
+    Forecast/previous are used as corroborating signals when available, which
+    prevents generic titles such as PPI or housing indicators from cross-matching.
+    """
+    merged = 0
+    for row in rows:
+        r_title = _normalize_title(row.get("title"))
+        r_currency = str(row.get("country") or "").upper().strip()
+        r_utc = row.get("utc")
+        if not r_title or not r_currency or not isinstance(r_utc, datetime):
+            continue
+        candidates = []
+        for event in events:
+            if str(event.get("country") or "").upper().strip() != r_currency:
+                continue
+            e_utc = event.get("utc")
+            if not isinstance(e_utc, datetime) or e_utc.date() != r_utc.date():
+                continue
+            diff = abs((e_utc - r_utc).total_seconds())
+            if diff > 30 * 60:
+                continue
+            e_title = _normalize_title(event.get("title"))
+            if not e_title:
+                continue
+            ratio = difflib.SequenceMatcher(None, e_title, r_title).ratio()
+            rt, et = set(r_title.split()), set(e_title.split())
+            overlap = len(rt & et) / max(1, len(rt | et))
+            title_ok = ratio >= 0.90 or (ratio >= 0.82 and overlap >= 0.70)
+            if not title_ok:
+                continue
+            corroboration = 0
+            for field in ("forecast", "previous"):
+                rv = str(row.get(field) or "").strip().lower()
+                ev = str(event.get(field) or "").strip().lower()
+                if rv and ev and rv == ev:
+                    corroboration += 1
+            # Exact title can stand on its own; looser title matches need at
+            # least one existing FF value to agree.
+            if ratio < 0.90 and corroboration == 0:
+                continue
+            score = ratio * 0.72 + overlap * 0.18 + min(corroboration, 2) * 0.05 - min(diff / 1800, 1) * 0.03
+            candidates.append((score, event))
+        if not candidates:
+            continue
+        _, event = max(candidates, key=lambda x: x[0])
+        for field in ("actual", "forecast", "previous"):
+            value = str(row.get(field) or "").strip()
+            if value and not str(event.get(field) or "").strip():
+                event[field] = row.get(field)
+                if field == "actual":
+                    merged += 1
+    return merged
+
+
 def _merge_historical_values(events: list[dict[str, Any]], rows: list[dict[str, Any]]) -> int:
     """Merge published values from the same Forex Factory calendar HTML.
 
@@ -454,6 +596,26 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
                 except Exception as exc2:
                     errors.append(f"fallback: {exc2}")
         normalized = [e for e in (_normalize(x) for x in all_rows) if e]
+
+        # Biquote is the actual-value fallback. It is independent of Forex
+        # Factory's weekly JSON (which omits Actual) and does not require an API
+        # key. Keep its matching deliberately strict to avoid false Actuals.
+        biquote_rows: list[dict[str, Any]] = []
+        try:
+            now_utc = datetime.now(timezone.utc)
+            biquote_rows = await asyncio.to_thread(
+                _fetch_biquote_calendar, now_utc - timedelta(days=2), now_utc + timedelta(days=2)
+            )
+            if biquote_rows and normalized:
+                merged_bq = _merge_biquote_values(normalized, biquote_rows)
+                if merged_bq:
+                    logger.info("economic calendar: merged %d Actual value(s) from Biquote", merged_bq)
+            elif biquote_rows and not normalized:
+                normalized = _normalize_biquote_rows(biquote_rows)
+                if normalized:
+                    logger.info("economic calendar: using Biquote as primary source (%d events)", len(normalized))
+        except Exception as exc:
+            logger.debug("economic calendar Biquote source failed: %s", exc)
 
         # Do not merge TradingView values into Forex Factory events here.
         # TradingView titles are not a stable one-to-one identifier (especially
