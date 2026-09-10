@@ -127,8 +127,7 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
         }.get(repeat_type, "یک‌بار")
         await update.message.reply_text(
             f"⏰ یادآوری ثبت شد.\nموضوع: {body}\nزمان: {when.strftime('%Y-%m-%d %H:%M')}\nتکرار: {repeat_label}",
-            reply_markup=get_ai_keyboard(user_id),
-        )
+                    )
         return True
     m = re.match(r"^(جستجو|سرچ|search)\s*[:：]?\s*(.+)$", text, re.I | re.S)
     if m or re.search(r"\b(در\s*اینترنت|تو\s*وب)\s*جستجو", text, re.I):
@@ -136,7 +135,7 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
         notice = await update.message.reply_text("🔎 در حال جستجو...")
         try:
             result = await web_search(q)
-            await update.message.reply_text(result, reply_markup=get_ai_keyboard(user_id))
+            await update.message.reply_text(result)
         finally:
             try:
                 await notice.delete()
@@ -152,7 +151,7 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
             bio = BytesIO(png)
             bio.name = "chart.png"
             await update.message.reply_photo(
-                photo=bio, caption=title, reply_markup=get_ai_keyboard(user_id)
+                photo=bio, caption=title
             )
         except Exception as e:
             await update.message.reply_text(f"⚠️ نمودار: {e}")
@@ -169,13 +168,12 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
             bio = BytesIO(audio)
             bio.name = "music.mp3"
             await update.message.reply_audio(
-                audio=bio, caption="🎵", reply_markup=get_ai_keyboard(user_id)
+                audio=bio, caption="🎵"
             )
         except Exception as e:
             await update.message.reply_text(
                 f"⚠️ ساخت موسیقی در دسترس نبود:\n{e}",
-                reply_markup=get_ai_keyboard(user_id),
-            )
+                            )
         finally:
             try:
                 await notice.delete()
@@ -219,16 +217,26 @@ async def _reply_long_text(msg, text: str, *, prefix: str = "🤖 "):
         if not sent:
             raise RuntimeError(f"AI reply chunk {i+1}/{len(chunks)} could not be delivered")
     return first
+AI_CONTINUE_THRESHOLD = 2500
+
 async def _send_ai_answer(update, user_id, answer: str, *, stream: bool = True):
-    """ارسال جواب AI کامل؛ روی پیام اول دکمه «ادامه پاسخ» هم قرار می‌گیرد."""
+    """ارسال پاسخ AI؛ فقط پاسخ‌های طولانی دکمه ادامه دارند."""
     msg = update.message
-    store_answer(user_id, answer)
-    chunks = _split_telegram_text("🤖 " + (answer or "").strip(), 3900) or ["🤖 پاسخی دریافت نشد."]
-    first = await msg.reply_text(chunks[0], reply_markup=get_ai_answer_keyboard(user_id))
-    for i, chunk in enumerate(chunks[1:], start=2):
+    clean_answer = (answer or "").strip()
+    store_answer(user_id, clean_answer)
+    chunks = _split_telegram_text("🤖 " + clean_answer, 3900) or ["🤖 پاسخی دریافت نشد."]
+    is_long = len(clean_answer) >= AI_CONTINUE_THRESHOLD
+    first = None
+    for i, chunk in enumerate(chunks):
         body = chunk[2:].lstrip() if chunk.startswith("🤖 ") else chunk
-        await msg.reply_text(f"🤖 ادامه ({i}/{len(chunks)})\\n{body}", reply_markup=get_ai_answer_keyboard(user_id))
+        payload = chunk if i == 0 else f"🤖 ادامه ({i+1}/{len(chunks)})\n{body}"
+        # فقط آخرین تکه دکمه را می‌گیرد؛ پاسخ کوتاه هیچ دکمه‌ای ندارد.
+        markup = get_ai_answer_keyboard(user_id) if is_long and i == len(chunks) - 1 else None
+        sent = await msg.reply_text(payload, reply_markup=markup)
+        if first is None:
+            first = sent
     return first
+
 async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
     """استریم AI و ویرایش تدریجی پیام؛ در شکست، پیام نیمه‌کاره حذف می‌شود."""
     from bot.services.ai_service import ask_ai_stream
@@ -271,9 +279,9 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
         # این جلوی Duplicate Reply را در خطای «Message is not modified» می‌گیرد.
         # اگر آخرین ویرایش دقیقاً همان متن نهایی بوده، دوباره پیام نفرست.
         final = chunks[0]
-        is_long = len(answer) >= 2500
-        final_markup = get_ai_answer_keyboard(user_id) if is_long else None
-        if final != last_rendered:
+        is_long = len(answer) >= AI_CONTINUE_THRESHOLD
+        final_markup = get_ai_answer_keyboard(user_id) if is_long and len(chunks) == 1 else None
+        if final != last_rendered or final_markup is not None:
             try:
                 await sent.edit_text(final, reply_markup=final_markup)
                 last_rendered = final
@@ -290,7 +298,8 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
             sent_cont = False
             for attempt in range(3):
                 try:
-                    await msg.reply_text(f"🤖 ادامه ({i}/{len(chunks)})\n{body}")
+                    markup = get_ai_answer_keyboard(user_id) if is_long and i == len(chunks) else None
+                    await msg.reply_text(f"🤖 ادامه ({i}/{len(chunks)})\n{body}", reply_markup=markup)
                     sent_cont = True
                     break
                 except Exception as cont_err:
@@ -419,8 +428,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                         await update.message.reply_photo(
                             photo=bio,
                             caption="🎨 تصویر ساخته شد",
-                            reply_markup=get_ai_keyboard(user_id),
-                        )
+                                                    )
                     finally:
                         try:
                             await notice.delete()
@@ -430,7 +438,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 mode_msg = _apply_voice_chat_flags(context, text)
                 if mode_msg:
                     await update.message.reply_text(
-                        mode_msg, reply_markup=get_ai_keyboard(user_id)
+                        mode_msg
                     )
                 if is_voice_only_request(text):
                     last = get_last_answer(user_id) or (context.user_data or {}).get("last_ai_answer")

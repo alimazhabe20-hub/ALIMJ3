@@ -721,22 +721,33 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "ai_continue":
         await _safe_answer(query, "در حال ادامه دادن پاسخ…", show_alert=False)
         try:
+            # دکمه را فوراً حذف کن تا کلیک‌های پشت‌سرهم درخواست موازی نسازند.
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception as exc:
+            logger.debug("AI continuation button cleanup skipped: %s", exc)
+        try:
             from bot.services.ai_service import ask_ai
-            from bot.services.ai_extras import get_last_answer
+            from bot.services.ai_extras import get_last_answer, store_answer
             last_answer = get_last_answer(user_id)
             if not last_answer:
                 await query.message.reply_text("⚠️ پاسخ قبلی برای ادامه پیدا نشد. دوباره سؤال را بفرست.")
                 return
+
             continuation_prompt = (
-                "پاسخ قبلی خودت را ادامه بده. فقط ادامه‌ی محتوایی پاسخ را بنویس و از ابتدا تکرار نکن. "
-                "از همان جایی که پاسخ قبلی متوقف شده ادامه بده؛ اگر پاسخ قبلی به‌خاطر محدودیت طول ناقص مانده، "
-                "باقی بخش‌های لازم را کامل کن. هیچ مقدمه‌ای مثل «ادامه پاسخ» یا توضیح درباره این درخواست ننویس."
+                "پاسخ قبلی خودت را ادامه بده. فقط ادامهٔ محتوایی را بنویس و هیچ بخش قبلی را تکرار نکن. "
+                "از همان نقطه‌ای که پاسخ قبلی تمام شده ادامه بده. اگر جمله، فهرست، کد یا جدول نیمه‌تمام است، "
+                "ابتدا همان را کامل کن. هیچ مقدمه، عنوان «ادامه پاسخ» یا توضیح درباره این درخواست ننویس. "
+                "اگر پاسخ قبلی کامل شده، فقط نکات تکمیلی واقعاً مفید را اضافه کن."
             )
-            answer, provider = await ask_ai(user_id, continuation_prompt)
-            from bot.services.ai_extras import store_answer
+            answer, _provider = await ask_ai(user_id, continuation_prompt)
+            answer = (answer or "").strip()
+            if not answer:
+                await query.message.reply_text("⚠️ ادامه‌ای برای پاسخ دریافت نشد.")
+                return
             store_answer(user_id, answer)
+
             chunks = []
-            remaining = (answer or "").strip()
+            remaining = answer
             while len(remaining) > 3600:
                 cut = remaining.rfind("\n", 0, 3601)
                 if cut < 1200:
@@ -748,15 +759,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chunks.append(remaining)
             if not chunks:
                 chunks = ["پاسخی برای ادامه دریافت نشد."]
+
+            is_long = len(answer) >= 2500
             for idx, chunk in enumerate(chunks, start=1):
                 prefix = "🤖 ادامه پاسخ" if idx == 1 else f"🤖 ادامه ({idx}/{len(chunks)})"
-                await query.message.reply_text(
-                    f"{prefix}\n{chunk}",
-                    reply_markup=get_ai_answer_keyboard(user_id),
-                )
+                markup = get_ai_answer_keyboard(user_id) if is_long and idx == len(chunks) else None
+                await query.message.reply_text(f"{prefix}\n{chunk}", reply_markup=markup)
         except Exception as exc:
             logger.error("AI continuation failed: %s", exc, exc_info=True)
-            await query.message.reply_text("⚠️ ادامه پاسخ انجام نشد. لطفاً دوباره روی «ادامه پاسخ» بزن.")
+            await query.message.reply_text("⚠️ ادامه پاسخ انجام نشد. لطفاً دوباره سؤال را بفرست.")
         return
 
     if data == "ai_models":
