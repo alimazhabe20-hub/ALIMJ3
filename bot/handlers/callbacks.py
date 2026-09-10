@@ -670,7 +670,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["crypto_symbol"] = symbol
         try:
             from bot.features.market.finance import (
-                analyze_crypto, analyze_gold, get_crypto_chart, get_crypto_analysis_keyboard,
+                analyze_crypto, analyze_gold, get_crypto_chart, get_gold_chart, get_crypto_analysis_keyboard,
                 trading_recommendation, derivatives_radar, risk_scenarios,
                 position_size_guide, entry_alert_text, market_scanner,
             )
@@ -719,7 +719,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if png:
                         bio = BytesIO(png)
                         bio.name = f"{symbol}.png"
-                        media = InputMediaPhoto(media=bio, caption=cap)
+                        media = InputMediaPhoto(media=bio, caption=cap, parse_mode="HTML")
                         await msg.edit_media(media=media, reply_markup=menu)
                         return
                     # بدون عکس جدید
@@ -757,10 +757,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if action == "gold":
                 txt = await analyze_gold("1h")
                 try:
-                    png, _cap = await get_crypto_chart("PAXG", 7)
+                    png, _cap = await get_gold_chart("1h")
                 except Exception:
                     png = None
                 await _edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
+                return
+
+            if action == "ai" and symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
+                base = await analyze_gold("1h")
+                from bot.services.ai_service import ask_ai
+                prompt = (
+                    "تو تحلیل‌گر ارشد XAU/USD هستی. فقط از داده‌های گزارش زیر استفاده کن و هیچ عددی را حدس نزن. "
+                    "گزارش تلگرام‌پسند، بدون جدول Markdown و با تیترهای واضح بده. ساختار، HH/HL/LH/LL، BOS/CHOCH، "
+                    "کندل و rejection، حمایت/مقاومت همان 1H، عرضه/تقاضا، نقدینگی، breakout/retest، RSI/ADX/ATR، حجم، "
+                    "MTF، سناریوی Long، سناریوی Short، invalidation و نتیجه نهایی را پوشش بده. در صورت تناقض یا نبود داده، ورود را تأیید نکن.\n\n"
+                    + (base or "")[:12000]
+                )
+                answer, _ = await ask_ai(query.from_user.id, prompt)
+                safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند طلا وجود ندارد.").strip())
+                out = "🧠 <b>تحلیل هوشمند XAU/USD</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
+                png, _cap = await get_gold_chart("1h")
+                await _edit_photo_caption(png, out)
                 return
 
             if action == "ai":
