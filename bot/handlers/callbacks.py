@@ -478,20 +478,41 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             f"impact={e.get('impact')} | actual={e.get('actual')} | "
                             f"forecast={e.get('forecast')} | previous={e.get('previous')}"
                         )
-                    prompt = (
-                        "تو تحلیل‌گر اقتصاد کلان و بازارهای مالی هستی. فقط فارسی بنویس.\n"
-                        "فقط از داده زیر استفاده کن؛ عدد جعلی نساز.\n"
-                        "فارکس را تحلیل نکن.\n"
-                        "اگر Actual خالی یا منتشر نشده است، بگو هنوز منتشر نشده و سناریو بده.\n"
-                        "پاسخ را کامل و بدون جمله ناتمام بنویس با همین تیترها:\n"
-                        "معنی خبر\nکریپتو\nدلار/DXY\nطلا\nسهام\nاوراق و بازدهی\nسناریوی Actual در برابر Forecast\nجمع‌بندی\n"
-                        "هر بخش ۲ تا ۳ جمله. کل پاسخ را کامل تمام کن.\n\n"
-                        "داده رویداد:\n" + ctx
+
+                    # دو درخواست کوتاه تا مدل وسط جمله قطع نشود (سقف خروجی AI)
+                    prompt_a = (
+                        "تحلیل‌گر اقتصاد کلان هستی. فقط فارسی. عدد جعلی نساز. فارکس ننویس.\n"
+                        "فقط همین ۴ بخش را کامل بنویس و تمام کن:\n"
+                        "معنی خبر\nکریپتو\nدلار/DXY\nطلا\n"
+                        "هر بخش حداکثر ۳ جمله کوتاه.\n\nداده:\n" + ctx
+                    )
+                    prompt_b = (
+                        "ادامه همان تحلیل. فقط فارسی. عدد جعلی نساز. فارکس ننویس.\n"
+                        "فقط همین ۴ بخش را کامل بنویس و تمام کن:\n"
+                        "سهام\nاوراق و بازدهی\nسناریوی Actual در برابر Forecast\nجمع‌بندی\n"
+                        "هر بخش حداکثر ۳ جمله کوتاه. جمع‌بندی حتماً جهت کلی بازار را بگوید.\n\nداده:\n" + ctx
                     )
 
-                    answer, _used = await ask_ai(user_id, prompt)
-                    answer = (answer or "").strip() or "تحلیل در دسترس نیست."
+                    part_a = part_b = ""
+                    try:
+                        part_a, _ = await ask_ai(user_id, prompt_a)
+                    except Exception as ai_err:
+                        logger.error("ec analyze part A failed: %s", ai_err, exc_info=True)
+                        await msg_target.reply_text(
+                            "⚠️ بخش اول تحلیل ناموفق بود:\n" + str(ai_err)[:300]
+                        )
+                        return
+                    try:
+                        part_b, _ = await ask_ai(user_id, prompt_b)
+                    except Exception as ai_err:
+                        logger.error("ec analyze part B failed: %s", ai_err, exc_info=True)
+                        part_b = "(بخش دوم تحلیل در دسترس نبود)"
 
+                    part_a = (part_a or "").strip()
+                    part_b = (part_b or "").strip()
+                    answer = (part_a + "\n\n" + part_b).strip() or "تحلیل در دسترس نیست."
+
+                    # جزئیات خبر در همان پیام رویداد
                     try:
                         await query.edit_message_text(
                             event_detail(e, tz_name),
@@ -501,31 +522,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception:
                         pass
 
-                    header = "🤖 تحلیل هوشمند بازار\n━━━━━━━━━━━━━━━━━━━━\n"
+                    # کل تحلیل در یک یا دو پیام پشت‌سرهم (بدون HTML تا قطع نشود)
+                    title = (e.get("title_fa") or e.get("title") or "خبر").strip()
+                    header = f"🤖 تحلیل هوشمند بازار\n📌 {title}\n━━━━━━━━━━━━━━━━━━━━\n"
                     full = header + answer
-                    max_len = 3500
-                    parts = []
-                    while full:
-                        if len(full) <= max_len:
-                            parts.append(full)
-                            break
-                        cut = full.rfind("\n", 0, max_len)
-                        if cut < 500:
-                            cut = max_len
-                        parts.append(full[:cut].strip())
-                        full = full[cut:].strip()
-                        if full:
-                            full = "🤖 ادامه تحلیل\n━━━━━━━━━━━━━━━━━━━━\n" + full
-
-                    for part in parts:
-                        try:
-                            await msg_target.reply_text(part)
-                        except Exception as send_err:
-                            logger.error("ec analyze send failed: %s", send_err)
-                            try:
-                                await msg_target.reply_text(part[:3500])
-                            except Exception:
-                                pass
+                    if len(full) <= 4000:
+                        await msg_target.reply_text(full)
+                    else:
+                        # دو تکه تمیز روی مرز خط
+                        cut = full.rfind("\n", 0, 3800)
+                        if cut < 800:
+                            cut = 3800
+                        await msg_target.reply_text(full[:cut].strip())
+                        rest = full[cut:].strip()
+                        if rest:
+                            await msg_target.reply_text(
+                                "🤖 ادامه تحلیل\n━━━━━━━━━━━━━━━━━━━━\n" + rest
+                            )
                     return
                 except Exception as err:
                     logger.error("ec analyze failed: %s", err, exc_info=True)
