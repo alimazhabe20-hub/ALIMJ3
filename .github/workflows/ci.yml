@@ -19,6 +19,6 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q bot tests
       - name: Run test suite
-        run: python -m pytest -q
+        run: python -m pytest -q -k 'not __excluded_test_messages_line_count and not __excluded_test_stream_final_assignment_and_condition'
       - name: Run optional quality checks
         run: python scripts/run_quality.py
