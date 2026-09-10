@@ -213,45 +213,66 @@ def _parse_ff_time(text: str) -> tuple[int, int] | None:
 
 
 def _parse_ff_historical_html(text: str, year_hint: int) -> list[dict[str, Any]]:
-    """Extract published Actual/Forecast/Previous values from FF HTML."""
+    """Extract published Actual/Forecast/Previous values from Forex Factory HTML.
+
+    FF puts the date on the first/merged date cell of calendar rows rather than
+    reliably using a dedicated day-break <tr>, so the parser must carry the
+    latest non-empty .calendar__date value forward across rows.
+    """
     soup = BeautifulSoup(text, "html.parser")
     out: list[dict[str, Any]] = []
     current_date: datetime | None = None
-    for tr in soup.select("tr"):
+
+    rows = soup.select("tr.calendar__row.calendar_row, tr.calendar_row")
+    for tr in rows:
+        # The date cell is often populated only on the first event of a day;
+        # subsequent rows inherit it through current_date.
+        date_cell = tr.select_one(".calendar__date")
+        if date_cell:
+            parsed_day = _parse_ff_date(date_cell.get_text(" ", strip=True), year_hint)
+            if parsed_day:
+                current_date = parsed_day
+
+        # Some FF variants expose a standalone day-break row. Keep support for it.
         classes = " ".join(tr.get("class") or [])
-        row_text = tr.get_text(" ", strip=True)
         if "day-break" in classes or "calendar__day" in classes:
-            parsed_day = _parse_ff_date(row_text, year_hint)
+            parsed_day = _parse_ff_date(tr.get_text(" ", strip=True), year_hint)
             if parsed_day:
                 current_date = parsed_day
             continue
-        if not current_date:
-            parsed_day = _parse_ff_date(row_text, year_hint)
-            if parsed_day and not tr.select_one(".calendar__event"):
-                current_date = parsed_day
-                continue
+
         cur = tr.select_one(".calendar__currency")
         event = tr.select_one(".calendar__event")
         if not cur or not event or not current_date:
             continue
+
         currency = cur.get_text(" ", strip=True).upper()
         title = event.get_text(" ", strip=True)
         time_cell = tr.select_one(".calendar__time")
         parsed_time = _parse_ff_time(time_cell.get_text(" ", strip=True) if time_cell else "")
         if parsed_time:
-            dt_local = HISTORICAL_TZ.localize(current_date.replace(hour=parsed_time[0], minute=parsed_time[1]))
+            dt_local = HISTORICAL_TZ.localize(
+                current_date.replace(hour=parsed_time[0], minute=parsed_time[1])
+            )
         else:
             dt_local = HISTORICAL_TZ.localize(current_date)
-        def cell_value(cls: str) -> str:
-            node = tr.select_one(cls)
-            return node.get_text(" ", strip=True) if node else ""
+
+        def cell_value(*selectors: str) -> str:
+            for selector in selectors:
+                node = tr.select_one(selector)
+                if node:
+                    value = node.get_text(" ", strip=True)
+                    if value:
+                        return value
+            return ""
+
         out.append({
             "utc": dt_local.astimezone(timezone.utc),
             "country": currency,
             "title": title,
-            "actual": cell_value(".calendar__actual"),
-            "forecast": cell_value(".calendar__forecast"),
-            "previous": cell_value(".calendar__previous"),
+            "actual": cell_value(".calendar__actual", ".calendar-actual"),
+            "forecast": cell_value(".calendar__forecast", ".calendar-forecast"),
+            "previous": cell_value(".calendar__previous", ".calendar-previous"),
         })
     return out
 
