@@ -10,6 +10,7 @@ from bot.features.market import finance as _f
 from bot.logger import logger
 from bot.utils.http_client import pooled_async_client, request_with_retry, safe_json
 from bot.features.market.trading_intelligence import detect_regime, dynamic_weights, quality_gate
+from bot.features.market.trading_adaptation import adaptive_weights, adapt_score, adaptive_profile, kill_switch
 
 # Compatibility aliases preserved from the original finance.py implementation.
 # finance_ta is loaded through the finance facade after it is initialized.
@@ -380,6 +381,10 @@ def _professional_score(ta, mtf=None, structure=None, binance=None, fg=None, cur
         market["onchain_score"] = f["onchain"]
     regime=detect_regime(ta, mtf, ta.get("vol_ratio"))
     weights=dynamic_weights(regime)
+    # Empirical adaptation is bounded and activates only after enough settled outcomes.
+    symbol = str(getattr(_f, "_ADAPT_SYMBOL", "BTC"))
+    setup = str(getattr(_f, "_ADAPT_SETUP", "default"))
+    weights=adaptive_weights(weights, symbol, regime.get("label", ""), setup)
     score=round(sum(f[k]*weights[k] for k in weights))
     vals=[trend,rsi,vr,fr,fg,mtf.get("scores"),market.get("btc_dominance"),market.get("macro"),market.get("news"),market.get("onchain_score")]
     avail=sum(x is not None and x!={} for x in vals)
@@ -387,7 +392,14 @@ def _professional_score(ta, mtf=None, structure=None, binance=None, fg=None, cur
     gate=quality_gate(score, confidence, mtf, float(market.get("data_quality") or 100), regime)
     if not gate["allowed"]:
         confidence=min(confidence, 54)
+    score, confidence, adaptive = adapt_score(score, confidence, symbol, regime.get("label", ""), setup)
+    gate=quality_gate(score, confidence, mtf, float(market.get("data_quality") or 100), regime)
+    blocked, kill_reason=kill_switch(adaptive, gate.get("allowed", True))
+    if blocked:
+        gate={**gate, "allowed":False, "label":"صبر / عدم‌تأیید", "reasons":list(gate.get("reasons",[]))+([kill_reason] if kill_reason else [])}
+        confidence=min(confidence,54)
     return {"score":max(0,min(100,score)),"confidence":confidence,
             "direction":"صعودی" if score>=60 else "نزولی" if score<=40 else "خنثی",
-            "factors":f,"weights":weights,"regime":regime,"quality_gate":gate}
+            "factors":f,"weights":weights,"regime":regime,"quality_gate":gate,
+            "adaptive":adaptive}
 

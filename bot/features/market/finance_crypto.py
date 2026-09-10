@@ -35,6 +35,7 @@ _advanced_levels = _f._advanced_levels
 _market_regime = _f._market_regime
 _professional_score = _f._professional_score
 from bot.features.market.trading_intelligence import (backtest_directional, walk_forward, calibration, alert_flags, risk_plan)
+from bot.features.market.trading_adaptation import settle_signals, record_signal, adaptive_profile, performance_summary
 _fetch_fundamentals = _f._fetch_fundamentals
 _build_smart_summary = _f._build_smart_summary
 _default_guide = _f._default_guide
@@ -363,9 +364,14 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
 
     # ساختار بازار
     struct = _market_structure(highs, lows, closes) if len(closes) >= 20 else {}
+    setattr(_f, "_ADAPT_SYMBOL", base)
+    setattr(_f, "_ADAPT_SETUP", signal or "default")
+    if current is not None:
+        settle_signals(base, current)
     pro = _professional_score(ta, mtf, struct, {**(binance or {}), **(orderflow or {})}, fg, current, support, resistance, market)
     regime = (pro.get("regime") or {}).get("label") or _market_regime(ta, mtf, ta.get("vol_ratio"))
     gate = pro.get("quality_gate") or {}
+    adaptive = pro.get("adaptive") or adaptive_profile(base, regime, signal or "default")
     alerts = alert_flags(current, support, resistance, ta, {**(binance or {}), **(orderflow or {})}, market)
     # Non-lookahead historical proxy scores for robustness metrics.
     hist_scores=[]
@@ -385,6 +391,9 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
     stop=(current-(ta.get("atr") or 0)*1.5) if current is not None and "لانگ" in signal else (current+(ta.get("atr") or 0)*1.5) if current is not None and "شورت" in signal else None
     target=resistance if "لانگ" in signal else support if "شورت" in signal else None
     risk=risk_plan(entry,stop,target) if stop is not None and target is not None else {"valid":False}
+    # Record only actionable long/short snapshots; outcomes are settled later from observed prices.
+    if current is not None and gate.get("allowed") and ("لانگ" in signal or "شورت" in signal):
+        record_signal(base, "long" if "لانگ" in signal else "short", current, stop, target, regime, pro.get("score",50), calibrated_conf, pro.get("factors",{}), horizon_seconds=21600, setup=signal or "default")
     lines.append("")
     lines.append("▎3. 🧠 امتیاز حرفه‌ای و وضعیت بازار")
     score_em = "🟢" if pro["score"] >= 60 else ("🔴" if pro["score"] <= 40 else "🟡")
@@ -392,6 +401,9 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
     lines.append(f"🎯 امتیاز جهت‌گیری: {pro['score']}/100 {score_em} | اطمینان داده: {calibrated_conf}% {conf_em}")
     lines.append(f"🌐 رژیم بازار: {regime}")
     lines.append(f"🛡 گیت کیفیت: {gate.get('label','—')}" + (f" | {', '.join(gate.get('reasons',[]))}" if gate.get('reasons') else ""))
+    lines.append(f"🧠 یادگیری تطبیقی: {adaptive.get('samples',0)} نمونه | Win Rate {adaptive.get('win_rate','—')}% | وضعیت {'فعال' if adaptive.get('ready') else 'در حال جمع‌آوری داده'}")
+    if adaptive.get("kill"):
+        lines.append("🛑 Kill Switch تطبیقی: فعال — این ستاپ در این رژیم فعلاً تأیید نمی‌شود")
     if risk.get("valid"):
         lines.append(f"📐 مدیریت ریسک: R:R تقریبی {risk['rr']:.2f} | ریسک واحد {risk['risk_per_unit']:.4f}")
     if bt.get("trades",0):
