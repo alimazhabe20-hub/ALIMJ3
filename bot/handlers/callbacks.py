@@ -103,41 +103,47 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ai_context,
         )
         from bot.database import get_economic_calendar_preferences, set_economic_calendar_preferences
+
+        async def _ec_load(uid, mode="today", impact="all", currency="", date_str=""):
+            evs, tzn = await _ec_load(uid, mode, impact, currency, date_str)
+            context.user_data["ec_events"] = {x["id"]: x for x in evs}
+            return evs, tzn
+
         try:
             if data == "ec:today":
                 _set_ec_view(context, mode="today", impact="all")
-                events, tz_name = await get_calendar_for_user(user_id, "today", "all")
+                events, tz_name = await _ec_load(user_id, "today", "all")
                 await _safe_answer(query)
                 await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", events=events, selected_date=datetime_now_date(tz_name)))
                 return
             if data == "ec:tomorrow":
                 _set_ec_view(context, mode="tomorrow", impact="all")
-                events, tz_name = await get_calendar_for_user(user_id, "tomorrow", "all")
+                events, tz_name = await _ec_load(user_id, "tomorrow", "all")
                 await _safe_answer(query)
                 await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی فردا", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="tomorrow", impact="all", events=events, selected_date=datetime_now_date(tz_name, 1)))
                 return
             if data == "ec:week":
                 _set_ec_view(context, mode="week", impact="all")
-                events, tz_name = await get_calendar_for_user(user_id, "week", "all")
+                events, tz_name = await _ec_load(user_id, "week", "all")
                 await _safe_answer(query)
                 await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی هفته", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="week", impact="all", events=events, selected_date=datetime_now_date(tz_name)))
                 return
             if data == "ec:impact:high":
                 _set_ec_view(context, mode="today", impact="high")
-                events, tz_name = await get_calendar_for_user(user_id, "today", "high")
+                events, tz_name = await _ec_load(user_id, "today", "high")
                 await _safe_answer(query, "فقط خبرهای مهم")
                 await query.edit_message_text(calendar_text(events, title="خبرهای مهم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="today", impact="high", events=events, selected_date=datetime_now_date(tz_name)))
                 return
             if data == "ec:impact:all":
                 _set_ec_view(context, mode="today", impact="all")
-                events, tz_name = await get_calendar_for_user(user_id, "today", "all")
+                events, tz_name = await _ec_load(user_id, "today", "all")
                 await _safe_answer(query)
                 await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", events=events, selected_date=datetime_now_date(tz_name)))
                 return
             if data.startswith("ec:cur:"):
                 cur = data.split(":", 2)[2].upper()
                 _set_ec_view(context, mode="today", impact="all", currency=cur)
-                events, tz_name = await get_calendar_for_user(user_id, "today", "all", cur)
+                events, tz_name = await _ec_load(user_id, "today", "all", cur)
                 await _safe_answer(query, f"فیلتر {cur}")
                 await query.edit_message_text(calendar_text(events, title=f"خبرهای {cur} امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", currency=cur, events=events, selected_date=datetime_now_date(tz_name)))
                 return
@@ -147,7 +153,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if data == "ec:refresh":
                 await _safe_answer(query, "در حال بروزرسانی…")
                 await refresh_calendar(force=True)
-                events, tz_name = await get_calendar_for_user(user_id, "today", "all")
+                events, tz_name = await _ec_load(user_id, "today", "all")
                 await query.edit_message_text(
                     calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name),
                     parse_mode="HTML",
@@ -156,7 +162,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             if data.startswith("ec:date:"):
                 selected_date = data.split(":", 2)[2]
-                events, tz_name = await get_calendar_for_user(user_id, "today", "all", date_str=selected_date)
+                events, tz_name = await _ec_load(user_id, "today", "all", date_str=selected_date)
                 await _safe_answer(query)
                 await query.edit_message_text(
                     calendar_text(events, title=f"تقویم اقتصادی {selected_date}", tz_name=tz_name),
@@ -171,7 +177,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
                 _, _, page_s, mode, selected_date, impact, currency = parts
                 page = max(0, int(page_s))
-                events, tz_name = await get_calendar_for_user(
+                events, tz_name = await _ec_load(
                     user_id, mode or "today", impact or "all", currency or "", selected_date or ""
                 )
                 if mode == "week":
@@ -201,7 +207,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if data.startswith("ec:page:"):
                 page = max(0, int(data.split(":", 2)[2]))
                 view = _ec_view(context)
-                events, tz_name = await get_calendar_for_user(
+                events, tz_name = await _ec_load(
                     user_id, view["mode"], view["impact"], view["currency"], view["date_str"]
                 )
                 await _safe_answer(query)
@@ -213,7 +219,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if data.startswith("ec:date:"):
                 date_str = data.split(":", 2)[2]
                 _set_ec_view(context, mode="date", impact="all", date_str=date_str)
-                events, tz_name = await get_calendar_for_user(user_id, "today", "all", date_str=date_str)
+                events, tz_name = await _ec_load(user_id, "today", "all", date_str=date_str)
                 await _safe_answer(query)
                 await query.edit_message_text(
                     calendar_text(events, title=f"تقویم اقتصادی {date_str}", tz_name=tz_name),
@@ -226,7 +232,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 view = _ec_view(context)
                 await _safe_answer(query, "در حال بروزرسانی…")
                 await refresh_calendar(force=True)
-                events, tz_name = await get_calendar_for_user(
+                events, tz_name = await _ec_load(
                     user_id, view["mode"], view["impact"], view["currency"], view["date_str"]
                 )
                 await query.edit_message_text(
@@ -254,7 +260,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 selected_date = parts[4] or ""
                 impact = parts[5] or "all"
                 currency = parts[6].upper() if len(parts) > 6 and parts[6] else ""
-                events, tz_name = await get_calendar_for_user(
+                events, tz_name = await _ec_load(
                     user_id, mode, impact, currency, selected_date
                 )
                 await _safe_answer(query)
@@ -268,7 +274,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if data.startswith("ec:date:"):
                 selected_date = data.split(":", 2)[2]
-                events, tz_name = await get_calendar_for_user(
+                events, tz_name = await _ec_load(
                     user_id, "today", "all", "", selected_date
                 )
                 await _safe_answer(query)
@@ -285,7 +291,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if data == "ec:refresh":
                 await _safe_answer(query, "در حال بروزرسانی…")
                 await refresh_calendar(force=True)
-                events, tz_name = await get_calendar_for_user(user_id, "today", "all")
+                events, tz_name = await _ec_load(user_id, "today", "all")
                 await query.edit_message_text(
                     calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name),
                     parse_mode="HTML",
@@ -341,7 +347,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if data == "ec:ai":
                 _set_ec_view(context, mode="today", impact="all")
                 await _safe_answer(query, "در حال تحلیل هوشمند…")
-                events, tz_name = await get_calendar_for_user(user_id, "today", "all")
+                events, tz_name = await _ec_load(user_id, "today", "all")
                 context_text = ai_context(events, tz_name, 60)
                 from bot.services.ai_service import ask_ai
                 prompt = (
@@ -411,25 +417,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             if data.startswith("ec:event:"):
                 event_id = data.split(":", 2)[2]
-                events = await refresh_calendar()
                 p = get_economic_calendar_preferences(user_id)
                 tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
-                e = get_event(events, event_id)
+                # اول از اسنپ‌شات همان پیام؛ بعد از کش زنده
+                snap = (context.user_data or {}).get("ec_events") or {}
+                e = snap.get(event_id)
                 if not e:
-                    await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست.", show_alert=True)
+                    events = await refresh_calendar()
+                    e = get_event(events, event_id)
+                    if e:
+                        context.user_data["ec_events"] = {x["id"]: x for x in events}
+                if not e:
+                    await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست. یک‌بار «بروزرسانی» بزنید.", show_alert=True)
                     return
                 await _safe_answer(query)
-                await query.edit_message_text(event_detail(e, tz_name), parse_mode="HTML", reply_markup=get_event_keyboard(event_id))
+                await query.edit_message_text(event_detail(e, tz_name), parse_mode="HTML", reply_markup=get_event_keyboard(e["id"]))
                 return
             if data.startswith("ec:analyze:"):
                 event_id = data.split(":", 2)[2]
                 await _safe_answer(query, "در حال تحلیل…")
-                events = await refresh_calendar()
                 p = get_economic_calendar_preferences(user_id)
                 tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
-                e = get_event(events, event_id)
+                snap = (context.user_data or {}).get("ec_events") or {}
+                e = snap.get(event_id)
+                events = await refresh_calendar()
                 if not e:
-                    await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست.", show_alert=True)
+                    e = get_event(events, event_id)
+                if not e:
+                    await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست. یک‌بار «بروزرسانی» بزنید.", show_alert=True)
                     return
                 from bot.services.ai_service import ask_ai
                 prompt = (
@@ -507,7 +522,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             if data == "ec:back":
                 _set_ec_view(context, mode="today", impact="all")
-                events, tz_name = await get_calendar_for_user(user_id, "today", "all")
+                events, tz_name = await _ec_load(user_id, "today", "all")
                 await _safe_answer(query)
                 await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", events=events, selected_date=datetime_now_date(tz_name)))
                 return
