@@ -72,7 +72,15 @@ def snapshot() -> dict[str, Any]:
         tasks = task_stats()
     except Exception:
         tasks = {"tracked": 0, "active": 0}
-    return {"counters": counters, "latency": latency, "tasks": tasks, "recent_errors": recent_errors(10), "generated_at": time.time()}
+    try:
+        from bot.utils.http_client import circuit_snapshot
+        circuits = circuit_snapshot()
+    except Exception:
+        circuits = {}
+    open_circuits = sum(1 for x in circuits.values() if x.get("open"))
+    return {"counters": counters, "latency": latency, "tasks": tasks,
+            "http_circuits": circuits, "open_circuits": open_circuits,
+            "recent_errors": recent_errors(10), "generated_at": time.time()}
 
 
 def reset() -> None:

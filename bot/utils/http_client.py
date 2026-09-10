@@ -9,6 +9,10 @@ from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urlparse
 from bot.utils.exceptions import UpstreamTimeoutError
+
+class UpstreamCircuitOpenError(RuntimeError):
+    """Raised when an upstream host is temporarily circuit-open."""
+
 from bot.utils.observability import record as record_metric
 import httpx
 
@@ -57,6 +61,39 @@ _GET_CACHE_TTL = _SETTINGS.cache_ttl
 _RATE_LIMIT_MAX_DELAY = _SETTINGS.rate_limit_max_delay
 _RATE_LIMIT_COOLDOWN: dict[str, float] = {}
 _RATE_LIMIT_LOCK = asyncio.Lock()
+
+_CIRCUIT_FAILURE_THRESHOLD = _env_int("HTTP_CIRCUIT_FAILURE_THRESHOLD", 3, 1)
+_CIRCUIT_COOLDOWN = _env_float("HTTP_CIRCUIT_COOLDOWN", 30.0, 1.0)
+_CIRCUIT_STATE: dict[str, dict[str, float | bool]] = {}
+_CIRCUIT_LOCK = asyncio.Lock()
+
+async def _circuit_before(host: str) -> None:
+    now = time.monotonic()
+    async with _CIRCUIT_LOCK:
+        state = _CIRCUIT_STATE.get(host)
+        if not state:
+            return
+        until = float(state.get("cooldown_until", 0.0))
+        if until > now:
+            raise UpstreamCircuitOpenError(f"upstream circuit open: {host}")
+        if state.get("open"):
+            # Half-open: allow one probe and immediately reserve the slot.
+            state["open"] = False
+            state["probe"] = True
+
+async def _circuit_result(host: str, ok: bool) -> None:
+    async with _CIRCUIT_LOCK:
+        state = _CIRCUIT_STATE.setdefault(host, {"failures": 0.0, "open": False, "cooldown_until": 0.0, "probe": False})
+        if ok:
+            state.update(failures=0.0, open=False, cooldown_until=0.0, probe=False)
+            return
+        failures = float(state.get("failures", 0.0)) + 1.0
+        state["failures"] = failures
+        state["probe"] = False
+        if failures >= _CIRCUIT_FAILURE_THRESHOLD:
+            state["open"] = True
+            state["cooldown_until"] = time.monotonic() + _CIRCUIT_COOLDOWN
+
 
 def safe_json(response: Any, default: Any = None) -> Any:
     """Return decoded JSON without letting empty/non-JSON upstream bodies crash callers."""
@@ -130,6 +167,7 @@ async def request_with_retry(method: str, url: str, *, retries: int | None = Non
     attempts = _RETRIES if retries is None else max(0, retries)
     last: Exception | None = None
     for attempt in range(attempts + 1):
+        await _circuit_before(host)
         await _wait_for_rate_limit(host)
         try:
             started = time.monotonic()
@@ -138,11 +176,17 @@ async def request_with_retry(method: str, url: str, *, retries: int | None = Non
             # Host is safe, bounded diagnostic metadata; query strings/keys are never recorded.
             safe_host = host[:80] or "unknown"
             record_metric("http", method, ok=response.status_code < 400, latency=elapsed, status=response.status_code, host=safe_host)
+            if response.status_code < 400:
+                await _circuit_result(host, True)
+            elif response.status_code not in _RETRY_STATUSES:
+                await _circuit_result(host, False)
             if response.status_code in (401, 403, 451):
                 # These responses are not made better by retries. Preserve the response
                 # for callers so existing fallback logic remains in control.
                 return response
             if response.status_code not in _RETRY_STATUSES or attempt >= attempts:
+                if response.status_code in _RETRY_STATUSES and response.status_code >= 400:
+                    await _circuit_result(host, False)
                 if cache_key and response.status_code == 200:
                     _GET_CACHE[cache_key] = (time.monotonic() + _GET_CACHE_TTL, response)
                     if len(_GET_CACHE) > _GET_CACHE_MAX:
@@ -165,11 +209,14 @@ async def request_with_retry(method: str, url: str, *, retries: int | None = Non
                 _set_rate_limit(host, delay)
             await asyncio.sleep(delay)
         except httpx.TimeoutException as exc:
+            await _circuit_result(host, False) if attempt >= attempts else None
             last = UpstreamTimeoutError(str(exc) or "HTTP request timed out")
             if attempt >= attempts:
                 raise last from exc
             await asyncio.sleep(min(4.0, 0.35 * (2 ** attempt)))
         except (httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+            if attempt >= attempts:
+                await _circuit_result(host, False)
             last = exc
             if attempt >= attempts:
                 raise
@@ -185,7 +232,21 @@ async def close_async_client() -> None:
     _async_client = None
 
 
+
+def circuit_snapshot() -> dict[str, dict[str, float | bool]]:
+    """Safe operational view of upstream circuit state; never includes URLs or secrets."""
+    now = time.monotonic()
+    out = {}
+    for host, state in list(_CIRCUIT_STATE.items()):
+        out[str(host)[:80]] = {
+            "open": bool(state.get("open")) and float(state.get("cooldown_until", 0.0)) > now,
+            "failures": float(state.get("failures", 0.0)),
+            "cooldown_remaining": round(max(0.0, float(state.get("cooldown_until", 0.0)) - now), 1),
+        }
+    return out
+
 def clear_http_cache() -> None:
     """Drop in-memory GET responses during lifecycle shutdown/tests."""
     _GET_CACHE.clear()
     _RATE_LIMIT_COOLDOWN.clear()
+    _CIRCUIT_STATE.clear()
