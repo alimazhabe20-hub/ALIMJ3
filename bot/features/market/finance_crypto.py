@@ -126,7 +126,9 @@ async def analyze_gold(timeframe: str = "4h") -> str:
         return "❌ داده کافی برای تحلیل حرفه‌ای طلا در دسترس نیست."
     cur = float(direct_price) if direct_price is not None else closes[-1]
     ta=_compute_ta(closes, highs, lows, vols); ta["atr"]=_atr(highs,lows,closes,14)
+    # سطوح اصلی فقط از همان تایم‌فریم نمودار طلا استخراج می‌شوند.
     support,resistance=_support_resistance(closes,highs,lows,cur)
+    pa=_price_action_analysis(opens,highs,lows,closes,vols,support,resistance,ta.get("atr"))
     struct=_market_structure(highs,lows,closes); demand,supply=_demand_supply_zone(highs,lows,closes)
     mtf=await _mtf_bundle(pair)
     def f(v):
@@ -143,6 +145,13 @@ async def analyze_gold(timeframe: str = "4h") -> str:
         if struct.get('bos'): lines.append(f"🔀 BOS/CHOCH: {struct['bos']}")
     if demand: lines.append(f"🟢 ناحیه تقاضا: ${f(demand[0])} – ${f(demand[1])}")
     if supply: lines.append(f"🔴 ناحیه عرضه: ${f(supply[0])} – ${f(supply[1])}")
+    lines += ["", "🧠 تحلیل پرایس اکشن"]
+    lines.append(f"• ساختار: {pa.get('structure','—')}")
+    lines.append(f"• BOS/CHOCH: {pa.get('bos_choch','—')}")
+    if pa.get("patterns"): lines.append("• الگوهای کندلی: " + "، ".join(pa["patterns"]))
+    lines.append(f"• وضعیت سطح: {pa.get('location','—')} | حرکت: {pa.get('impulse','—')}")
+    if pa.get("liquidity_sweep") != "—": lines.append(f"• نقدینگی: {pa['liquidity_sweep']}")
+    if pa.get("volume_ratio") is not None: lines.append(f"• حجم/میانگین۲۰: {pa['volume_ratio']}x")
     sc,di=mtf.get('scores') or {},mtf.get('dirs') or {}
     lines += ["","⏱ همگرایی تایم‌فریم‌ها:"]
     for k in ("15M","1H","4H","1D","1W"):

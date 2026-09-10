@@ -967,6 +967,10 @@ def _advanced_levels(*args, **kwargs):
     from bot.features.market.finance_ta import _advanced_levels as _fn
     return _fn(*args, **kwargs)
 
+def _price_action_analysis(*args, **kwargs):
+    from bot.features.market.finance_ta import _price_action_analysis as _fn
+    return _fn(*args, **kwargs)
+
 def _market_regime(*args, **kwargs):
     from bot.features.market.finance_ta import _market_regime as _fn
     return _fn(*args, **kwargs)
@@ -1216,7 +1220,8 @@ def get_crypto_analysis_keyboard(symbol: str) -> "InlineKeyboardMarkup":
                 InlineKeyboardButton("🔔 هشدار ورود", callback_data=f"cx:al:{s}"),
             ],
             [InlineKeyboardButton("🧠 تحلیل هوشمند حرفه‌ای", callback_data=f"cx:ai:{s}")],
-            [InlineKeyboardButton("🥇 تحلیل طلا", callback_data="cx:gold:gold")],
+            [InlineKeyboardButton("🧠 تحلیل پرایس اکشن", callback_data=f"cx:pa:{s}")],
+            [InlineKeyboardButton("🥇 تحلیل طلا / XAUUSD", callback_data="cx:gold:gold")],
             [InlineKeyboardButton("🔄 بروزرسانی تحلیل", callback_data=f"cx:ref:{s}")],
         ]
     )
