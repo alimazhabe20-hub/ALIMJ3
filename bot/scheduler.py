@@ -173,8 +173,13 @@ async def check_economic_calendar_alerts(context):
             tz = _tz(tz_name or config.TIMEZONE)
             currencies = {x.strip().upper() for x in (currencies_raw or "").split(",") if x.strip()}
             max_delta = timedelta(minutes=max(1, int(lead_minutes or 15)))
+            from bot.features.market.economic_calendar import MAJOR_CURRENCIES
             for e in events:
-                if currencies and e["country"] not in currencies:
+                # اگر کاربر ارز خاصی نگذاشته، فقط majors
+                if currencies:
+                    if e["country"] not in currencies:
+                        continue
+                elif e.get("country") not in MAJOR_CURRENCIES:
                     continue
                 allowed = (impact or "high").lower()
                 if allowed != "all":
