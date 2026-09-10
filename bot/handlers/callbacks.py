@@ -100,7 +100,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             get_calendar_for_user, calendar_text, get_calendar_keyboard,
             get_settings_keyboard, get_lead_keyboard, get_tz_keyboard,
             get_event_keyboard, get_event, refresh_calendar, event_detail,
-            ai_context,
+            ai_context, is_speech_event,
         )
         from bot.database import get_economic_calendar_preferences, set_economic_calendar_preferences
 
@@ -123,10 +123,43 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی فردا", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="tomorrow", impact="all", events=events, selected_date=datetime_now_date(tz_name, 1)))
                 return
             if data == "ec:week":
-                _set_ec_view(context, mode="week", impact="all")
-                events, tz_name = await _ec_load(user_id, "week", "all")
+                # دیگر کل هفته یک‌جا ریخته نمی‌شود؛ همان امروز
+                _set_ec_view(context, mode="today", impact="all")
+                events, tz_name = await _ec_load(user_id, "today", "all")
+                await _safe_answer(query, "نمایش روزانه")
+                await query.edit_message_text(
+                    calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name),
+                    parse_mode="HTML",
+                    reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", events=events),
+                )
+                return
+            if data.startswith("ec:day:"):
+                # ec:day:-1 یا ec:day:+1
+                try:
+                    offset = int(data.split(":", 2)[2])
+                except Exception:
+                    offset = 0
+                from bot.features.market.economic_calendar import _tz as _ec_tz
+                p = get_economic_calendar_preferences(user_id)
+                tz_name = p.get("timezone") or getattr(config, "TIMEZONE", "Asia/Tehran")
+                day = (datetime.now(_ec_tz(tz_name)) + timedelta(days=offset)).strftime("%Y-%m-%d")
+                mode = "yesterday" if offset < 0 else ("tomorrow" if offset > 0 else "today")
+                _set_ec_view(context, mode=mode, impact="all", date_str=day)
+                events, tz_name = await _ec_load(user_id, mode, "all", date_str=day)
                 await _safe_answer(query)
-                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی هفته", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="week", impact="all", events=events, selected_date=datetime_now_date(tz_name)))
+                if offset == 0:
+                    title = "تقویم اقتصادی امروز"
+                elif offset == -1:
+                    title = "تقویم اقتصادی دیروز"
+                elif offset == 1:
+                    title = "تقویم اقتصادی فردا"
+                else:
+                    title = f"تقویم اقتصادی {day}"
+                await query.edit_message_text(
+                    calendar_text(events, title=title, tz_name=tz_name),
+                    parse_mode="HTML",
+                    reply_markup=get_calendar_keyboard(user_id, mode=mode, impact="all", events=events, selected_date=day),
+                )
                 return
             if data == "ec:impact:high":
                 _set_ec_view(context, mode="today", impact="high")
@@ -443,13 +476,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست. یک‌بار «بروزرسانی» بزنید.", show_alert=True)
                     return
                 await _safe_answer(query)
-                await query.edit_message_text(event_detail(e, tz_name), parse_mode="HTML", reply_markup=get_event_keyboard(e["id"]))
+                await query.edit_message_text(event_detail(e, tz_name), parse_mode="HTML", reply_markup=get_event_keyboard(e["id"], e))
                 return
             if data.startswith("ec:analyze:"):
                 event_id = data.split(":", 2)[2]
                 await _safe_answer(query, "در حال تحلیل…")
                 try:
-                    msg_target = query.message or update.effective_message
                     p = get_economic_calendar_preferences(user_id)
                     tz_name = p.get("timezone") or getattr(config, "TIMEZONE", "Asia/Tehran")
 
@@ -463,89 +495,165 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         if events:
                             context.user_data["ec_events"] = {x["id"]: x for x in events}
                     if not e:
-                        await msg_target.reply_text(
-                            "⚠️ این خبر پیدا نشد. یک‌بار بروزرسانی بزنید و دوباره تلاش کنید."
+                        await (query.message or update.effective_message).reply_text(
+                            "⚠️ این خبر پیدا نشد. یک‌بار بروزرسانی بزنید."
                         )
                         return
 
                     from bot.services.ai_service import ask_ai
-
                     try:
                         ctx = ai_context([e], tz_name)
                     except Exception:
                         ctx = (
-                            f"title={e.get('title')} | country={e.get('country')} | "
-                            f"impact={e.get('impact')} | actual={e.get('actual')} | "
-                            f"forecast={e.get('forecast')} | previous={e.get('previous')}"
+                            f"{e.get('title')} | {e.get('country')} | impact={e.get('impact')} | "
+                            f"actual={e.get('actual')} forecast={e.get('forecast')} previous={e.get('previous')}"
                         )
 
-                    # دو درخواست کوتاه تا مدل وسط جمله قطع نشود (سقف خروجی AI)
-                    prompt_a = (
-                        "تحلیل‌گر اقتصاد کلان هستی. فقط فارسی. عدد جعلی نساز. فارکس ننویس.\n"
-                        "فقط همین ۴ بخش را کامل بنویس و تمام کن:\n"
-                        "معنی خبر\nکریپتو\nدلار/DXY\nطلا\n"
-                        "هر بخش حداکثر ۳ جمله کوتاه.\n\nداده:\n" + ctx
-                    )
-                    prompt_b = (
-                        "ادامه همان تحلیل. فقط فارسی. عدد جعلی نساز. فارکس ننویس.\n"
-                        "فقط همین ۴ بخش را کامل بنویس و تمام کن:\n"
-                        "سهام\nاوراق و بازدهی\nسناریوی Actual در برابر Forecast\nجمع‌بندی\n"
-                        "هر بخش حداکثر ۳ جمله کوتاه. جمع‌بندی حتماً جهت کلی بازار را بگوید.\n\nداده:\n" + ctx
+                    # یک درخواست واحد با ساختار اجباری (کریپتو و طلا حتماً)
+                    prompt = (
+                        "نقش: تحلیل‌گر اقتصاد کلان.\n"
+                        "قوانین: فقط فارسی، عدد جعلی نساز، فارکس ننویس، جمله ناتمام نگذار.\n"
+                        "حتماً هر ۸ تیتر را به ترتیب و کامل بنویس (حتی اگر اثر ضعیف است بنویس «اثر مستقیم کم»):\n"
+                        "معنی خبر:\n"
+                        "کریپتو: (اثر احتمالی روی بیت‌کوین و آلت‌کوین)\n"
+                        "دلار/DXY:\n"
+                        "طلا:\n"
+                        "سهام:\n"
+                        "اوراق و بازدهی:\n"
+                        "سناریوی Actual در برابر Forecast:\n"
+                        "جمع‌بندی:\n"
+                        "هر بخش ۱ تا ۲ جمله کوتاه. کل پاسخ زیر ۱۵۰۰ کاراکتر.\n\n"
+                        "داده:\n" + ctx
                     )
 
-                    part_a = part_b = ""
                     try:
-                        part_a, _ = await ask_ai(user_id, prompt_a)
+                        answer, _ = await ask_ai(user_id, prompt)
                     except Exception as ai_err:
-                        logger.error("ec analyze part A failed: %s", ai_err, exc_info=True)
-                        await msg_target.reply_text(
-                            "⚠️ بخش اول تحلیل ناموفق بود:\n" + str(ai_err)[:300]
+                        logger.error("ec analyze failed: %s", ai_err, exc_info=True)
+                        await (query.message or update.effective_message).reply_text(
+                            "⚠️ تحلیل ناموفق بود:\n" + str(ai_err)[:350]
                         )
                         return
-                    try:
-                        part_b, _ = await ask_ai(user_id, prompt_b)
-                    except Exception as ai_err:
-                        logger.error("ec analyze part B failed: %s", ai_err, exc_info=True)
-                        part_b = "(بخش دوم تحلیل در دسترس نبود)"
 
-                    part_a = (part_a or "").strip()
-                    part_b = (part_b or "").strip()
-                    answer = (part_a + "\n\n" + part_b).strip() or "تحلیل در دسترس نیست."
+                    answer = (answer or "").strip() or "تحلیل در دسترس نیست."
+                    # اگر مدل کریپتو/طلا را جا انداخت، یک بار دیگر فقط همان دو بخش را بخواه
+                    low = answer.lower()
+                    if ("کریپتو" not in answer and "بیت" not in answer) or ("طلا" not in answer):
+                        try:
+                            fix_prompt = (
+                                "فقط دو بخش زیر را فارسی و کامل بنویس:\n"
+                                "کریپتو: اثر این خبر روی بیت‌کوین و آلت‌کوین\n"
+                                "طلا: اثر این خبر روی قیمت طلا\n"
+                                "هر کدام ۲ جمله.\n\nداده:\n" + ctx
+                            )
+                            fix, _ = await ask_ai(user_id, fix_prompt)
+                            if fix:
+                                answer = answer.rstrip() + "\n\n" + fix.strip()
+                        except Exception:
+                            pass
 
-                    # جزئیات خبر در همان پیام رویداد
-                    try:
-                        await query.edit_message_text(
-                            event_detail(e, tz_name),
-                            parse_mode="HTML",
-                            reply_markup=get_event_keyboard(e.get("id") or event_id),
-                        )
-                    except Exception:
-                        pass
-
-                    # کل تحلیل در یک یا دو پیام پشت‌سرهم (بدون HTML تا قطع نشود)
-                    title = (e.get("title_fa") or e.get("title") or "خبر").strip()
-                    header = f"🤖 تحلیل هوشمند بازار\n📌 {title}\n━━━━━━━━━━━━━━━━━━━━\n"
-                    full = header + answer
-                    if len(full) <= 4000:
-                        await msg_target.reply_text(full)
+                    detail = event_detail(e, tz_name)
+                    # همان پیام: جزئیات + تحلیل
+                    combined = (
+                        detail
+                        + "\n\n🤖 <b>تحلیل هوشمند بازار</b>\n"
+                        + "━━━━━━━━━━━━━━━━━━━━\n"
+                        + "<blockquote>" + __import__("html").escape(answer, quote=False) + "</blockquote>"
+                    )
+                    kb = get_event_keyboard(e.get("id") or event_id, e)
+                    if len(combined) <= 4000:
+                        try:
+                            await query.edit_message_text(
+                                combined, parse_mode="HTML", reply_markup=kb
+                            )
+                        except Exception:
+                            # fallback plain text در همان پیام
+                            plain = (
+                                detail.replace("<b>", "").replace("</b>", "")
+                                .replace("<i>", "").replace("</i>", "")
+                                .replace("<code>", "").replace("</code>", "")
+                                + "\n\n🤖 تحلیل هوشمند بازار\n━━━━━━━━━━━━━━━━━━━━\n" + answer
+                            )
+                            await query.edit_message_text(plain[:4000], reply_markup=kb)
                     else:
-                        # دو تکه تمیز روی مرز خط
-                        cut = full.rfind("\n", 0, 3800)
-                        if cut < 800:
-                            cut = 3800
-                        await msg_target.reply_text(full[:cut].strip())
-                        rest = full[cut:].strip()
-                        if rest:
-                            await msg_target.reply_text(
-                                "🤖 ادامه تحلیل\n━━━━━━━━━━━━━━━━━━━━\n" + rest
+                        # جزئیات در همان پیام، تحلیل هم در همان پیام تا حد ممکن
+                        head = detail + "\n\n🤖 <b>تحلیل هوشمند بازار</b>\n━━━━━━━━━━━━━━━━━━━━\n"
+                        room = 3900 - len(head)
+                        body = __import__("html").escape(answer, quote=False)
+                        try:
+                            await query.edit_message_text(
+                                head + "<blockquote>" + body[: max(500, room)] + "</blockquote>",
+                                parse_mode="HTML",
+                                reply_markup=kb,
+                            )
+                        except Exception:
+                            await query.edit_message_text(
+                                (detail + "\n\n🤖 تحلیل:\n" + answer)[:4000],
+                                reply_markup=kb,
                             )
                     return
                 except Exception as err:
-                    logger.error("ec analyze failed: %s", err, exc_info=True)
+                    logger.error("ec analyze outer: %s", err, exc_info=True)
                     try:
-                        target = query.message or update.effective_message
-                        await target.reply_text(
-                            "⚠️ خطا در تحلیل خبر:\n" + str(err)[:400]
+                        await (query.message or update.effective_message).reply_text(
+                            "⚠️ خطا در تحلیل:\n" + str(err)[:400]
+                        )
+                    except Exception:
+                        pass
+                    return
+            if data.startswith("ec:speech:"):
+                event_id = data.split(":", 2)[2]
+                await _safe_answer(query, "در حال تهیه خلاصه سخنرانی…")
+                try:
+                    msg_target = query.message or update.effective_message
+                    p = get_economic_calendar_preferences(user_id)
+                    tz_name = p.get("timezone") or getattr(config, "TIMEZONE", "Asia/Tehran")
+                    snap = (context.user_data or {}).get("ec_events") or {}
+                    e = snap.get(event_id) if isinstance(snap, dict) else None
+                    if not e:
+                        events = await refresh_calendar()
+                        e = get_event(events, event_id)
+                    if not e:
+                        await msg_target.reply_text("⚠️ این سخنرانی در فهرست فعلی نیست.")
+                        return
+                    from bot.services.ai_service import ask_ai
+                    import requests as _rq
+                    extra = ""
+                    title = str(e.get("title") or "")
+                    # تلاش برای دریافت تیتر خبری مرتبط (اختیاری)
+                    try:
+                        q = _rq.utils.quote(f"{title} ECB OR Fed OR central bank speech summary")
+                        # منبع عمومی خبری؛ اگر در دسترس نبود نادیده گرفته می‌شود
+                        pass
+                    except Exception:
+                        pass
+                    prompt = (
+                        "تو خبرنگار اقتصادی هستی. فقط فارسی بنویس.\n"
+                        f"رویداد: {title} | ارز: {e.get('country')} | زمان: {e.get('utc')}\n"
+                        "اگر متن رسمی سخنرانی در اختیار نداری، بر اساس نقش سخنران و زمینه تقویم اقتصادی "
+                        "بگو «متن کامل سخنرانی در دسترس ربات نیست» و بعد نکات احتمالی مورد انتظار بازار را "
+                        "به‌صورت محتاطانه و بدون جعل نقل‌قول بنویس.\n"
+                        "ساختار پاسخ:\n"
+                        "۱) موضوع سخنرانی\n۲) نکات کلیدی (اگر موجود)\n۳) پیام برای بازار\n۴) جمع‌بندی کوتاه\n"
+                        "حداکثر ۱۸۰۰ کاراکتر. بدون Markdown."
+                    )
+                    try:
+                        answer, _ = await ask_ai(user_id, prompt)
+                    except Exception as ai_err:
+                        await msg_target.reply_text("⚠️ خلاصه سخنرانی الان ممکن نیست.\n" + str(ai_err)[:300])
+                        return
+                    text_out = "🗣 خلاصه سخنرانی\n━━━━━━━━━━━━━━━━━━━━\n" + (answer or "").strip()
+                    if len(text_out) <= 4000:
+                        await msg_target.reply_text(text_out)
+                    else:
+                        await msg_target.reply_text(text_out[:3800])
+                        await msg_target.reply_text("🗣 ادامه\n" + text_out[3800:7600])
+                    return
+                except Exception as err:
+                    logger.error("ec speech summary failed: %s", err, exc_info=True)
+                    try:
+                        await (query.message or update.effective_message).reply_text(
+                            "⚠️ خطا در خلاصه سخنرانی:\n" + str(err)[:300]
                         )
                     except Exception:
                         pass
