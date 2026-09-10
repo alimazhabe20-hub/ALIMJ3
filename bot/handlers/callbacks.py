@@ -105,7 +105,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from bot.database import get_economic_calendar_preferences, set_economic_calendar_preferences
 
         async def _ec_load(uid, mode="today", impact="all", currency="", date_str=""):
-            evs, tzn = await _ec_load(uid, mode, impact, currency, date_str)
+            evs, tzn = await get_calendar_for_user(uid, mode, impact, currency, date_str)
             context.user_data["ec_events"] = {x["id"]: x for x in evs}
             return evs, tzn
 
@@ -364,7 +364,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "پاسخ باید کامل باشد و هیچ جمله یا تیتر ناتمام نماند.\n\n"
                     "داده تقویم:\n" + context_text[:4000]
                 )
-                answer, _ = await ask_ai(user_id, prompt)
+                try:
+                    answer, provider = await ask_ai(user_id, prompt)
+                except Exception as ai_err:
+                    logger.error("ec analyze ask_ai failed: %s", ai_err, exc_info=True)
+                    msg = str(ai_err).strip() or "سرویس AI پاسخ نداد"
+                    if len(msg) > 280:
+                        msg = msg[:280] + "…"
+                    await query.message.reply_text(
+                        "⚠️ تحلیل این خبر الان ممکن نیست.\n"
+                        f"{msg}\n\n"
+                        "اگر کلید AI تنظیم است، چند ثانیه بعد دوباره امتحان کنید."
+                    )
+                    return
                 from html import escape
 
                 def _split_ai_text(txt: str, limit: int = 3600):
@@ -459,7 +471,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "بدون Markdown و بدون جدول.\n\n"
                     "داده رویداد:\n" + ai_context([e], tz_name)
                 )
-                answer, _ = await ask_ai(user_id, prompt)
+                try:
+                    answer, provider = await ask_ai(user_id, prompt)
+                except Exception as ai_err:
+                    logger.error("ec event-analyze ask_ai failed: %s", ai_err, exc_info=True)
+                    msg = str(ai_err).strip() or "سرویس AI پاسخ نداد"
+                    if len(msg) > 280:
+                        msg = msg[:280] + "…"
+                    err_text = (
+                        "⚠️ تحلیل این خبر الان ممکن نیست.\n"
+                        + msg
+                        + "\n\nاگر کلید AI تنظیم است، چند ثانیه بعد دوباره امتحان کنید."
+                    )
+                    await query.message.reply_text(err_text)
+                    return
                 from html import escape
 
                 def _split_ai_text(txt: str, limit: int = 3500):
