@@ -22,7 +22,7 @@ from bot.handlers.feature_handlers import (
     _h_date_convert, _h_age_calc, _h_birthday, _h_zodiac, _h_lunar,
     _h_date_diff, _h_age_diff, _h_event_search, _h_countdown, _h_calc,
     _h_profit, _h_currency, _h_crypto_full, _h_crypto_pos, _h_crypto_chart,
-    _h_crypto_analyze, _h_economic_calendar, _h_distance, _h_birth_save, _h_count_text,
+    _h_crypto_analyze, _h_distance, _h_birth_save, _h_count_text,
     _h_font_text, _h_font_all,
 )
 from bot.utils.motivation import get_motivation
@@ -34,7 +34,7 @@ from bot.features.date.date_tools import (
 )
 from bot.features.date.converters import calculate_age, parse_birth_datetime
 from bot.features.religious import qibla_direction, daily_adhkar, daily_verse_hadith, religious_countdown, istikhara, istikhara_intro
-from bot.features.market.finance import full_market_prices, convert_currency, profit_loss, parse_profit, get_top_crypto, convert_crypto, get_crypto_chart, analyze_crypto, parse_currency_input, get_crypto_analysis_keyboard, trading_recommendation, derivatives_radar, risk_scenarios, position_size_guide, calc_position_size, entry_alert_text, register_price_alert
+from bot.features.market.finance import full_market_prices, convert_currency, profit_loss, parse_profit, get_top_crypto, convert_crypto, get_crypto_chart, get_gold_chart, analyze_crypto, analyze_gold, parse_currency_input, get_crypto_analysis_keyboard, trading_recommendation, derivatives_radar, risk_scenarios, position_size_guide, calc_position_size, entry_alert_text, register_price_alert
 from bot.features.tools.app_tools import calculator, generate_password, count_text, world_distance
 from bot.features.fun.fun_tools import hafez_fal, joke_of_day, fact_of_day, daily_challenge, random_joke, get_joke_categories
 from bot.features.weather.weather_extra import weather_forecast, air_quality
@@ -716,6 +716,43 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _show_azan_settings(update, user_id, city, note="همه اذان‌ها خاموش شدند.")
         return
 
+    # تحلیل مستقیم طلا: کاربر می‌تواند فقط «gold»، «طلا»، «اونس»، «XAUUSD» یا عبارت تحلیلی مشابه را بفرستد.
+    # این مسیر قبل از fallback عمومی اجرا می‌شود تا Gold هرگز به‌عنوان «نماد نامعتبر» پاسخ داده نشود.
+    _gold_text = re.sub(r"[\s\u200c_/\-]+", "", text.lower())
+    _gold_aliases = ("gold", "xau", "xauusd", "طلا", "طلایجهانی", "اونس", "اونسجهانی")
+    if any(alias in _gold_text for alias in _gold_aliases):
+        # فقط وقتی پیام واقعاً درباره طلاست؛ اعداد/متن‌های نامرتبطی که کلمه gold را داخل جمله دارند هم به تحلیل طلا می‌روند.
+        try:
+            track_usage(user_id, "gold_analysis")
+            notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…")
+            report = await analyze_gold("1h")
+            try:
+                png, _ = await get_gold_chart("1h")
+            except Exception:
+                png = None
+            try:
+                await notice.delete()
+            except Exception:
+                pass
+            if png:
+                from io import BytesIO
+                bio = BytesIO(png)
+                bio.name = "gold_xauusd_1h.png"
+                await update.message.reply_photo(
+                    photo=bio,
+                    caption="🥇 Gold / XAUUSD — 1H",
+                    reply_markup=get_market_keyboard(),
+                )
+            # گزارش کامل را به‌صورت پیام متنی می‌فرستیم تا محدودیت 1024 کاراکتری کپشن باعث ناقص شدن تحلیل نشود.
+            chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
+            for chunk in chunks:
+                await update.message.reply_text(chunk)
+            return
+        except Exception as exc:
+            logger.error("direct gold analysis failed: %s", exc, exc_info=True)
+            await update.message.reply_text("⚠️ دریافت تحلیل طلا موقتاً ناموفق بود؛ دوباره تلاش کنید.")
+            return
+
     # دکمه‌های تکی اذان (با ✅ یا ❌)
     _azan_btn_map = {
         "اذان صبح": "fajr",
@@ -744,11 +781,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             "اسم محصول، قیمت، لینک خرید یا عکس محصول را بفرست؛ خودم جستجوی فروشگاهی و مقایسه را انجام می‌دهم.",
             reply_markup=get_ai_keyboard(user_id),
         )
-        return
-
-    if text in ("🗓 تقویم اقتصادی", "تقویم اقتصادی", "📅 تقویم اقتصادی"):
-        track_usage(user_id, "economic_calendar")
-        await _h_economic_calendar(update, context, text, user_id)
         return
 
     if text in ("💵 قیمت کامل بازار", "قیمت کامل بازار"):
