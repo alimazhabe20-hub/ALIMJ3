@@ -188,6 +188,14 @@ async def analyze_gold(timeframe: str = "4h") -> str:
         f"📈 ADX: {float(ta.get('adx')):.1f}" if ta.get('adx') is not None else "📈 ADX: —",
     ]
     if state: lines.append(f"🕒 وضعیت منبع: {state.get('status','نامشخص')} | {state.get('age_seconds','—')}s")
+    def _format_chart_pattern(x):
+        name = x.get('name') or '—'
+        state = x.get('state') or '—'
+        bias = f" | چشم‌انداز: {x.get('bias')}" if x.get('bias') else ''
+        trigger = f" | تریگر: {f(x.get('trigger'))}" if x.get('trigger') is not None else ''
+        target = f" | هدف: {f(x.get('target'))}" if x.get('target') is not None else ''
+        return name + ' — ' + state + bias + trigger + target
+
     if struct:
         lines.append(f"🏗 ساختار: {struct.get('structure','—')}")
         if struct.get('bos'): lines.append(f"🔀 BOS/CHOCH: {struct['bos']}")
@@ -197,7 +205,7 @@ async def analyze_gold(timeframe: str = "4h") -> str:
         lines += ["", "🧠 تحلیل پرایس اکشن", f"🏗 ساختار: {pa.get('structure','—')}",
                   f"🔀 BOS/CHOCH: {pa.get('bos_choch') or 'ندارد'}",
                   f"🕯 الگو: {', '.join(pa.get('patterns') or []) or '—'}",
-                  f"📐 الگوی کلاسیک: {', '.join(x.get('name') + ' — ' + x.get('state') + (' | چشم‌انداز: ' + x.get('bias') if x.get('bias') else '') + (f" | تریگر: {f(x.get('trigger'))}" if x.get('trigger') is not None else '') + (f" | هدف: {f(x.get('target'))}" if x.get('target') is not None else '') for x in (pa.get('chart_patterns') or [])) or '—'}",
+                  f"📐 الگوی کلاسیک: {', '.join(_format_chart_pattern(x) for x in (pa.get('chart_patterns') or [])) or '—'}",
                   f"💧 نقدینگی/Sweep: {pa.get('liquidity_sweep') or '—'}",
                   f"📍 موقعیت قیمت: {pa.get('location','—')}"]
     lines += ["", "⏱ همگرایی چندتایم‌فریم طلا"]
