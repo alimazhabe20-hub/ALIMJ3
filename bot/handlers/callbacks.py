@@ -384,14 +384,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             if data.startswith("ec:analyze:"):
                 event_id = data.split(":", 2)[2]
-                events = await refresh_calendar()
+
+                # پاسخ به Callback باید قبل از هر عملیات شبکه/AI انجام شود؛
+                # در غیر این صورت Telegram تا پایان refresh/AI حالت loading نشان می‌دهد.
+                await _safe_answer(query, "در حال تحلیل…")
+
+                # از refresh اجباری در ابتدای callback پرهیز می‌کنیم؛
+                # get_calendar_for_user خودش cache/DB را مدیریت می‌کند.
                 p = get_economic_calendar_preferences(user_id)
                 tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
+                events, _ = await get_calendar_for_user(user_id, "today", "all")
                 e = get_event(events, event_id)
                 if not e:
-                    await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست.", show_alert=True)
+                    await query.edit_message_text(
+                        "⚠️ این خبر دیگر در فهرست فعلی نیست.",
+                        reply_markup=get_calendar_keyboard(
+                            user_id, mode="today", impact="all", events=events,
+                            selected_date=datetime_now_date(tz_name), page=0
+                        ),
+                    )
                     return
-                await _safe_answer(query, "در حال تحلیل…")
+
+                # همان پیام خبر را فوراً به حالت پردازش می‌بریم؛ پیام جدید ساخته نمی‌شود.
+                await query.edit_message_text(
+                    event_detail(e, tz_name) + "\n\n🤖 <b>تحلیل هوشمند بازار</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>در حال تحلیل داده و اثر احتمالی بازار…</i>",
+                    parse_mode="HTML",
+                    reply_markup=get_event_keyboard(event_id),
+                )
+
                 from bot.services.ai_service import ask_ai
                 prompt = (
                     "تو تحلیل‌گر ارشد اقتصاد کلان و بازارهای مالی هستی. این رویداد را عمیق، کاربردی و کاملاً فارسی تحلیل کن. "
@@ -410,7 +430,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "اگر Actual منتشر نشده است، تحلیل را بر اساس سناریوهای بالاتر/پایین‌تر/مطابق انتظار انجام بده و آن را به‌عنوان نتیجه واقعی معرفی نکن.\n\n"
                     "داده رویداد:\n" + ai_context([e], tz_name)
                 )
-                answer, _ = await ask_ai(user_id, prompt)
+                try:
+                    answer, _ = await ask_ai(user_id, prompt)
+                except Exception as ai_exc:
+                    logger.error("economic calendar AI analysis failed: %s", ai_exc, exc_info=True)
+                    await query.edit_message_text(
+                        event_detail(e, tz_name) + (
+                            "\n\n🤖 <b>تحلیل هوشمند بازار</b>\n"
+                            "━━━━━━━━━━━━━━━━━━━━\n"
+                            "⚠️ فعلاً سرویس هوش مصنوعی پاسخ نداد.\n"
+                            "لطفاً چند لحظه بعد دوباره روی «تحلیل این خبر با AI» بزنید."
+                        ),
+                        parse_mode="HTML",
+                        reply_markup=get_event_keyboard(event_id),
+                    )
+                    return
                 from html import escape
                 body = escape((answer or "تحلیل در دسترس نیست.").strip(), quote=False)
                 if len(body) > 2700:
