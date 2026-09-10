@@ -573,6 +573,15 @@ def _shopping_prompt_hint(prompt: str) -> str:
     q = (prompt or "").strip()
     if not q:
         return ""
+    # درخواست‌های مالی/بازاریابی را هرگز shopping تلقی نکن؛ کلمه «قیمت» در
+    # تحلیل بازار کاملاً طبیعی است و نباید به ابزار خرید route شود.
+    if re.search(
+        r"تحلیل|بازار|کریپتو|رمزارز|بیت.?کوین|اتریوم|طلا|XAU|USD|USDT|"
+        r"حمایت|مقاومت|RSI|ADX|ATR|BOS|CHOCH|Funding|Open.?Interest|"
+        r"لانگ|شورت|معامله|ترید|سیگنال|تایم.?فریم",
+        q, re.I,
+    ):
+        return ""
     if not re.search(
         r"خرید|قیمت|فروشگاه|فروشنده|ارزان|بهترین|لینک خرید|اینستا|شاپ|"
         r"مقایسه.*قیمت|قیمت.*محصول|buy|price|shop",
