@@ -408,20 +408,56 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "«معنی خبر»، «کریپتو»، «دلار/DXY»، «طلا»، «سهام»، «اوراق و بازدهی»، «سناریوی Actual در برابر Forecast»، «جمع‌بندی». "
                     "در «جمع‌بندی» یک جهت‌گیری احتمالی کلی برای ریسک‌پذیری بازار بده (مثلاً ریسک‌پذیرتر، ریسک‌گریزتر یا خنثی) و دلیلش را کوتاه بگو. "
                     "اگر Actual منتشر نشده است، تحلیل را بر اساس سناریوهای بالاتر/پایین‌تر/مطابق انتظار انجام بده و آن را به‌عنوان نتیجه واقعی معرفی نکن.\n\n"
-                    "داده رویداد:\n" + ai_context([e], tz_name)
+                    "داده رویداد هدف:\n" + ai_context([e], tz_name, 1) +
+                    "\n\nکانتکست تقویم مرتبط (برای تشخیص هم‌زمانی خبرها و اثرات متقابل):\n" +
+                    ai_context(events, tz_name, 60)
                 )
                 answer, _ = await ask_ai(user_id, prompt)
                 from html import escape
-                body = escape((answer or "تحلیل در دسترس نیست.").strip(), quote=False)
-                if len(body) > 2700:
-                    body = body[:2690] + "…"
-                text = event_detail(e, tz_name) + (
+                answer_text = (answer or "تحلیل در دسترس نیست.").strip()
+
+                # Telegram حدود 4096 کاراکتر برای پیام متنی دارد. به‌جای بریدن
+                # کورکورانه وسط تحلیل، بخش اول را روی همان پیام رویداد قرار می‌دهیم
+                # و اگر لازم بود ادامه را در پیام‌های بعدی می‌فرستیم.
+                event_text = event_detail(e, tz_name)
+                header = (
                     "\n\n🤖 <b>تحلیل هوشمند بازار</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"<blockquote>{body}</blockquote>"
                 )
+                max_first_body = max(900, 4000 - len(event_text) - len(header) - 80)
+
+                def _split_naturally(text: str, size: int):
+                    if len(text) <= size:
+                        return [text]
+                    parts = []
+                    rest = text.strip()
+                    while len(rest) > size:
+                        cut = max(rest.rfind("\n", 0, size), rest.rfind(". ", 0, size))
+                        if cut < int(size * 0.65):
+                            cut = size
+                        elif rest[cut:cut + 2] == ". ":
+                            cut += 1
+                        parts.append(rest[:cut].strip())
+                        rest = rest[cut:].strip()
+                    if rest:
+                        parts.append(rest)
+                    return parts
+
+                chunks = _split_naturally(answer_text, max_first_body)
+                first = escape(chunks[0], quote=False)
+                text = event_text + header + f"<blockquote>{first}</blockquote>"
+                if len(chunks) > 1:
+                    text += "\n\n📌 <i>ادامه تحلیل در پیام بعدی…</i>"
                 # تحلیل باید همان پیام رویداد را ویرایش کند، نه اینکه یک پیام جدید بسازد.
                 await query.edit_message_text(text, parse_mode="HTML", reply_markup=get_event_keyboard(event_id))
+
+                for idx, chunk in enumerate(chunks[1:], 2):
+                    continuation = (
+                        f"🤖 <b>ادامه تحلیل هوشمند بازار ({idx}/{len(chunks)})</b>\n"
+                        "━━━━━━━━━━━━━━━━━━━━\n"
+                        f"<blockquote>{escape(chunk, quote=False)}</blockquote>"
+                    )
+                    await query.message.reply_text(continuation, parse_mode="HTML", reply_markup=get_event_keyboard(event_id) if idx == len(chunks) else None)
                 return
             if data == "ec:back":
                 _set_ec_view(context, mode="today", impact="all")
