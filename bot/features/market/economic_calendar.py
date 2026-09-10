@@ -911,21 +911,39 @@ def ai_context(events, tz_name: str = "", limit: int = 40) -> str:
     return "\n".join(rows)
 
 
-def get_calendar_keyboard(user_id: int, *, mode: str = "today", impact: str = "all", events=None, selected_date: str = ""):
+def get_calendar_keyboard(user_id: int, *, mode: str = "today", impact: str = "all", currency: str = "", events=None, selected_date: str = "", page: int = 0):
+    """Build the economic-calendar controls.
+
+    Every event is clickable.  Because Telegram keyboards can become very tall,
+    event buttons are paginated; no event is silently omitted from navigation.
+    The view state (mode/date/impact/currency/page) is encoded in callback data
+    so pagination does not reset the user's selected calendar.
+    """
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    if not selected_date:
-        try:
-            from bot.database import get_economic_calendar_preferences
-            pref = get_economic_calendar_preferences(user_id)
-            user_tz = pref.get("timezone") or getattr(config, "TIMEZONE", "Asia/Tehran")
-        except Exception:
-            user_tz = getattr(config, "TIMEZONE", "Asia/Tehran")
-        selected_date = datetime.now(_tz(user_tz)).strftime("%Y-%m-%d")
-    selected = selected_date
+
     try:
-        d = datetime.strptime(selected, "%Y-%m-%d").date()
+        from bot.database import get_economic_calendar_preferences
+        pref = get_economic_calendar_preferences(user_id)
+        user_tz = pref.get("timezone") or getattr(config, "TIMEZONE", "Asia/Tehran")
+    except Exception:
+        user_tz = getattr(config, "TIMEZONE", "Asia/Tehran")
+    if not selected_date:
+        selected_date = datetime.now(_tz(user_tz)).strftime("%Y-%m-%d")
+
+    try:
+        d = datetime.strptime(selected_date, "%Y-%m-%d").date()
     except Exception:
         d = datetime.now(_tz()).date()
+        selected_date = d.isoformat()
+
+    mode = str(mode or "today")
+    impact = str(impact or "all")
+    currency = str(currency or "").upper()
+    try:
+        page = max(0, int(page))
+    except Exception:
+        page = 0
+
     prev_d = (d - timedelta(days=1)).isoformat()
     next_d = (d + timedelta(days=1)).isoformat()
     rows = [
@@ -937,15 +955,31 @@ def get_calendar_keyboard(user_id: int, *, mode: str = "today", impact: str = "a
         [InlineKeyboardButton("🤖 تحلیل هوشمند", callback_data="ec:ai"), InlineKeyboardButton("🔄 بروزرسانی", callback_data="ec:refresh")],
         [InlineKeyboardButton("💵 USD", callback_data="ec:cur:USD"), InlineKeyboardButton("💶 EUR", callback_data="ec:cur:EUR"), InlineKeyboardButton("💷 GBP", callback_data="ec:cur:GBP")],
     ]
-    if events:
-        for e in list(events)[:6]:
-            rows.append([InlineKeyboardButton(
-                f"{IMPACT_ICON.get(e['impact'], '⚪')} {e['country']} {e['title_fa'][:38]}",
-                callback_data=f"ec:event:{e['id']}",
-            )])
+
+    event_list = list(events or [])
+    per_page = 20
+    total_pages = max(1, (len(event_list) + per_page - 1) // per_page)
+    page = min(page, total_pages - 1)
+    start_i = page * per_page
+    page_events = event_list[start_i:start_i + per_page]
+
+    for e in page_events:
+        local = _event_local(e, user_tz)
+        title = str(e.get("title_fa") or e.get("title") or "رویداد اقتصادی").strip()
+        label = f"{IMPACT_ICON.get(e.get('impact'), '⚪')} {local.strftime('%H:%M')} | {e.get('country', '')} | {title[:42]}"
+        rows.append([InlineKeyboardButton(label, callback_data=f"ec:event:{e['id']}")])
+
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("⬅️ خبرهای قبلی", callback_data=f"ec:page:{page-1}:{mode}:{selected_date}:{impact}:{currency}"))
+        nav.append(InlineKeyboardButton(f"صفحه {page + 1}/{total_pages}", callback_data="ec:noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton("خبرهای بعدی ➡️", callback_data=f"ec:page:{page+1}:{mode}:{selected_date}:{impact}:{currency}"))
+        rows.append(nav)
+
     rows.append([InlineKeyboardButton("🕐 تنظیم ساعت و فیلتر", callback_data="ec:settings")])
     return InlineKeyboardMarkup(rows)
-
 
 def get_settings_keyboard(user_id: int):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
