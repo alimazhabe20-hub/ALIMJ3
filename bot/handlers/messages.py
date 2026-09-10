@@ -108,7 +108,6 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
     import re
     from io import BytesIO
     from bot.database import add_reminder
-
     # یادآوری
     rem = parse_natural_reminder(text)
     if rem:
@@ -132,11 +131,9 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
             reply_markup=get_ai_keyboard(user_id),
         )
         return True
-
     # Weather/Crypto عمدی اینجا مستقیم پاسخ داده نمی‌شوند.
     # V41.1: اجازه بده Capability Router + Function Calling ابزار واقعی را اجرا کند
     # و خود AI نتیجه را به زبان طبیعی برای کاربر بنویسد؛ خروجی خام ابزار کپی نشود.
-
     # جستجوی وب
     m = re.match(r"^(جستجو|سرچ|search)\s*[:：]?\s*(.+)$", text, re.I | re.S)
     if m or re.search(r"\b(در\s*اینترنت|تو\s*وب)\s*جستجو", text, re.I):
@@ -151,7 +148,6 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
             except Exception as _exc:
                 logger.debug("%s: %s", __name__, _exc)
         return True
-
     # نمودار
     chart = parse_chart_request(text)
     if chart:
@@ -172,7 +168,6 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
             except Exception as _exc:
                 logger.debug("%s: %s", __name__, _exc)
         return True
-
     # موسیقی
     if re.search(r"(موسیقی|آهنگ|music)\s*بساز|(بساز|تولید)\s*(موسیقی|آهنگ|افکت)", text, re.I):
         notice = await update.message.reply_text("🎵 در حال ساخت موسیقی...")
@@ -194,29 +189,22 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
             except Exception as _exc:
                 logger.debug("%s: %s", __name__, _exc)
         return True
-
     return False
-
-
 async def _send_ai_answer(update, user_id, answer: str, *, stream: bool = True):
     """ارسال جواب AI — بدون دکمه زیر پیام."""
     msg = update.message
     store_answer(user_id, answer)
     return await msg.reply_text(f"🤖 {answer}")
-
-
 async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
     """استریم AI و ویرایش تدریجی پیام؛ در شکست، پیام نیمه‌کاره حذف می‌شود."""
     import asyncio
     from bot.services.ai_service import ask_ai_stream
-
     msg = update.message
     # هنگام تولید پاسخ فقط وضعیت «در حال نوشتن» نمایش داده شود؛
     # آیکن ربات تا آماده شدن پاسخ نهایی نمایش داده نمی‌شود.
     sent = await msg.reply_text("✍️ در حال نوشتن...")
     buf = []
     provider_label = ""
-
     try:
         # Streaming واقعی با ویرایش کنترل‌شده برای جلوگیری از Flood Limit تلگرام.
         last_edit = time.monotonic()
@@ -243,11 +231,9 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
                             logger.debug("AI stream edit skipped: %s", edit_error)
                     else:
                         last_edit, last_len = now, len(current)
-
         answer = "".join(buf).strip()
         if not answer:
             raise RuntimeError("جواب خالی")
-
         store_answer(user_id, answer)
         final = "🤖 " + answer
         if len(final) > 4000:
@@ -270,15 +256,12 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
                 except Exception as retry_error:
                     logger.warning("AI final edit retry failed: %s", retry_error)
         return answer, provider_label or "ai"
-
     except Exception:
         try:
             await sent.delete()
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
         raise
-
-
 async def _send_ai_voice(update_or_msg, text: str, user_id: int, reply_markup=None):
     """ارسال ویس با پیام وضعیت «در حال ویس دادن»."""
     msg = getattr(update_or_msg, "message", None) or update_or_msg
@@ -297,7 +280,6 @@ async def _send_ai_voice(update_or_msg, text: str, user_id: int, reply_markup=No
             await notice.delete()
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
-
 async def _ask_ai_with_typing(update, context, user_id, text):
     """AI request with stable chunked output and safe fallback semantics."""
     import asyncio
@@ -323,8 +305,6 @@ async def _ask_ai_with_typing(update, context, user_id, text):
             await task
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
-
-
 async def _send_main(update, context, text, user_id):
     context.user_data.pop("waiting_for", None)
     await update.message.reply_text("🏠 منوی اصلی", reply_markup=get_main_keyboard(user_id))
@@ -332,23 +312,16 @@ async def _send_main(update, context, text, user_id):
     context.user_data["last_main_msg_id"] = msg.message_id
     set_last_main_msg_id(user_id, msg.message_id)
     return msg
-
-
 def _is_back(text):
     t = text.strip()
     return t in ("🔙 بازگشت", "بازگشت") or "بازگشت" in t
-
-
 def _is_back_more(text):
     return "بازگشت به بیشتر" in text
-
-
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
     if not await check_and_rate_limit(update, context):
         return
-
     try:
         await _text_handler_inner(update, context)
     except Exception as e:
@@ -357,15 +330,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ این بخش موقتاً در دسترس نیست. کمی بعد دوباره امتحان کنید.")
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
-
-
 async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name or "کاربر"
     city = get_user_city(user_id)
     waiting = context.user_data.get("waiting_for")
-
     # AI chat mode
     if context.user_data.get("ai_mode"):
         if _is_back(text) or _is_back_more(text):
@@ -489,7 +459,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                     "❌ فعلاً هیچ‌کدام از سرویس‌های AI پاسخ ندادند.\n\n" + str(exc)[:3000]
                 )
             return
-
     if waiting:
         if _is_back(text) or _is_back_more(text):
             context.user_data.pop("waiting_for", None)
@@ -534,7 +503,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                     )
                 return
             context.user_data.pop("waiting_for", None)
-
     if text in ("🏙 انتخاب شهر", "انتخاب شهر"):
         await update.message.reply_text("🏙 کشور:", reply_markup=get_country_keyboard()); return
     if text in ("📅 تقویم", "تقویم"):
@@ -544,7 +512,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("🌍 زبان:", reply_markup=get_language_keyboard()); return
     if text in ("➕ بیشتر", "بیشتر"):
         await update.message.reply_text("➕ بخش را انتخاب کنید:", reply_markup=get_more_keyboard()); return
-
     if text == "🤖 دستیار هوشمند":
         providers = enabled_providers()
         context.user_data["ai_mode"] = True
@@ -557,7 +524,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=get_ai_keyboard(user_id),
         )
         return
-
     if text == "📅 تاریخ و سن":
         await update.message.reply_text("📅 تاریخ و سن:", reply_markup=get_date_tools_keyboard()); return
     if text == "🕌 مذهبی":
@@ -570,7 +536,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("🛠 ابزارها:", reply_markup=get_tools_keyboard()); return
     if text == "🎮 سرگرمی":
         await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard()); return
-    
     if text in ("🎨 فونت", "فونت"):
         await update.message.reply_text("🎨 بخش فونت:", reply_markup=get_font_keyboard()); return
     if text in ("📋 لیست فونت‌ها", "📋 لیست همه فونت‌ها"):
@@ -592,12 +557,10 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data["selected_font"] = key
         context.user_data["waiting_for"] = "font_text"
         await update.message.reply_text(f"🎨 فونت انتخاب شد.\nمتن را بفرستید:", reply_markup=get_font_keyboard()); return
-
     if text == "👤 پروفایل":
         await update.message.reply_text("👤 پروفایل:", reply_markup=get_profile_keyboard()); return
     if _is_back_more(text):
         await update.message.reply_text("➕ منوی بیشتر:", reply_markup=get_more_keyboard()); return
-
     # تاریخ و سن
     if text in ("🔄 مبدل تاریخ", "مبدل تاریخ"):
         context.user_data["waiting_for"] = "date_convert"; track_usage(user_id, "date_convert")
@@ -649,7 +612,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("⏳ شمارش‌معکوس", "شمارش‌معکوس"):
         context.user_data["waiting_for"] = "countdown"; track_usage(user_id, "countdown")
         await update.message.reply_text("⏳ تاریخ:\n`1405/01/01 نوروز`", reply_markup=get_date_tools_keyboard()); return
-
     # مذهبی
     if text in ("🕋 قبله‌نما", "قبله‌نما"):
         track_usage(user_id, "qibla")
@@ -663,7 +625,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("🕌 مناسبت مذهبی", "مناسبت مذهبی"):
         track_usage(user_id, "rel_cd")
         await update.message.reply_text(religious_countdown(), reply_markup=get_religious_keyboard()); return
-    
     if text in ("🙏 استخاره", "استخاره"):
         track_usage(user_id, "istikhara")
         context.user_data["waiting_for"] = "istikhara_confirm"
@@ -678,19 +639,16 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text == "🔙 بازگشت به مذهبی":
         context.user_data.pop("waiting_for", None)
         await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard()); return
-
     if text in ("🔔 تنظیم اذان", "تنظیم اذان"):
         track_usage(user_id, "azan")
         await _show_azan_settings(update, user_id, city)
         return
-
     # دکمه‌های شخصی‌سازی اذان
     if text in ("🔔 اعلان‌ها: روشن", "🔕 اعلان‌ها: خاموش"):
         settings = get_azan_settings(user_id)
         set_azan_master(user_id, not settings["enabled"])
         await _show_azan_settings(update, user_id, city, note="وضعیت کلی اعلان‌ها تغییر کرد.")
         return
-
     if text in ("🔄 همه روشن",):
         set_azan_master(user_id, True)
         for key in ("fajr", "dhuhr", "asr", "maghrib", "isha"):
@@ -698,13 +656,11 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             update_user_field(user_id, field, 1)
         await _show_azan_settings(update, user_id, city, note="همه اذان‌ها روشن شدند.")
         return
-
     if text in ("⏹ همه خاموش",):
         for key in ("fajr", "dhuhr", "asr", "maghrib", "isha"):
             update_user_field(user_id, f"notify_{key}", 0)
         await _show_azan_settings(update, user_id, city, note="همه اذان‌ها خاموش شدند.")
         return
-
     # تحلیل طلا دقیقاً داخل همان جریان «بازار» و با ساختار منوی تحلیل کریپتو
     # نمایش داده می‌شود؛ وارد بخش/منوی جدید نمی‌شود.
     if text in ("🥇 تحلیل طلا", "تحلیل طلا"):
@@ -720,7 +676,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await notice.delete()
             except Exception:
                 pass
-
             # XAUUSD همان منوی Inline تحلیل کریپتو را با نماد gold استفاده می‌کند.
             # بنابراین تایم‌فریم، پرایس‌اکشن، تحلیل هوشمند و بروزرسانی همگی روی همان پیام می‌مانند.
             menu = get_crypto_analysis_keyboard("gold")
@@ -733,7 +688,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                     caption="🥇 <b>تحلیل طلا / XAUUSD — 1H</b>",
                     parse_mode="HTML",
                 )
-
             chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
             for i, chunk in enumerate(chunks):
                 await update.message.reply_text(
@@ -749,7 +703,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 reply_markup=get_market_keyboard(),
             )
             return
-
     # تحلیل مستقیم طلا: کاربر می‌تواند فقط «gold»، «طلا»، «اونس»، «XAUUSD» یا عبارت تحلیلی مشابه را بفرستد.
     # این مسیر قبل از fallback عمومی اجرا می‌شود تا Gold هرگز به‌عنوان «نماد نامعتبر» پاسخ داده نشود.
     _gold_text = re.sub(r"[\s\u200c_/\-]+", "", text.lower())
@@ -786,7 +739,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.error("direct gold analysis failed: %s", exc, exc_info=True)
             await update.message.reply_text("⚠️ دریافت تحلیل طلا موقتاً ناموفق بود؛ دوباره تلاش کنید.")
             return
-
     # دکمه‌های تکی اذان (با ✅ یا ❌)
     _azan_btn_map = {
         "اذان صبح": "fajr",
@@ -801,11 +753,9 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             status = "روشن" if new_state else "خاموش"
             await _show_azan_settings(update, user_id, city, note=f"{label} {status} شد.")
             return
-
     if text in ("🔙 بازگشت به مذهبی",):
         await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard())
         return
-
     # «دستیار خرید» قدیمی حذف شده؛ خرید اکنون بخشی از همان دستیار هوشمند است.
     if text in ("🛒 دستیار خرید", "دستیار خرید", "🛍 دستیار خرید"):
         context.user_data["ai_mode"] = True
@@ -816,7 +766,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=get_ai_keyboard(user_id),
         )
         return
-
     if text in ("💵 قیمت کامل بازار", "قیمت کامل بازار"):
         track_usage(user_id, "market")
         m = await update.message.reply_text("⏳ دریافت قیمت‌ها...")
@@ -849,11 +798,9 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         track_usage(user_id, "economic_calendar")
         await _h_economic_calendar(update, context, text, user_id)
         return
-
     if text in ("📈 سود و ضرر", "سود و ضرر"):
         context.user_data["waiting_for"] = "profit"; track_usage(user_id, "profit")
         await update.message.reply_text("📈 `1000 1200` یا `1000 1200 5`", reply_markup=get_market_keyboard()); return
-
     if text in (
         "📊 نمودار و تحلیل ارز دیجیتال",
         "نمودار و تحلیل ارز دیجیتال",
@@ -885,7 +832,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=get_market_keyboard(),
         )
         return
-
     # هوا
     if text in ("🌤 پیش‌بینی هوا", "پیش‌بینی هوا"):
         track_usage(user_id, "forecast")
@@ -909,7 +855,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("📍 لوکیشن من", "لوکیشن من"):
         track_usage(user_id, "location")
         await update.message.reply_text(f"📍 لوکیشن را از 📎 بفرستید.\nشهر فعلی: {city}", reply_markup=get_weather_geo_keyboard()); return
-
     # ابزار
     if text in ("🔢 ماشین‌حساب", "ماشین‌حساب"):
         context.user_data["waiting_for"] = "calc"; track_usage(user_id, "calc")
@@ -925,18 +870,15 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("📝 شمارش متن", "شمارش متن"):
         context.user_data["waiting_for"] = "count_text"; track_usage(user_id, "count")
         await update.message.reply_text("📝 متن را بفرستید:", reply_markup=get_tools_keyboard()); return
-
     # سرگرمی
     if text in ("📖 فال حافظ", "فال حافظ"):
         track_usage(user_id, "hafez"); await update.message.reply_text(await hafez_fal(user_id), reply_markup=get_fun_keyboard()); return
-    
     if text in ("😂 جوک روز", "جوک روز"):
         track_usage(user_id, "joke")
         await update.message.reply_text(
             "😂 دسته جوک را انتخاب کن:\n(بیش از ۸۷۰۰ جوک از farsijokes)",
             reply_markup=get_joke_keyboard(),
         ); return
-
     # دسته‌های جوک
     _joke_map = {
         "🎲 جوک تصادفی": None,
@@ -964,7 +906,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         track_usage(user_id, "challenge"); await update.message.reply_text(await daily_challenge(), reply_markup=get_fun_keyboard()); return
     if text in ("💖 جمله انگیزشی", "جمله انگیزشی"):
         track_usage(user_id, "motivation"); await update.message.reply_text(f"💖 {get_motivation()}", reply_markup=get_fun_keyboard()); return
-
     # پروفایل
     if text in ("⚙️ تنظیمات هوشمند", "تنظیمات هوشمند"):
         from bot.database import get_user_preferences
@@ -998,7 +939,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text == "🔙 بازگشت به پروفایل":
         await update.message.reply_text("👤 پروفایل:", reply_markup=get_profile_keyboard())
         return
-
     if text in ("👤 پروفایل من", "پروفایل من"):
         track_usage(user_id, "profile")
         u = update.effective_user
@@ -1034,7 +974,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("🎂 ذخیره تاریخ تولد", "ذخیره تاریخ تولد"):
         context.user_data["waiting_for"] = "birth_save"
         await update.message.reply_text("🎂 `1375/03/15`", reply_markup=get_profile_keyboard()); return
-
     if text in ("🇮🇷 ایران", "ایران"):
         await update.message.reply_text("🇮🇷 شهر:", reply_markup=get_iran_cities_keyboard()); return
     if text in ("🇮🇶 عراق", "عراق"):
@@ -1050,27 +989,21 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ALL_CITIES:
         update_user_field(user_id, "city", text); update_user_field(user_id, "country", CITY_COUNTRY.get(text, "Iran"))
         await _send_main(update, context, f"✅ شهر → **{text}**\n\n" + await build_message(user_id, first_name, text), user_id); return
-
-
 async def _show_azan_settings(update, user_id, city, note: str = None):
     """نمایش پنل تنظیم اذان با وضعیت فعلی و اوقات شرعی"""
     from bot.api.prayer import get_prayer_times, get_next_prayer_time
     from datetime import datetime
     import pytz
     from bot.config import config
-
     settings = get_azan_settings(user_id)
     times = get_prayer_times(city) or {}
     now = datetime.now(pytz.timezone(config.TIMEZONE))
     nxt_name, nxt_delta = get_next_prayer_time(times, now) if times else (None, None)
-
     def mark(on: bool) -> str:
         return "✅" if on else "❌"
-
     lines = [f"🔔 تنظیم اذان — {city}\n"]
     if note:
         lines.append(f"ℹ️ {note}\n")
-
     master = "روشن ✅" if settings["enabled"] else "خاموش ❌"
     lines.append(f"اعلان کلی: {master}\n")
     lines.append("انتخاب اذان‌ها:")
@@ -1079,7 +1012,6 @@ async def _show_azan_settings(update, user_id, city, note: str = None):
     lines.append(f"{mark(settings['asr'])} اذان عصر" + (f"  ({times.get('اذان عصر', '—')})" if times else ""))
     lines.append(f"{mark(settings['maghrib'])} اذان مغرب" + (f"  ({times.get('اذان مغرب', '—')})" if times else ""))
     lines.append(f"{mark(settings['isha'])} اذان عشاء" + (f"  ({times.get('اذان عشاء', '—')})" if times else ""))
-
     if nxt_name and nxt_delta and settings["enabled"]:
         secs = int(nxt_delta.total_seconds())
         h, r = divmod(secs, 3600)
@@ -1087,21 +1019,15 @@ async def _show_azan_settings(update, user_id, city, note: str = None):
         lines.append(f"\n⏳ اذان بعدی: {nxt_name} — {h} ساعت و {mi} دقیقه")
     elif not settings["enabled"]:
         lines.append("\n🔕 اعلان‌ها خاموش است.")
-
     lines.append("\nروی هر دکمه بزن تا روشن/خاموش شود.")
     await update.message.reply_text(
         "\n".join(lines),
         reply_markup=get_azan_keyboard(settings),
     )
-
-
 async def media_ai_handler(update, context):
     """Compatibility facade; implementation lives in media_handlers.py."""
     from bot.handlers.media_handlers import media_ai_handler as _impl
     return await _impl(update, context)
-
-
-
 async def lens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """اجرای Lens محلی روی عکسی که کاربر به آن Reply کرده است."""
     if not update.message:
@@ -1110,17 +1036,14 @@ async def lens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not reply:
         await update.message.reply_text("📷 روی یک عکس Reply کن و بعد /lens را بفرست.")
         return
-
     photo = reply.photo[-1] if reply.photo else None
     if not photo and reply.document:
         mime = reply.document.mime_type or ""
         if mime.startswith("image/"):
             photo = reply.document
-
     if not photo:
         await update.message.reply_text("❌ پیام Reply شده یک تصویر نیست.")
         return
-
     notice = await update.message.reply_text("🔎 در حال تحلیل تصویر...")
     try:
         tg_file = await photo.get_file()
@@ -1134,11 +1057,7 @@ async def lens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await notice.delete()
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
-
-
 async def voice_ai_handler(update, context):
     """Compatibility facade; implementation lives in media_handlers.py."""
     from bot.handlers.media_handlers import voice_ai_handler as _impl
     return await _impl(update, context)
-
-
