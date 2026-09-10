@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import html
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -260,30 +261,59 @@ def format_value(value: Any) -> str:
     return str(value).strip() if value not in (None, "") else "—"
 
 
+def _esc(value: Any) -> str:
+    return html.escape(str(value), quote=False)
+
+
+def _impact_label(e: dict[str, Any]) -> str:
+    return IMPACT_FA.get(e.get("impact", ""), e.get("impact") or "نامشخص")
+
+
 def format_event(e: dict[str, Any], tz_name: str = "") -> str:
     local = _event_local(e, tz_name)
     icon = IMPACT_ICON.get(e["impact"], "⚪")
+    title_fa = _esc(e["title_fa"])
+    title_en = _esc(e["title"])
     return (
-        f"{icon} {local.strftime('%H:%M')} | {e['country']} | {e['title_fa']}\n"
-        f"   اهمیت: {IMPACT_FA.get(e['impact'], e['impact'] or 'نامشخص')}"
-        f" | واقعی: {format_value(e['actual'])}"
-        f" | پیش‌بینی: {format_value(e['forecast'])}"
-        f" | قبلی: {format_value(e['previous'])}"
+        f"{icon} <b>{local.strftime('%H:%M')} | {_esc(e['country'])} | {title_fa}</b>\n"
+        f"   <i>{title_en}</i>\n"
+        f"   🚦 <b>اهمیت:</b> {_esc(_impact_label(e))}"
+        f"  •  📢 <b>واقعی:</b> {_esc(format_value(e['actual']))}"
+        f"  •  🔮 <b>پیش‌بینی:</b> {_esc(format_value(e['forecast']))}"
+        f"  •  ◀️ <b>قبلی:</b> {_esc(format_value(e['previous']))}"
     )
 
 
 def calendar_text(events, *, title: str, tz_name: str = "", limit: int = 25) -> str:
     tz = _tz(tz_name)
-    lines = [f"🗓 {title}", "────────────────────", f"🕐 منطقه زمانی: {tz.zone}", ""]
+    lines = [
+        f"🗓 <b>{_esc(title)}</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
+        f"🕐 <b>منطقه زمانی:</b> <code>{_esc(tz.zone)}</code>",
+        "",
+    ]
     if not events:
-        lines.append("📭 رویداد اقتصادی‌ای با این فیلتر پیدا نشد.")
+        lines.append("📭 <i>رویداد اقتصادی‌ای با این فیلتر پیدا نشد.</i>")
         return "\n".join(lines)
+    base = "\n".join(lines)
+    added = 0
     for e in events[:limit]:
-        lines.append(format_event(e, tz_name))
-    if len(events) > limit:
-        lines += ["", f"… {len(events) - limit} رویداد دیگر هم وجود دارد."]
-    lines += ["", "🔴 زیاد  🟠 متوسط  🟡 کم", "ℹ️ مقادیر واقعی ممکن است تا زمان انتشار خالی باشند."]
-    return "\n".join(lines)[:4000]
+        block = format_event(e, tz_name)
+        candidate = base + "\n" + block + "\n"
+        # هرگز HTML را وسط یک تگ قطع نکنیم.
+        if len(candidate) > 3850:
+            break
+        lines.extend([block, ""])
+        base = candidate
+        added += 1
+    remaining = len(events) - added
+    if remaining > 0:
+        lines += [f"… <i>{remaining} رویداد دیگر هم وجود دارد.</i>", ""]
+    lines += [
+        "<b>راهنمای اهمیت:</b> 🔴 زیاد  🟠 متوسط  🟡 کم",
+        "ℹ️ <i>مقادیر واقعی ممکن است تا زمان انتشار خالی باشند.</i>",
+    ]
+    return "\n".join(lines)
 
 
 def get_event(events, event_id: str):
@@ -300,17 +330,18 @@ def event_detail(e: dict[str, Any], tz_name: str = "") -> str:
     else:
         countdown = "زمان رویداد گذشته است"
     return (
-        f"{IMPACT_ICON.get(e['impact'], '⚪')} {e['title_fa']}\n"
-        f"────────────────────\n"
-        f"💱 ارز: {e['country']} — {e['currency_name']}\n"
-        f"📅 تاریخ: {local.strftime('%Y/%m/%d')}\n"
-        f"⏰ ساعت: {local.strftime('%H:%M')}\n"
-        f"🚦 اهمیت: {IMPACT_FA.get(e['impact'], e['impact'])}\n"
-        f"⏳ وضعیت: {countdown}\n\n"
-        f"📌 واقعی: {format_value(e['actual'])}\n"
-        f"🔮 پیش‌بینی: {format_value(e['forecast'])}\n"
-        f"◀️ قبلی: {format_value(e['previous'])}\n\n"
-        "⚠️ این داده برای تصمیم‌گیری مالی قطعی نیست."
+        f"{IMPACT_ICON.get(e['impact'], '⚪')} <b>{_esc(e['title_fa'])}</b>\n"
+        f"<i>{_esc(e['title'])}</i>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💱 <b>ارز:</b> {_esc(e['country'])} — {_esc(e['currency_name'])}\n"
+        f"📅 <b>تاریخ:</b> <code>{local.strftime('%Y/%m/%d')}</code>\n"
+        f"⏰ <b>ساعت:</b> <code>{local.strftime('%H:%M')}</code>\n"
+        f"🚦 <b>اهمیت:</b> {_esc(_impact_label(e))}\n"
+        f"⏳ <b>وضعیت:</b> {_esc(countdown)}\n\n"
+        f"📢 <b>واقعی:</b> {_esc(format_value(e['actual']))}\n"
+        f"🔮 <b>پیش‌بینی:</b> {_esc(format_value(e['forecast']))}\n"
+        f"◀️ <b>قبلی:</b> {_esc(format_value(e['previous']))}\n\n"
+        "⚠️ <i>این داده برای تصمیم‌گیری مالی قطعی نیست.</i>"
     )
 
 
