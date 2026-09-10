@@ -114,7 +114,21 @@ TERM_MAP = {
 }
 
 
+def _stable_event_id(dt: datetime, country: str, title: str) -> str:
+    """شناسه پایدار بر اساس زمان UTC دقیق تا دقیقه + ارز + عنوان نرمال‌شده.
+    بین منبع FF و biquote یکسان می‌ماند تا دکمه‌ها بعد از refresh نشکنند.
+    """
+    utc = dt.astimezone(timezone.utc)
+    base = f"{utc.strftime('%Y-%m-%dT%H:%M')}|{(country or '').upper()}|{_title_key(title)}"
+    return hashlib.sha1(base.encode("utf-8")).hexdigest()[:16]
+
+
 def _event_id(raw: dict[str, Any]) -> str:
+    dt = _parse_dt(raw.get("date", ""))
+    title = str(raw.get("title") or raw.get("event") or "").strip()
+    country = str(raw.get("country") or raw.get("currency") or "").upper().strip()
+    if dt:
+        return _stable_event_id(dt, country, title)
     base = "|".join(str(raw.get(k, "")) for k in ("date", "country", "title", "impact"))
     return hashlib.sha1(base.encode("utf-8")).hexdigest()[:16]
 
@@ -335,9 +349,7 @@ def _normalize_biquote_row(raw: dict[str, Any]) -> dict[str, Any] | None:
     previous = _to_str_num(
         raw.get("previous") if raw.get("previous") is not None else raw.get("revisedPrevious")
     )
-    # synthesize an id compatible with the rest of the bot
-    rid = str(raw.get("eventId") or raw.get("id") or f"{dt.isoformat()}|{cur}|{title}")
-    eid = hashlib.sha1(rid.encode("utf-8")).hexdigest()[:16]
+    eid = _stable_event_id(dt, cur, title)
     return {
         "id": eid,
         "utc": dt,
@@ -633,7 +645,41 @@ def calendar_text(events, *, title: str, tz_name: str = "", limit: int = 25) -> 
 
 
 def get_event(events, event_id: str):
-    return next((e for e in events if e.get("id") == event_id), None)
+    if not events or not event_id:
+        return None
+    for e in events:
+        if e.get("id") == event_id:
+            return e
+    return None
+
+
+def find_event(events, event_id: str = "", *, title: str = "", country: str = "", utc=None):
+    """Find by stable id, then by title+country+time proximity."""
+    e = get_event(events, event_id)
+    if e:
+        return e
+    tk = _title_key(title)
+    cur = (country or "").upper()
+    best = None
+    best_score = 10**9
+    for cand in events or []:
+        score = 0
+        if cur and cand.get("country") != cur:
+            continue
+        if tk:
+            ctk = _title_key(cand.get("title", ""))
+            if tk != ctk and tk not in ctk and ctk not in tk:
+                continue
+        if utc is not None and cand.get("utc") is not None:
+            try:
+                delta = abs((cand["utc"] - utc).total_seconds())
+            except Exception:
+                delta = 0
+            score = delta
+        if score < best_score:
+            best_score = score
+            best = cand
+    return best
 
 
 def event_detail(e: dict[str, Any], tz_name: str = "") -> str:
@@ -688,23 +734,14 @@ def get_calendar_keyboard(user_id: int, *, mode: str = "today", impact: str = "a
         [InlineKeyboardButton("💵 USD", callback_data="ec:cur:USD"), InlineKeyboardButton("💶 EUR", callback_data="ec:cur:EUR"), InlineKeyboardButton("💷 GBP", callback_data="ec:cur:GBP")],
         [InlineKeyboardButton("🔄 بروزرسانی", callback_data="ec:refresh")],
     ]
-    # دکمه جدا برای هر خبر — صفحه‌بندی ۸تایی
+    # دکمه جدا برای هر خبر — همه در یک کیبورد (بدون صفحه بعد)
     if events:
         tz_name = getattr(config, "TIMEZONE", "Asia/Tehran")
-        page = max(0, int(page or 0))
-        page_size = 8
-        chunk = list(events)[page * page_size:(page + 1) * page_size]
-        for e in chunk:
+        # سقف تلگرام حدود ۱۰۰ دکمه است؛ برای تقویم روزانه کافی است
+        for e in list(events)[:40]:
             local = e["utc"].astimezone(_tz(tz_name))
             label = f"{IMPACT_ICON.get(e['impact'], '⚪')} {local.strftime('%H:%M')} {e['country']} {e['title_fa'][:28]}"
             rows.append([InlineKeyboardButton(label, callback_data=f"ec:event:{e['id']}")])
-        nav = []
-        if page > 0:
-            nav.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"ec:page:{page-1}"))
-        if (page + 1) * page_size < len(list(events)):
-            nav.append(InlineKeyboardButton("بعدی ➡️", callback_data=f"ec:page:{page+1}"))
-        if nav:
-            rows.append(nav)
     rows.append([InlineKeyboardButton("🕐 تنظیم ساعت و فیلتر", callback_data="ec:settings")])
     return InlineKeyboardMarkup(rows)
 
