@@ -52,14 +52,16 @@ _request_with_retry = _f.request_with_retry
 safe_json = _f.safe_json
 logger = _f.logger
 
+# Shared formatter: both crypto and gold reports use it. Keeping it at module
+# scope prevents NameError when analyze_crypto renders support/resistance.
 def fmt_p(v):
-    """فرمت امن قیمت؛ باید قبل از همه formatterهای تحلیل در دسترس باشد."""
     if v is None:
         return "—"
     try:
-        return f"{float(v):,.2f}"
-    except (TypeError, ValueError):
-        return str(v)
+        v = float(v)
+    except Exception:
+        return "—"
+    return f"{v:,.2f}" if abs(v) >= 1 else f"{v:,.4f}"
 
 if _format_fear_greed is None:
     def _format_fear_greed(data):
@@ -184,6 +186,7 @@ async def analyze_gold(timeframe: str = "4h") -> str:
 
     def f(x):
         return "—" if x is None else f"{float(x):,.2f}"
+
     lines=[
         "🥇 تحلیل حرفه‌ای طلا / XAUUSD", "━━━━━━━━━━━━━━━━━━━━",
         f"تایم‌فریم اصلی: {tf.upper()} | منبع تکنیکال: {selected_source}",
@@ -371,10 +374,14 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
         setup_score = min(setup_score, 5)
         exec_status = "صبر کنید ❌ — ADX روزانه ضعیف (بازار رنج)"
         risk_level = "متوسط 🟡"
-    # امتیاز MTF این تایم
+    # امتیاز MTF این تایم؛ فیلتر صبر باید بعد از دریافت امتیاز اعمال شود،
+    # وگرنه مثلاً امتیاز 9/10 دوباره جایگزین سقف 5/10 می‌شود.
     tf_key = "1H" if tf == "1h" else ("1D" if tf == "1d" else "4H")
-    if mtf.get("scores", {}).get(tf_key):
-        setup_score = mtf["scores"][tf_key]
+    mtf_setup_score = mtf.get("scores", {}).get(tf_key)
+    if mtf_setup_score is not None:
+        setup_score = float(mtf_setup_score)
+    if mtf.get("force_wait"):
+        setup_score = min(float(setup_score), 5.0)
 
     # امتیاز حرفه‌ای در خروجی نهایی محاسبه می‌شود؛ نوع سیگنال «خرید/فروش» حفظ می‌شود.
     if "لانگ" in signal:
@@ -383,21 +390,6 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
         signal_fa = f"فروش / شورت {signal_emoji}"
     else:
         signal_fa = f"{signal} {signal_emoji}"
-
-    def fmt_p(v):
-        if v is None:
-            return "—"
-        try:
-            v = float(v)
-        except Exception:
-            return "—"
-        if v >= 1000:
-            return f"{v:,.2f}"
-        if v >= 100:
-            return f"{v:,.2f}"
-        if v >= 1:
-            return f"{v:,.2f}"
-        return f"{v:,.4f}"
 
     # MFI تقریبی از حجم+قیمت برای متن جمع‌بندی
     mfi_note = ""
@@ -428,7 +420,7 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
         "",
         f"🧭 <b>روند:</b> {trend_arrow}",
         f"🎯 <b>سیگنال:</b> {signal_fa}",
-        f"⭐️ <b>کیفیت ستاپ:</b> {setup_score}.0/10",
+        f"⭐️ <b>کیفیت ستاپ:</b> {float(setup_score):.1f}/10",
         f"🔖 <b>وضعیت اجرا:</b> {exec_status}",
         "",
         "<b>📍 سطوح مهم</b>",
@@ -503,7 +495,13 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
         settle_signals(base, current)
     pro = _professional_score(ta, mtf, struct, {**(binance or {}), **(orderflow or {})}, fg, current, support, resistance, market)
     regime = (pro.get("regime") or {}).get("label") or _market_regime(ta, mtf, ta.get("vol_ratio"))
+    if mtf.get("force_wait"):
+        # ADX روزانه ضعیف، رژیم را برای نمایش به «رنج/احتیاط» تبدیل می‌کند
+        # تا با سیگنال خنثی و وضعیت اجرای Wait تناقض نداشته باشد.
+        regime = "رنج / نوسان کم (ADX روزانه ضعیف)"
     gate = pro.get("quality_gate") or {}
+    if mtf.get("force_wait"):
+        gate = {**gate, "label": "مجاز مشروط", "reasons": list(dict.fromkeys([*(gate.get("reasons") or []), "ADX روزانه ضعیف"]))}
     adaptive = pro.get("adaptive") or adaptive_profile(base, regime, signal or "default")
     alerts = alert_flags(current, support, resistance, ta, {**(binance or {}), **(orderflow or {})}, market)
     alerts = dedupe_alerts(alerts, key=f"{base}|{regime}")
@@ -688,7 +686,11 @@ def _build_smart_summary_pair(pair, trend, ta, support, resistance, signal, scor
         elif rsi <= 30:
             parts.append("RSI در ناحیه اشباع فروش است.")
     if adx is not None and adx >= 25:
-        parts.append("ADX قدرت روند را تأیید می‌کند.")
+        parts.append(f"ADX تایم‌فریم فعلی ({tf_label}) قدرت حرکت را نشان می‌دهد.")
+    elif adx is not None:
+        parts.append("ADX تایم‌فریم فعلی ضعیف است و روند قدرت کافی ندارد.")
+    if "ADX روزانه ضعیف" in (exec_status or ""):
+        parts.append("با وجود ADX تایم‌فریم فعلی، ADX روزانه ضعیف است؛ بنابراین فیلتر صبر فعال است.")
     if mfi_note:
         parts.append(mfi_note)
     if binance and binance.get("funding_rate") is not None:
