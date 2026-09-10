@@ -26,6 +26,15 @@ import re
 from datetime import datetime, timedelta
 
 
+def datetime_now_date(tz_name: str, add_days: int = 0) -> str:
+    """Return the user's calendar date in the selected timezone."""
+    try:
+        from bot.features.market.economic_calendar import _tz
+        return (datetime.now(_tz(tz_name)) + timedelta(days=add_days)).strftime("%Y-%m-%d")
+    except Exception:
+        return (datetime.now() + timedelta(days=add_days)).strftime("%Y-%m-%d")
+
+
 # جلوگیری از اجرای همزمان چند بروزرسانی برای یک کاربر
 _refresh_locks = {}
 
@@ -55,6 +64,22 @@ async def _safe_answer(query, text: str = None, show_alert: bool = False):
         logger.debug("%s: %s", __name__, _exc)
 
 
+def _set_ec_view(context, *, mode="today", impact="all", currency="", date_str=""):
+    context.user_data["ec_view"] = {
+        "mode": mode, "impact": impact, "currency": currency, "date_str": date_str,
+    }
+
+
+def _ec_view(context):
+    view = context.user_data.get("ec_view") or {}
+    return {
+        "mode": view.get("mode", "today"),
+        "impact": view.get("impact", "all"),
+        "currency": view.get("currency", ""),
+        "date_str": view.get("date_str", ""),
+    }
+
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     # نکته مهم: callback_query را فقط یک‌بار می‌توان answer کرد.
@@ -80,49 +105,194 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from bot.database import get_economic_calendar_preferences, set_economic_calendar_preferences
         try:
             if data == "ec:today":
+                _set_ec_view(context, mode="today", impact="all")
                 events, tz_name = await get_calendar_for_user(user_id, "today", "all")
                 await _safe_answer(query)
-                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events, selected_date=datetime.now(_tz(tz_name)).strftime("%Y-%m-%d")))
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", events=events, selected_date=datetime_now_date(tz_name)))
                 return
             if data == "ec:tomorrow":
+                _set_ec_view(context, mode="tomorrow", impact="all")
                 events, tz_name = await get_calendar_for_user(user_id, "tomorrow", "all")
-                selected = (datetime.now(_tz(tz_name)) + timedelta(days=1)).strftime("%Y-%m-%d")
                 await _safe_answer(query)
-                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی فردا", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events, selected_date=selected))
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی فردا", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="tomorrow", impact="all", events=events, selected_date=datetime_now_date(tz_name, 1)))
                 return
             if data == "ec:week":
+                _set_ec_view(context, mode="week", impact="all")
                 events, tz_name = await get_calendar_for_user(user_id, "week", "all")
                 await _safe_answer(query)
-                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی هفته", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events, selected_date=datetime.now(_tz(tz_name)).strftime("%Y-%m-%d")))
-                return
-            if data.startswith("ec:date:"):
-                date_str = data.split(":", 2)[2]
-                events, tz_name = await get_calendar_for_user(user_id, "date", "all", date_str=date_str)
-                await _safe_answer(query)
-                await query.edit_message_text(calendar_text(events, title=f"تقویم اقتصادی {date_str}", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events, selected_date=date_str))
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی هفته", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="week", impact="all", events=events, selected_date=datetime_now_date(tz_name)))
                 return
             if data == "ec:impact:high":
+                _set_ec_view(context, mode="today", impact="high")
                 events, tz_name = await get_calendar_for_user(user_id, "today", "high")
                 await _safe_answer(query, "فقط خبرهای مهم")
-                await query.edit_message_text(calendar_text(events, title="خبرهای مهم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events, selected_date=datetime.now(_tz(tz_name)).strftime("%Y-%m-%d")))
+                await query.edit_message_text(calendar_text(events, title="خبرهای مهم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="today", impact="high", events=events, selected_date=datetime_now_date(tz_name)))
                 return
             if data == "ec:impact:all":
+                _set_ec_view(context, mode="today", impact="all")
                 events, tz_name = await get_calendar_for_user(user_id, "today", "all")
-                await _safe_answer(query, "همه خبرهای امروز")
-                await query.edit_message_text(calendar_text(events, title="همه خبرهای اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events, selected_date=datetime.now(_tz(tz_name)).strftime("%Y-%m-%d")))
+                await _safe_answer(query)
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", events=events, selected_date=datetime_now_date(tz_name)))
+                return
+            if data.startswith("ec:cur:"):
+                cur = data.split(":", 2)[2].upper()
+                _set_ec_view(context, mode="today", impact="all", currency=cur)
+                events, tz_name = await get_calendar_for_user(user_id, "today", "all", cur)
+                await _safe_answer(query, f"فیلتر {cur}")
+                await query.edit_message_text(calendar_text(events, title=f"خبرهای {cur} امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", currency=cur, events=events, selected_date=datetime_now_date(tz_name)))
+                return
+            if data == "ec:noop":
+                await _safe_answer(query)
                 return
             if data == "ec:refresh":
                 await _safe_answer(query, "در حال بروزرسانی…")
                 await refresh_calendar(force=True)
                 events, tz_name = await get_calendar_for_user(user_id, "today", "all")
-                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز — بروزرسانی شد", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events, selected_date=datetime.now(_tz(tz_name)).strftime("%Y-%m-%d")))
+                await query.edit_message_text(
+                    calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name),
+                    parse_mode="HTML",
+                    reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", events=events, selected_date=datetime_now_date(tz_name)),
+                )
                 return
-            if data.startswith("ec:cur:"):
-                cur = data.split(":", 2)[2].upper()
-                events, tz_name = await get_calendar_for_user(user_id, "today", "all", cur)
-                await _safe_answer(query, f"فیلتر {cur}")
-                await query.edit_message_text(calendar_text(events, title=f"خبرهای {cur} امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events, selected_date=datetime.now(_tz(tz_name)).strftime("%Y-%m-%d")))
+            if data.startswith("ec:date:"):
+                selected_date = data.split(":", 2)[2]
+                events, tz_name = await get_calendar_for_user(user_id, "today", "all", date_str=selected_date)
+                await _safe_answer(query)
+                await query.edit_message_text(
+                    calendar_text(events, title=f"تقویم اقتصادی {selected_date}", tz_name=tz_name),
+                    parse_mode="HTML",
+                    reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", events=events, selected_date=selected_date),
+                )
                 return
+            if data.startswith("ec:page:"):
+                parts = data.split(":", 6)
+                if len(parts) != 7:
+                    await _safe_answer(query, "صفحه نامعتبر است.", show_alert=True)
+                    return
+                _, _, page_s, mode, selected_date, impact, currency = parts
+                page = max(0, int(page_s))
+                events, tz_name = await get_calendar_for_user(
+                    user_id, mode or "today", impact or "all", currency or "", selected_date or ""
+                )
+                if mode == "week":
+                    title = "تقویم اقتصادی هفته"
+                elif mode == "tomorrow":
+                    title = "تقویم اقتصادی فردا"
+                elif impact == "high":
+                    title = "خبرهای مهم اقتصادی امروز"
+                elif currency:
+                    title = f"خبرهای {currency} امروز"
+                else:
+                    title = "تقویم اقتصادی امروز"
+                await _safe_answer(query)
+                await query.edit_message_text(
+                    calendar_text(events, title=title, tz_name=tz_name),
+                    parse_mode="HTML",
+                    reply_markup=get_calendar_keyboard(
+                        user_id, mode=mode or "today", impact=impact or "all", currency=currency or "",
+                        events=events, selected_date=selected_date, page=page
+                    ),
+                )
+                return
+            if data == "ec:noop":
+                await _safe_answer(query)
+                return
+
+            if data.startswith("ec:page:"):
+                page = max(0, int(data.split(":", 2)[2]))
+                view = _ec_view(context)
+                events, tz_name = await get_calendar_for_user(
+                    user_id, view["mode"], view["impact"], view["currency"], view["date_str"]
+                )
+                await _safe_answer(query)
+                await query.edit_message_reply_markup(
+                    reply_markup=get_calendar_keyboard(user_id, events=events, selected_date=view["date_str"], page=page)
+                )
+                return
+
+            if data.startswith("ec:date:"):
+                date_str = data.split(":", 2)[2]
+                _set_ec_view(context, mode="date", impact="all", date_str=date_str)
+                events, tz_name = await get_calendar_for_user(user_id, "today", "all", date_str=date_str)
+                await _safe_answer(query)
+                await query.edit_message_text(
+                    calendar_text(events, title=f"تقویم اقتصادی {date_str}", tz_name=tz_name),
+                    parse_mode="HTML",
+                    reply_markup=get_calendar_keyboard(user_id, events=events, selected_date=date_str),
+                )
+                return
+
+            if data == "ec:refresh":
+                view = _ec_view(context)
+                await _safe_answer(query, "در حال بروزرسانی…")
+                await refresh_calendar(force=True)
+                events, tz_name = await get_calendar_for_user(
+                    user_id, view["mode"], view["impact"], view["currency"], view["date_str"]
+                )
+                await query.edit_message_text(
+                    calendar_text(events, title="تقویم اقتصادی امروز" if view["mode"] == "today" else "تقویم اقتصادی", tz_name=tz_name),
+                    parse_mode="HTML",
+                    reply_markup=get_calendar_keyboard(user_id, events=events, selected_date=view["date_str"]),
+                )
+                return
+
+            if data == "ec:noop":
+                await _safe_answer(query)
+                return
+
+            if data.startswith("ec:page:"):
+                # ec:page:<page>:<mode>:<date>:<impact>:<currency>
+                parts = data.split(":", 6)
+                if len(parts) < 6:
+                    await _safe_answer(query, "صفحه نامعتبر است.", show_alert=True)
+                    return
+                try:
+                    page = max(0, int(parts[2]))
+                except Exception:
+                    page = 0
+                mode = parts[3] or "today"
+                selected_date = parts[4] or ""
+                impact = parts[5] or "all"
+                currency = parts[6].upper() if len(parts) > 6 and parts[6] else ""
+                events, tz_name = await get_calendar_for_user(
+                    user_id, mode, impact, currency, selected_date
+                )
+                await _safe_answer(query)
+                await query.edit_message_reply_markup(
+                    reply_markup=get_calendar_keyboard(
+                        user_id, mode=mode, impact=impact, currency=currency,
+                        events=events, selected_date=selected_date, page=page
+                    )
+                )
+                return
+
+            if data.startswith("ec:date:"):
+                selected_date = data.split(":", 2)[2]
+                events, tz_name = await get_calendar_for_user(
+                    user_id, "today", "all", "", selected_date
+                )
+                await _safe_answer(query)
+                await query.edit_message_text(
+                    calendar_text(events, title=f"تقویم اقتصادی {selected_date}", tz_name=tz_name),
+                    parse_mode="HTML",
+                    reply_markup=get_calendar_keyboard(
+                        user_id, mode="today", impact="all", events=events,
+                        selected_date=selected_date, page=0
+                    ),
+                )
+                return
+
+            if data == "ec:refresh":
+                await _safe_answer(query, "در حال بروزرسانی…")
+                await refresh_calendar(force=True)
+                events, tz_name = await get_calendar_for_user(user_id, "today", "all")
+                await query.edit_message_text(
+                    calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name),
+                    parse_mode="HTML",
+                    reply_markup=get_calendar_keyboard(user_id, events=events, page=0),
+                )
+                return
+
             if data == "ec:settings":
                 await _safe_answer(query)
                 await query.edit_message_reply_markup(reply_markup=get_settings_keyboard(user_id))
@@ -169,6 +339,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_reply_markup(reply_markup=get_settings_keyboard(user_id))
                 return
             if data == "ec:ai":
+                _set_ec_view(context, mode="today", impact="all")
                 await _safe_answer(query, "در حال تحلیل هوشمند…")
                 events, tz_name = await get_calendar_for_user(user_id, "today", "all")
                 context_text = ai_context(events, tz_name, 35)
@@ -197,29 +368,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "<i>اثر احتمالی بر کریپتو، دلار، طلا، سهام و اوراق</i>\n\n"
                     f"<blockquote>{body}</blockquote>"
                 )
-                await query.message.reply_text(text, parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events))
+                await query.message.reply_text(text, parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", events=events, selected_date=datetime_now_date(tz_name)))
                 return
             if data.startswith("ec:event:"):
                 event_id = data.split(":", 2)[2]
+                events = await refresh_calendar()
                 p = get_economic_calendar_preferences(user_id)
                 tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
-                # جزئیات از merge زنده + تاریخچه می‌خواند تا Actual منتشرشده از بین نرود.
-                from bot.database import get_economic_calendar_event
-                row = get_economic_calendar_event(event_id)
-                e = None
-                if row:
-                    mod = __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt", "_tz"])
-                    parsed_utc = mod._parse_dt(row[1])
-                    if parsed_utc:
-                        local_date = parsed_utc.astimezone(mod._tz(tz_name)).strftime("%Y-%m-%d")
-                        events, _ = await get_calendar_for_user(user_id, "date", "all", date_str=local_date)
-                        e = get_event(events, event_id)
-                if not e:
-                    events = await refresh_calendar()
-                    e = get_event(events, event_id)
-                if not e and row:
-                    mod = __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt"])
-                    e = {"id": row[0], "utc": mod._parse_dt(row[1]), "country": row[2] or "", "currency_name": row[3] or row[2] or "نامشخص", "impact": row[4] or "", "title": row[5] or "رویداد اقتصادی", "title_fa": row[6] or row[5] or "رویداد اقتصادی", "actual": row[7] if row[7] is not None else "", "forecast": row[8] if row[8] is not None else "", "previous": row[9] if row[9] is not None else "", "source": row[10] or "Forex Factory"}
+                e = get_event(events, event_id)
                 if not e:
                     await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست.", show_alert=True)
                     return
@@ -228,24 +384,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             if data.startswith("ec:analyze:"):
                 event_id = data.split(":", 2)[2]
+                events = await refresh_calendar()
                 p = get_economic_calendar_preferences(user_id)
                 tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
-                from bot.database import get_economic_calendar_event
-                row = get_economic_calendar_event(event_id)
-                e = None
-                if row:
-                    mod = __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt", "_tz"])
-                    parsed_utc = mod._parse_dt(row[1])
-                    if parsed_utc:
-                        local_date = parsed_utc.astimezone(mod._tz(tz_name)).strftime("%Y-%m-%d")
-                        events, _ = await get_calendar_for_user(user_id, "date", "all", date_str=local_date)
-                        e = get_event(events, event_id)
-                if not e:
-                    events = await refresh_calendar()
-                    e = get_event(events, event_id)
-                if not e and row:
-                    mod = __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt"])
-                    e = {"id": row[0], "utc": mod._parse_dt(row[1]), "country": row[2] or "", "currency_name": row[3] or row[2] or "نامشخص", "impact": row[4] or "", "title": row[5] or "رویداد اقتصادی", "title_fa": row[6] or row[5] or "رویداد اقتصادی", "actual": row[7] if row[7] is not None else "", "forecast": row[8] if row[8] is not None else "", "previous": row[9] if row[9] is not None else "", "source": row[10] or "Forex Factory"}
+                e = get_event(events, event_id)
                 if not e:
                     await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست.", show_alert=True)
                     return
@@ -274,9 +416,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.message.reply_text(text, parse_mode="HTML", reply_markup=get_event_keyboard(event_id))
                 return
             if data == "ec:back":
+                _set_ec_view(context, mode="today", impact="all")
                 events, tz_name = await get_calendar_for_user(user_id, "today", "all")
                 await _safe_answer(query)
-                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events))
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", events=events, selected_date=datetime_now_date(tz_name)))
                 return
         except Exception as e:
             logger.error("economic calendar callback failed: %s", e, exc_info=True)
