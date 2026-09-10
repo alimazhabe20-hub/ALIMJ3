@@ -28,7 +28,7 @@ FF_FALLBACK_URLS = (
     "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
     "https://cdn-nfs.faireconomy.media/ff_calendar_nextweek.json",
 )
-CACHE_TTL = 10 * 60
+CACHE_TTL = 5 * 60
 _MAX_EVENTS = 600
 
 _cache: list[dict[str, Any]] = []
@@ -299,10 +299,18 @@ BIQUOTE_URL = "https://biquote.io/api/calendar"
 def _to_str_num(value: Any) -> str:
     if value is None or value == "":
         return ""
-    if isinstance(value, float):
-        if value != value:  # NaN
-            return ""
-        s = f"{value:.6f}".rstrip("0").rstrip(".")
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, (int, float)):
+        try:
+            if value != value:  # NaN
+                return ""
+        except Exception:
+            pass
+        # integers that are whole
+        if float(value) == int(value) and abs(value) >= 100:
+            return str(int(value))
+        s = f"{float(value):.6f}".rstrip("0").rstrip(".")
         return s
     return str(value).strip()
 
@@ -487,46 +495,67 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
         if _cache and now < _cache_expires and not force:
             return list(_cache)
 
-        all_rows: list[dict[str, Any]] = []
         errors: list[str] = []
+        normalized: list[dict[str, Any]] = []
 
-        # 1) Forex Factory JSON (primary when available)
+        # 1) PRIMARY: biquote — includes published Actual values
+        try:
+            normalized = await asyncio.to_thread(_load_biquote_events, 1, 8)
+            if normalized:
+                logger.info("economic calendar primary source=biquote events=%s", len(normalized))
+        except Exception as exc:
+            errors.append(f"biquote:{exc}")
+            logger.warning("economic calendar biquote primary failed: %s", exc)
+
+        # 2) SECONDARY: Forex Factory schedule (titles/impact) merged on top when biquote thin
+        ff_rows: list[dict[str, Any]] = []
         for i, url in enumerate(FF_URLS):
             try:
                 rows = await asyncio.to_thread(_fetch_json, url)
-                all_rows.extend(rows)
+                ff_rows.extend(rows)
             except Exception as exc:
                 errors.append(f"ff:{exc}")
                 try:
                     rows = await asyncio.to_thread(_fetch_json, FF_FALLBACK_URLS[i])
-                    all_rows.extend(rows)
+                    ff_rows.extend(rows)
                 except Exception as exc2:
                     errors.append(f"ff-fallback:{exc2}")
 
-        normalized = [e for e in (_normalize(x) for x in all_rows) if e]
-        dedup = {e["id"]: e for e in normalized}
-        normalized = sorted(dedup.values(), key=lambda e: e["utc"])[:_MAX_EVENTS]
+        ff_norm = [e for e in (_normalize(x) for x in ff_rows) if e]
+        if ff_norm:
+            if not normalized:
+                normalized = ff_norm
+                logger.warning("economic calendar using FF only (%s events)", len(normalized))
+            else:
+                # Merge: keep biquote values; add FF-only events; upgrade impact/title from FF when matched
+                by_id = {e["id"]: e for e in normalized}
+                for fe in ff_norm:
+                    if fe["id"] in by_id:
+                        be = by_id[fe["id"]]
+                        # Prefer non-empty numeric fields from either side
+                        for field in ("actual", "forecast", "previous"):
+                            if not str(be.get(field) or "").strip() and str(fe.get(field) or "").strip():
+                                be[field] = fe[field]
+                        # FF impact labels are often cleaner
+                        if fe.get("impact"):
+                            be["impact"] = fe["impact"]
+                        if fe.get("title") and len(fe["title"]) >= len(be.get("title") or ""):
+                            be["title"] = fe["title"]
+                            be["title_fa"] = fe.get("title_fa") or _fa_title(fe["title"])
+                    else:
+                        by_id[fe["id"]] = fe
+                normalized = sorted(by_id.values(), key=lambda e: e["utc"])[:_MAX_EVENTS]
 
-        # 2) Enrich actual/forecast/previous
+        # 3) Extra enrichment pass: fill remaining blank actuals from a fresh biquote pull
         if normalized:
-            try:
-                await asyncio.to_thread(_refresh_ff_html_values, normalized)
-            except Exception as exc:
-                logger.debug("economic calendar HTML enrichment failed: %s", exc)
             try:
                 await asyncio.to_thread(_refresh_biquote_values, normalized)
             except Exception as exc:
                 logger.debug("economic calendar biquote enrichment failed: %s", exc)
-
-        # 3) If FF is empty/blocked, load full week from biquote as primary source
-        if not normalized:
             try:
-                normalized = await asyncio.to_thread(_load_biquote_events, 1, 8)
-                if normalized:
-                    logger.warning("economic calendar using biquote primary source (%s events)", len(normalized))
+                await asyncio.to_thread(_refresh_ff_html_values, normalized)
             except Exception as exc:
-                errors.append(f"biquote-primary:{exc}")
-                logger.warning("economic calendar biquote primary failed: %s", exc)
+                logger.debug("economic calendar HTML enrichment failed: %s", exc)
 
         if normalized:
             _cache = normalized
@@ -536,7 +565,6 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
                 logger.warning("economic calendar partial refresh: %s", " | ".join(errors[:4]))
             return list(_cache)
 
-        # 4) Last resort: stale cache
         if _cache:
             logger.warning("economic calendar refresh failed; using stale cache: %s", " | ".join(errors[:4]))
             return list(_cache)
@@ -583,8 +611,13 @@ def filter_events(events, *, days: int = 1, currency: str = "", impact: str = ""
     return out
 
 
-def format_value(value: Any) -> str:
-    return str(value).strip() if value not in (None, "") else "—"
+def format_value(value: Any, *, empty: str = "در انتظار انتشار") -> str:
+    if value is None:
+        return empty
+    s = str(value).strip()
+    if not s or s in {"None", "null", "—", "-"}:
+        return empty
+    return s
 
 
 def _esc(value: Any) -> str:
@@ -601,15 +634,19 @@ def format_event(e: dict[str, Any], tz_name: str = "") -> str:
     title_fa = _esc(e["title_fa"])
     title_en = _esc(e["title"])
     now = datetime.now(_tz(tz_name))
-    past_mark = " ✅" if local < now else ""
+    past = local < now
+    past_mark = " ✅" if past else ""
+    actual_empty = "منتشر نشده" if past else "در انتظار انتشار"
+    other_empty = "—"
     return (
         f"{icon} <b>{local.strftime('%H:%M')} | {_esc(e['country'])} | {title_fa}</b>{past_mark}\n"
         f"   <i>{title_en}</i>\n"
         f"   🚦 <b>اهمیت:</b> {_esc(_impact_label(e))}"
-        f"  •  📢 <b>واقعی:</b> {_esc(format_value(e['actual']))}"
-        f"  •  🔮 <b>پیش‌بینی:</b> {_esc(format_value(e['forecast']))}"
-        f"  •  ◀️ <b>قبلی:</b> {_esc(format_value(e['previous']))}"
+        f"  •  📢 <b>واقعی:</b> {_esc(format_value(e.get('actual'), empty=actual_empty))}"
+        f"  •  🔮 <b>پیش‌بینی:</b> {_esc(format_value(e.get('forecast'), empty=other_empty))}"
+        f"  •  ◀️ <b>قبلی:</b> {_esc(format_value(e.get('previous'), empty=other_empty))}"
     )
+
 
 
 def calendar_text(events, *, title: str, tz_name: str = "", limit: int = 25) -> str:
@@ -639,7 +676,7 @@ def calendar_text(events, *, title: str, tz_name: str = "", limit: int = 25) -> 
         lines += [f"… <i>{remaining} رویداد دیگر هم وجود دارد.</i>", ""]
     lines += [
         "<b>راهنمای اهمیت:</b> 🔴 زیاد  🟠 متوسط  🟡 کم",
-        "ℹ️ <i>مقادیر واقعی پس از انتشار از چند منبع تکمیل می‌شوند؛ اگر هنوز خالی است یعنی هنوز در منبع رسمی ثبت نشده.</i>",
+        "ℹ️ <i>مقادیر واقعی از منبع داده‌محور خوانده می‌شوند. اگر «در انتظار انتشار» دیدید یعنی هنوز عدد رسمی ثبت نشده.</i>",
     ]
     return "\n".join(lines)
 
@@ -689,8 +726,10 @@ def event_detail(e: dict[str, Any], tz_name: str = "") -> str:
     if delta.total_seconds() > 0:
         mins = int(delta.total_seconds() // 60)
         countdown = f"حدود {mins // 60} ساعت و {mins % 60} دقیقه دیگر"
+        actual_empty = "در انتظار انتشار"
     else:
         countdown = "زمان رویداد گذشته است"
+        actual_empty = "منتشر نشده"
     return (
         f"{IMPACT_ICON.get(e['impact'], '⚪')} <b>{_esc(e['title_fa'])}</b>\n"
         f"<i>{_esc(e['title'])}</i>\n"
@@ -700,11 +739,12 @@ def event_detail(e: dict[str, Any], tz_name: str = "") -> str:
         f"⏰ <b>ساعت:</b> <code>{local.strftime('%H:%M')}</code>\n"
         f"🚦 <b>اهمیت:</b> {_esc(_impact_label(e))}\n"
         f"⏳ <b>وضعیت:</b> {_esc(countdown)}\n\n"
-        f"📢 <b>واقعی:</b> {_esc(format_value(e['actual']))}\n"
-        f"🔮 <b>پیش‌بینی:</b> {_esc(format_value(e['forecast']))}\n"
-        f"◀️ <b>قبلی:</b> {_esc(format_value(e['previous']))}\n\n"
+        f"📢 <b>واقعی:</b> {_esc(format_value(e.get('actual'), empty=actual_empty))}\n"
+        f"🔮 <b>پیش‌بینی:</b> {_esc(format_value(e.get('forecast'), empty='—'))}\n"
+        f"◀️ <b>قبلی:</b> {_esc(format_value(e.get('previous'), empty='—'))}\n\n"
         "⚠️ <i>این داده برای تصمیم‌گیری مالی قطعی نیست.</i>"
     )
+
 
 
 def get_status() -> str:
