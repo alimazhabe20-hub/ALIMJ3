@@ -354,21 +354,60 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "و «در صورت تداوم» بیان کن؛ هرگز آن را تضمین یا سیگنال قطعی معامله معرفی نکن. Previous را هم برای تشخیص "
                     "بهبود/بدترشدن روند در نظر بگیر. در پایان، «سناریوی پایه»، «سناریوی صعودی برای ریسک‌پذیری»، "
                     "«سناریوی نزولی برای ریسک‌پذیری» و «مهم‌ترین ریسک/ابهام» را کوتاه جمع‌بندی کن. اگر داده‌ای برای مقایسه وجود ندارد، "
-                    "صریحاً بگو «داده کافی برای مقایسه وجود ندارد». پاسخ را بدون Markdown و بدون جدول بده تا قالب‌بندی تلگرام را ربات انجام دهد.\n\n"
+                    "صریحاً بگو «داده کافی برای مقایسه وجود ندارد». پاسخ را بدون Markdown و بدون جدول بده. "
+                    "پاسخ باید کامل باشد و هیچ جمله یا تیتر ناتمام نماند.\n\n"
                     "داده تقویم:\n" + context_text[:6500]
                 )
                 answer, _ = await ask_ai(user_id, prompt)
                 from html import escape
-                body = escape((answer or "تحلیل در دسترس نیست.").strip(), quote=False)
-                if len(body) > 3700:
-                    body = body[:3690] + "…"
+
+                def _split_ai_text(txt: str, limit: int = 3600):
+                    txt = (txt or "").strip()
+                    if not txt:
+                        return ["تحلیل در دسترس نیست."]
+                    parts, buf, size = [], [], 0
+                    for line in txt.splitlines() or [txt]:
+                        piece = line.strip()
+                        add = len(piece) + (1 if buf else 0)
+                        if buf and size + add > limit:
+                            parts.append("\n".join(buf).strip())
+                            buf, size = [], 0
+                        if len(piece) > limit:
+                            if buf:
+                                parts.append("\n".join(buf).strip())
+                                buf, size = [], 0
+                            while len(piece) > limit:
+                                parts.append(piece[:limit])
+                                piece = piece[limit:]
+                            if piece:
+                                buf, size = [piece], len(piece)
+                        elif piece:
+                            buf.append(piece)
+                            size += add
+                    if buf:
+                        parts.append("\n".join(buf).strip())
+                    return parts or ["تحلیل در دسترس نیست."]
+
+                chunks = _split_ai_text(answer, 3600)
+                first = escape(chunks[0], quote=False)
                 text = (
                     "🤖 <b>تحلیل هوشمند تقویم اقتصادی</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
                     "<i>اثر احتمالی بر کریپتو، دلار، طلا، سهام و اوراق</i>\n\n"
-                    f"<blockquote>{body}</blockquote>"
+                    f"<blockquote>{first}</blockquote>"
                 )
-                await query.message.reply_text(text, parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", events=events, selected_date=datetime_now_date(tz_name)))
+                await query.message.reply_text(
+                    text,
+                    parse_mode="HTML",
+                    reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", events=events),
+                )
+                for idx, chunk in enumerate(chunks[1:], start=2):
+                    continuation = (
+                        f"🤖 <b>ادامه تحلیل هوشمند ({idx}/{len(chunks)})</b>\n"
+                        "━━━━━━━━━━━━━━━━━━━━\n"
+                        f"<blockquote>{escape(chunk, quote=False)}</blockquote>"
+                    )
+                    await query.message.reply_text(continuation, parse_mode="HTML")
                 return
             if data.startswith("ec:event:"):
                 event_id = data.split(":", 2)[2]
