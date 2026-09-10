@@ -493,10 +493,19 @@ def _merge_biquote_values(events: list[dict[str, Any]], rows: list[dict[str, Any
             if str(event.get("country") or "").upper().strip() != r_currency:
                 continue
             e_utc = event.get("utc")
-            if not isinstance(e_utc, datetime) or e_utc.date() != r_utc.date():
+            if not isinstance(e_utc, datetime):
+                continue
+            # Providers can publish the same event in different timezone
+            # conventions. Compare the calendar day in the provider's
+            # presentation timezone as well as UTC; this is important around
+            # midnight (e.g. UK/GBP releases). Exact-title matches are allowed
+            # a wider time window; fuzzy matches remain tight to avoid false
+            # joins between similarly named indicators.
+            local_day_match = e_utc.astimezone(HISTORICAL_TZ).date() == r_utc.astimezone(HISTORICAL_TZ).date()
+            if not local_day_match and e_utc.date() != r_utc.date():
                 continue
             diff = abs((e_utc - r_utc).total_seconds())
-            if diff > 30 * 60:
+            if diff > 6 * 3600:
                 continue
             e_title = _normalize_title(event.get("title"))
             if not e_title:
@@ -506,6 +515,10 @@ def _merge_biquote_values(events: list[dict[str, Any]], rows: list[dict[str, Any
             overlap = len(rt & et) / max(1, len(rt | et))
             title_ok = ratio >= 0.90 or (ratio >= 0.82 and overlap >= 0.70)
             if not title_ok:
+                continue
+            # Exact titles are strong identifiers; allow the broader time
+            # window only for them. Fuzzy titles stay within 30 minutes.
+            if ratio < 0.90 and diff > 30 * 60:
                 continue
             corroboration = 0
             for field in ("forecast", "previous"):
@@ -550,10 +563,16 @@ def _merge_historical_values(events: list[dict[str, Any]], rows: list[dict[str, 
             if str(event.get("country") or "").strip().upper() != r_currency:
                 continue
             e_utc = event.get("utc")
-            if not isinstance(e_utc, datetime) or e_utc.date() != r_utc.date():
+            if not isinstance(e_utc, datetime):
+                continue
+            # Match the day in Europe/London first because that is the timezone
+            # used by Forex Factory's HTML. UTC-day equality alone breaks for
+            # releases around midnight.
+            local_day_match = e_utc.astimezone(HISTORICAL_TZ).date() == r_utc.astimezone(HISTORICAL_TZ).date()
+            if not local_day_match and e_utc.date() != r_utc.date():
                 continue
             diff = abs((e_utc - r_utc).total_seconds())
-            if diff > 45 * 60:
+            if diff > 6 * 3600:
                 continue
             e_title = _normalize_title(event.get("title"))
             if not e_title:
@@ -565,15 +584,26 @@ def _merge_historical_values(events: list[dict[str, Any]], rows: list[dict[str, 
             # substantial token overlap as well as a high sequence score.
             if not (ratio >= 0.88 or (ratio >= 0.78 and overlap >= 0.65)):
                 continue
-            score = ratio * 0.85 + overlap * 0.15 - min(diff / 3600, 0.75) * 0.03
+            # Exact/near-exact FF titles can tolerate source timestamp drift;
+            # looser matches are kept tight to prevent cross-event enrichment.
+            if ratio < 0.94 and diff > 45 * 60:
+                continue
+            score = ratio * 0.85 + overlap * 0.15 - min(diff / 21600, 1.0) * 0.03
             candidates.append((score, event))
         if not candidates:
             continue
         _, event = max(candidates, key=lambda x: x[0])
         for field in ("actual", "forecast", "previous"):
             value = str(row.get(field) or "").strip()
-            if value and not str(event.get(field) or "").strip():
-                event[field] = value
+            if not value:
+                continue
+            current = str(event.get(field) or "").strip()
+            # FF HTML is the same source family as the event feed and is the
+            # authoritative published value. It may also contain revisions
+            # (especially Previous), so a non-empty HTML value intentionally
+            # replaces a stale JSON/Biquote value.
+            if current != value:
+                event[field] = row.get(field)
                 if field == "actual":
                     merged += 1
     return merged
@@ -741,6 +771,18 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
                     _merge_historical_values(normalized, html_rows)
                 else:
                     normalized = _html_rows_to_events(html_rows)
+
+                # HTML reconciliation can move an event timestamp to FF's
+                # canonical timezone. Run the Biquote matcher once more after
+                # that reconciliation so exact-title releases near midnight
+                # can still receive their published Actual/Previous values.
+                if biquote_rows and normalized:
+                    merged_bq_after_html = _merge_biquote_values(normalized, biquote_rows)
+                    if merged_bq_after_html:
+                        logger.info(
+                            "economic calendar: merged %d additional Actual value(s) from Biquote after FF reconciliation",
+                            merged_bq_after_html,
+                        )
         except Exception as exc:
             logger.debug("economic calendar HTML source failed: %s", exc)
 
