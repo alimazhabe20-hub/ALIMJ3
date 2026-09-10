@@ -201,25 +201,33 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             if data.startswith("ec:event:"):
                 event_id = data.split(":", 2)[2]
-                events = await refresh_calendar()
                 p = get_economic_calendar_preferences(user_id)
                 tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
-                # رویدادهای گذشته از تاریخچه DB هم قابل باز شدن هستند.
-                e = get_event(events, event_id)
+                # جزئیات باید از همان mergeِ live + historical استفاده کند؛
+                # refresh مستقیم فقط cache زنده را می‌داد و Actual تاریخی ممکن بود گم شود.
+                from bot.database import get_economic_calendar_event
+                row = get_economic_calendar_event(event_id)
+                e = None
+                if row:
+                    parsed_utc = __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt"])._parse_dt(row[1])
+                    if parsed_utc:
+                        local_date = parsed_utc.astimezone(__import__("bot.features.market.economic_calendar", fromlist=["_tz"])._tz(tz_name)).strftime("%Y-%m-%d")
+                        events, _ = await get_calendar_for_user(user_id, "date", "all", date_str=local_date)
+                        e = get_event(events, event_id)
                 if not e:
-                    from bot.database import get_economic_calendar_event
-                    row = get_economic_calendar_event(event_id)
-                    if row:
-                        e = {
-                            "id": row[0], "utc": __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt"])._parse_dt(row[1]),
-                            "country": row[2] or "", "currency_name": row[3] or row[2] or "نامشخص",
-                            "impact": row[4] or "", "title": row[5] or "رویداد اقتصادی",
-                            "title_fa": row[6] or row[5] or "رویداد اقتصادی",
-                            "actual": row[7] if row[7] is not None else "",
-                            "forecast": row[8] if row[8] is not None else "",
-                            "previous": row[9] if row[9] is not None else "",
-                            "source": row[10] or "Forex Factory",
-                        }
+                    events = await refresh_calendar()
+                    e = get_event(events, event_id)
+                if not e and row:
+                    e = {
+                        "id": row[0], "utc": __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt"])._parse_dt(row[1]),
+                        "country": row[2] or "", "currency_name": row[3] or row[2] or "نامشخص",
+                        "impact": row[4] or "", "title": row[5] or "رویداد اقتصادی",
+                        "title_fa": row[6] or row[5] or "رویداد اقتصادی",
+                        "actual": row[7] if row[7] is not None else "",
+                        "forecast": row[8] if row[8] is not None else "",
+                        "previous": row[9] if row[9] is not None else "",
+                        "source": row[10] or "Forex Factory",
+                    }
                 if not e:
                     await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست.", show_alert=True)
                     return
@@ -228,25 +236,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             if data.startswith("ec:analyze:"):
                 event_id = data.split(":", 2)[2]
-                events = await refresh_calendar()
                 p = get_economic_calendar_preferences(user_id)
                 tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
-                # رویدادهای گذشته از تاریخچه DB هم قابل باز شدن هستند.
-                e = get_event(events, event_id)
+                from bot.database import get_economic_calendar_event
+                row = get_economic_calendar_event(event_id)
+                e = None
+                if row:
+                    parsed_utc = __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt"])._parse_dt(row[1])
+                    if parsed_utc:
+                        local_date = parsed_utc.astimezone(__import__("bot.features.market.economic_calendar", fromlist=["_tz"])._tz(tz_name)).strftime("%Y-%m-%d")
+                        events, _ = await get_calendar_for_user(user_id, "date", "all", date_str=local_date)
+                        e = get_event(events, event_id)
                 if not e:
-                    from bot.database import get_economic_calendar_event
-                    row = get_economic_calendar_event(event_id)
-                    if row:
-                        e = {
-                            "id": row[0], "utc": __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt"])._parse_dt(row[1]),
-                            "country": row[2] or "", "currency_name": row[3] or row[2] or "نامشخص",
-                            "impact": row[4] or "", "title": row[5] or "رویداد اقتصادی",
-                            "title_fa": row[6] or row[5] or "رویداد اقتصادی",
-                            "actual": row[7] if row[7] is not None else "",
-                            "forecast": row[8] if row[8] is not None else "",
-                            "previous": row[9] if row[9] is not None else "",
-                            "source": row[10] or "Forex Factory",
-                        }
+                    events = await refresh_calendar()
+                    e = get_event(events, event_id)
+                if not e and row:
+                    e = {
+                        "id": row[0], "utc": __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt"])._parse_dt(row[1]),
+                        "country": row[2] or "", "currency_name": row[3] or row[2] or "نامشخص",
+                        "impact": row[4] or "", "title": row[5] or "رویداد اقتصادی",
+                        "title_fa": row[6] or row[5] or "رویداد اقتصادی",
+                        "actual": row[7] if row[7] is not None else "",
+                        "forecast": row[8] if row[8] is not None else "",
+                        "previous": row[9] if row[9] is not None else "",
+                        "source": row[10] or "Forex Factory",
+                    }
                 if not e:
                     await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست.", show_alert=True)
                     return
