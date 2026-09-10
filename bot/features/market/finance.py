@@ -707,6 +707,18 @@ def _demand_supply_zone(*args, **kwargs):
     from bot.features.market.finance_ta import _demand_supply_zone as _fn
     return _fn(*args, **kwargs)
 
+def _advanced_levels(*args, **kwargs):
+    from bot.features.market.finance_ta import _advanced_levels as _fn
+    return _fn(*args, **kwargs)
+
+def _market_regime(*args, **kwargs):
+    from bot.features.market.finance_ta import _market_regime as _fn
+    return _fn(*args, **kwargs)
+
+def _professional_score(*args, **kwargs):
+    from bot.features.market.finance_ta import _professional_score as _fn
+    return _fn(*args, **kwargs)
+
 def _mtf_convergence(*args, **kwargs):
     from bot.features.market.finance_ta import _mtf_convergence as _fn
     return _fn(*args, **kwargs)

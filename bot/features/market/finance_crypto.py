@@ -31,6 +31,9 @@ _rsi_divergence = _f._rsi_divergence
 _volume_breakout = _f._volume_breakout
 _demand_supply_zone = _f._demand_supply_zone
 _mtf_convergence = _f._mtf_convergence
+_advanced_levels = _f._advanced_levels
+_market_regime = _f._market_regime
+_professional_score = _f._professional_score
 _fetch_fundamentals = _f._fetch_fundamentals
 _build_smart_summary = _f._build_smart_summary
 _default_guide = _f._default_guide
@@ -199,6 +202,13 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
         ta["patterns"] = _detect_candle_patterns(opens, highs, lows, closes)
     support, resistance = _support_resistance(closes, highs, lows, current)
 
+    # سطوح حرفه‌ایِ خوشه‌ای؛ fallback به الگوریتم قدیمی اگر داده کم باشد
+    levels = _advanced_levels(closes, highs, lows, current) if len(closes) >= 35 else {}
+    if levels.get("supports"):
+        support = levels["supports"][0]["price"]
+    if levels.get("resistances"):
+        resistance = levels["resistances"][0]["price"]
+
     # MTF موازی
     mtf = await _mtf_bundle(pair)
     # فیلتر ADX روزانه
@@ -231,10 +241,11 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
     if mtf.get("scores", {}).get(tf_key):
         setup_score = mtf["scores"][tf_key]
 
+    # امتیاز حرفه‌ای در خروجی نهایی محاسبه می‌شود؛ نوع سیگنال «خرید/فروش» حفظ می‌شود.
     if "لانگ" in signal:
-        signal_fa = f"لانگ {signal_emoji}"
+        signal_fa = f"خرید / لانگ {signal_emoji}"
     elif "شورت" in signal:
-        signal_fa = f"شورت {signal_emoji}"
+        signal_fa = f"فروش / شورت {signal_emoji}"
     else:
         signal_fa = f"{signal} {signal_emoji}"
 
@@ -312,8 +323,20 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
 
     # ساختار بازار
     struct = _market_structure(highs, lows, closes) if len(closes) >= 20 else {}
+    pro = _professional_score(ta, mtf, struct, binance or {}, fg, current, support, resistance)
+    regime = _market_regime(ta, mtf, ta.get("vol_ratio"))
     lines.append("")
-    lines.append("▎3. 📊 ساختار و حجم")
+    lines.append("▎3. 🧠 امتیاز حرفه‌ای و وضعیت بازار")
+    score_em = "🟢" if pro["score"] >= 60 else ("🔴" if pro["score"] <= 40 else "🟡")
+    conf_em = "🟢" if pro["confidence"] >= 75 else ("🟡" if pro["confidence"] >= 55 else "🔴")
+    lines.append(f"🎯 امتیاز جهت‌گیری: {pro['score']}/100 {score_em} | اطمینان داده: {pro['confidence']}% {conf_em}")
+    lines.append(f"🌐 رژیم بازار: {regime}")
+    if levels.get("supports"):
+        lines.append("🛡 حمایت‌ها: " + " | ".join(f"{x['price']:,.2f} ({x['strength']}/100)" for x in levels['supports'][:3]))
+    if levels.get("resistances"):
+        lines.append("🧱 مقاومت‌ها: " + " | ".join(f"{x['price']:,.2f} ({x['strength']}/100)" for x in levels['resistances'][:3]))
+    lines.append("")
+    lines.append("▎4. 📊 ساختار و حجم")
     if struct:
         lines.append(f"ساختار: {struct.get('structure', '—')}")
         if struct.get("bos"):
@@ -336,7 +359,7 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
     pats = list(dict.fromkeys(pats))
     if pats:
         lines.append("")
-        lines.append("▎4. 🕯 الگوهای کندلی")
+        lines.append("▎5. 🕯 الگوهای کندلی")
         for p in pats[:4]:
             lines.append(f"• {p}")
 
@@ -346,7 +369,7 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
 
     # سناریوها
     lines.append("")
-    lines.append("▎5. 🎲 سناریوها")
+    lines.append("▎6. 🎲 سناریوها")
     for scn in _scenarios(signal, support, resistance, current, atr_v):
         lines.append(f"• {scn}")
 
@@ -355,7 +378,7 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
     ls_lines = _format_long_short(binance or {})
     if ls_lines:
         lines.append("")
-        lines.append("▎6. 📊 نسبت لانگ / شورت")
+        lines.append("▎7. 📊 نسبت لانگ / شورت")
         lines.extend(ls_lines)
     lines.append(_signal_track_stub())
 

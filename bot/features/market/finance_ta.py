@@ -403,3 +403,105 @@ def _mtf_convergence(mtf: dict) -> tuple:
     return "همگرایی ضعیف / رنج", max(1, int(avg - 1))
 
 
+
+
+def _advanced_levels(closes, highs, lows, current=None, max_levels=3):
+    """Clustered support/resistance zones with strength scoring."""
+    if not closes or not highs or not lows:
+        return {"supports": [], "resistances": []}
+    price = float(current if current is not None else closes[-1])
+    atr = _atr(highs, lows, closes, 14) or (price * 0.01)
+    tol = max(atr * 0.45, price * 0.0025)
+    pivots = []
+    for i in range(2, len(closes) - 2):
+        if highs[i] >= max(highs[i-2:i+3]):
+            pivots.append((float(highs[i]), "R", i))
+        if lows[i] <= min(lows[i-2:i+3]):
+            pivots.append((float(lows[i]), "S", i))
+    def cluster(kind):
+        vals = sorted([(p, i) for p, k, i in pivots if k == kind], key=lambda x: x[0])
+        groups = []
+        for p, idx in vals:
+            if not groups or abs(p - groups[-1]["center"]) > tol:
+                groups.append({"prices": [p], "idx": [idx], "center": p})
+            else:
+                groups[-1]["prices"].append(p); groups[-1]["idx"].append(idx)
+                groups[-1]["center"] = sum(groups[-1]["prices"]) / len(groups[-1]["prices"])
+        out = []
+        for g in groups:
+            center = g["center"]
+            touches = len(g["prices"])
+            recency = max(g["idx"] or [0]) / max(1, len(closes)-1)
+            strength = min(100, 35 + touches * 12 + recency * 25)
+            out.append({"price": center, "low": min(g["prices"]), "high": max(g["prices"]), "touches": touches, "strength": round(strength)})
+        return out
+    supports = [x for x in cluster("S") if x["price"] < price * 0.999]
+    resistances = [x for x in cluster("R") if x["price"] > price * 1.001]
+    supports.sort(key=lambda x: (abs(price-x["price"]), -x["strength"]))
+    resistances.sort(key=lambda x: (abs(price-x["price"]), -x["strength"]))
+    return {"supports": supports[:max_levels], "resistances": resistances[:max_levels], "atr": atr}
+
+
+def _market_regime(ta, mtf=None, vol_ratio=None):
+    """Rule-based regime; deterministic and safe when data is partial."""
+    adx = float(ta.get("adx") or 0)
+    trend = ta.get("trend") or "خنثی"
+    vr = float(vol_ratio if vol_ratio is not None else ta.get("vol_ratio") or 1)
+    if adx >= 30 and trend == "صعودی": return "روند صعودی قوی"
+    if adx >= 30 and trend == "نزولی": return "روند نزولی قوی"
+    if vr >= 1.8 and adx >= 25: return "نوسان/شوک بالا"
+    if adx < 18: return "رنج / کم‌قدرت"
+    if trend == "صعودی": return "صعودی در حال شکل‌گیری"
+    if trend == "نزولی": return "نزولی در حال شکل‌گیری"
+    return "تراکم / انتقالی"
+
+
+def _professional_score(ta, mtf=None, structure=None, binance=None, fg=None, current=None, support=None, resistance=None):
+    """0-100 composite score while preserving explicit LONG/SHORT signals."""
+    mtf = mtf or {}; structure = structure or {}; binance = binance or {}
+    bull = bear = 0.0; components = 0; available = 0
+    trend = ta.get("trend")
+    if trend in ("صعودی", "نزولی"):
+        components += 25; available += 25
+        bull += 25 if trend == "صعودی" else 0; bear += 25 if trend == "نزولی" else 0
+    rsi = ta.get("rsi")
+    if rsi is not None:
+        available += 15
+        if 50 <= rsi <= 68: bull += 15
+        elif 32 <= rsi < 50: bear += 15
+        elif rsi < 30: bull += 8
+        elif rsi > 70: bear += 8
+        components += 15
+    adx = float(ta.get("adx") or 0)
+    if adx:
+        available += 10; components += 10
+        if adx >= 25:
+            if trend == "صعودی": bull += 10
+            elif trend == "نزولی": bear += 10
+    vr = float(ta.get("vol_ratio") or 1)
+    available += 10; components += 10
+    if vr >= 1.2:
+        if trend == "صعودی": bull += 10
+        elif trend == "نزولی": bear += 10
+    dirs = mtf.get("dirs") or {}
+    vals = [v for v in dirs.values() if v in ("صعودی", "نزولی")]
+    if vals:
+        available += 20; components += 20
+        bull += 20 * vals.count("صعودی") / len(vals); bear += 20 * vals.count("نزولی") / len(vals)
+    fr = binance.get("funding_rate")
+    if fr is not None:
+        available += 10; components += 10
+        if fr < 0: bull += 5
+        elif fr > 0: bear += 5
+        if abs(fr) <= 0.03: bull += 2.5; bear += 2.5
+    if structure.get("structure"):
+        available += 10; components += 10
+        st = structure.get("structure", "")
+        if "صعودی" in st: bull += 10
+        elif "نزولی" in st: bear += 10
+    total = max(0, min(100, round(50 + bull - bear)))
+    confidence = round((available / 100) * 100)
+    if mtf.get("conflict"): confidence = max(0, confidence - 15)
+    if adx < 18: confidence = max(0, confidence - 10)
+    direction = "صعودی" if total >= 60 else ("نزولی" if total <= 40 else "خنثی")
+    return {"score": total, "confidence": confidence, "direction": direction, "bull": round(bull,1), "bear": round(bear,1), "available": available}
