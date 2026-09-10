@@ -110,13 +110,26 @@ def get_religious_keyboard():
     )
 
 def get_market_keyboard():
+    """منوی بازار با دکمه‌های واضح و نشانه‌های رنگی برای تشخیص سریع بخش‌ها."""
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("💵 قیمت کامل بازار"), KeyboardButton("💎 ۲۰ ارز برتر کریپتو")],
             [KeyboardButton("🔄 تبدیل ارز / کریپتو"), KeyboardButton("📈 سود و ضرر")],
             [KeyboardButton("🗓 تقویم اقتصادی")],
-            [KeyboardButton("📊 نمودار و تحلیل ارز دیجیتال")],
+            [KeyboardButton("🔵 📊 نمودار و تحلیل ارز دیجیتال"), KeyboardButton("🟡 🥇 تحلیل طلا")],
             [KeyboardButton("🔙 بازگشت به بیشتر")],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def get_gold_analysis_keyboard():
+    """کیبورد اختصاصی تحلیل طلا؛ طلا بعد از گزارش کریپتو به‌صورت مستقل نمایش داده می‌شود."""
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🟢 🔄 بروزرسانی تحلیل طلا")],
+            [KeyboardButton("🔵 📊 نمودار و تحلیل ارز دیجیتال")],
+            [KeyboardButton("🔙 بازگشت به بازار")],
         ],
         resize_keyboard=True,
     )
