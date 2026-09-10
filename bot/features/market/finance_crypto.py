@@ -197,6 +197,7 @@ async def analyze_gold(timeframe: str = "4h") -> str:
         lines += ["", "🧠 تحلیل پرایس اکشن", f"🏗 ساختار: {pa.get('structure','—')}",
                   f"🔀 BOS/CHOCH: {pa.get('bos_choch') or 'ندارد'}",
                   f"🕯 الگو: {', '.join(pa.get('patterns') or []) or '—'}",
+                  f"📐 الگوی کلاسیک: {', '.join(x.get('name') + ' — ' + x.get('state') + (' | چشم‌انداز: ' + x.get('bias') if x.get('bias') else '') + (f" | تریگر: {f(x.get('trigger'))}" if x.get('trigger') is not None else '') + (f" | هدف: {f(x.get('target'))}" if x.get('target') is not None else '') for x in (pa.get('chart_patterns') or [])) or '—'}",
                   f"💧 نقدینگی/Sweep: {pa.get('liquidity_sweep') or '—'}",
                   f"📍 موقعیت قیمت: {pa.get('location','—')}"]
     lines += ["", "⏱ همگرایی چندتایم‌فریم طلا"]
@@ -225,6 +226,8 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
     روند، حمایت/مقاومت، سیگنال، ستاپ، R:R، ریسک، وضعیت اجرا، جمع‌بندی AI، راهنما
     """
     symbol_clean = (symbol or "").lower().strip().replace(" ", "").replace("‌", "")
+    if symbol_clean in ("gold", "xau", "xauusd", "xau/usd", "طلا", "طلای جهانی", "اونس", "اونس جهانی", "xauusd"):
+        return await analyze_gold(timeframe)
     for junk in ("تحلیل", "analyze", "ارز", "کریپتو"):
         if symbol_clean.startswith(junk):
             symbol_clean = symbol_clean[len(junk):].strip()
@@ -409,6 +412,7 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
                   f"🏗 ساختار: {pa.get('structure','—')}",
                   f"🔀 BOS/CHOCH: {pa.get('bos_choch') or 'ندارد'}",
                   f"🕯 الگوی کندلی: {', '.join(pa.get('patterns') or []) or 'سیگنال قوی ندارد'}",
+                  f"📐 الگوی کلاسیک: {', '.join(x.get('name') + ' — ' + x.get('state') + (' | چشم‌انداز: ' + x.get('bias') if x.get('bias') else '') + (f" | تریگر: {fmt_p(x.get('trigger'))}" if x.get('trigger') is not None else '') + (f" | هدف: {fmt_p(x.get('target'))}" if x.get('target') is not None else '') for x in (pa.get('chart_patterns') or [])) or 'الگوی قابل اتکا شناسایی نشد'}",
                   f"💧 نقدینگی: {pa.get('liquidity_sweep') or 'Sweep مشخصی دیده نشد'}",
                   f"⚖️ Equal High/Low: {fmt_p(pa.get('equal_highs')) if pa.get('equal_highs') else '—'} / {fmt_p(pa.get('equal_lows')) if pa.get('equal_lows') else '—'}",
                   f"📍 موقعیت قیمت: {pa.get('location','—')}",
@@ -715,8 +719,9 @@ async def get_gold_chart(timeframe: str = "1h"):
         r = await _request_with_retry("GET", "https://xaus.com/api/v1/chart", retries=0,
                                       params={"symbol":"xau", "range":range_, "interval":interval})
         if getattr(r, "status_code", 0) != 200:
-            return None, "XAU/USD chart unavailable"
-        d = safe_json(r) or {}
+            d = {}
+        else:
+            d = safe_json(r) or {}
         rows = d.get("data") or d.get("series") or d.get("candles") or []
         parsed=[]
         for x in rows:
@@ -731,7 +736,20 @@ async def get_gold_chart(timeframe: str = "1h"):
             except Exception:
                 continue
         if len(parsed) < 30:
-            return None, "XAU/USD chart data insufficient"
+            proxy = await _fetch_klines_interval("PAXGUSDT", interval, limit)
+            if proxy and len(proxy) >= 30:
+                parsed=[]
+                for x in proxy:
+                    try:
+                        if len(x) >= 5:
+                            parsed.append((float(x[0]),float(x[1]),float(x[2]),float(x[3]),float(x[4])))
+                    except Exception:
+                        continue
+                proxy_mode = True
+            else:
+                return None, "XAU/USD chart data insufficient"
+        else:
+            proxy_mode = False
         ts=[x[0] for x in parsed[-8:]]
         diffs=[abs(ts[i]-ts[i-1]) for i in range(1,len(ts)) if ts[i] != ts[i-1]]
         med=sorted(diffs)[len(diffs)//2] if diffs else 0
@@ -756,7 +774,7 @@ async def get_gold_chart(timeframe: str = "1h"):
             for i in range(len(closes)):
                 w=closes[max(0,i-19):i+1]; ma.append(sum(w)/len(w))
             ax.plot(range(len(ma)),ma,linewidth=1.2,label="SMA20")
-        ax.set_title(f"XAU/USD — {tf.upper()} | Direct XAU data")
+        ax.set_title(f"Gold / XAUUSD — {tf.upper()} | {'PAXG/USDT proxy' if proxy_mode else 'Direct XAU data'}")
         ax.set_ylabel("USD / oz")
         ax.grid(alpha=0.2)
         ax.legend(loc="upper left")
@@ -767,7 +785,7 @@ async def get_gold_chart(timeframe: str = "1h"):
         fig.savefig(bio,format="png",bbox_inches="tight")
         plt.close(fig)
         bio.seek(0)
-        return bio.getvalue(), f"XAU/USD {tf.upper()}"
+        return bio.getvalue(), f"Gold / XAUUSD {tf.upper()}"
     except Exception as exc:
         logger.debug("gold chart failed: %s", exc)
         return None, "XAU/USD chart unavailable"

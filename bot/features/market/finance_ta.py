@@ -8,9 +8,7 @@ from __future__ import annotations
 import asyncio
 from bot.features.market import finance as _f
 from bot.logger import logger
-from bot.utils.http_client import pooled_async_client, request_with_retry, safe_json
-from bot.features.market.trading_intelligence import detect_regime, dynamic_weights, quality_gate
-from bot.features.market.trading_adaptation import adaptive_weights, adapt_score, adaptive_profile, kill_switch
+from bot.utils.http_client import pooled_async_client, request_with_retry
 
 # Compatibility aliases preserved from the original finance.py implementation.
 # finance_ta is loaded through the finance facade after it is initialized.
@@ -25,7 +23,7 @@ async def _fetch_klines_for_ta(pair: str, limit: int = 200) -> list:
                 params={"symbol": pair, "interval": "1h", "limit": limit},
             )
             if r.status_code == 200:
-                return safe_json(r) or []
+                return r.json() or []
             # OKX fallback
             okx = pair.replace("USDT", "-USDT")
             r2 = await request_with_retry("GET", 
@@ -33,7 +31,7 @@ async def _fetch_klines_for_ta(pair: str, limit: int = 200) -> list:
                 params={"instId": okx, "bar": "1H", "limit": str(min(limit, 300))},
             )
             if r2.status_code == 200:
-                data = (safe_json(r2) or {}).get("data") or []
+                data = (r2.json() or {}).get("data") or []
                 # OKX newest first → reverse; map to binance-like
                 out = []
                 for row in reversed(data):
@@ -228,26 +226,69 @@ def _score_timeframe(ta: dict) -> tuple:
 
 
 async def _mtf_bundle(pair: str) -> dict:
-    """تحلیل موازی 15M/1H/4H/1D/1W + تضاد و همگرایی."""
-    specs=[("15M","15m"),("1H","1h"),("4H","4h"),("1D","1d"),("1W","1w")]
-    ks=await asyncio.gather(*[_fetch_klines_interval(pair,iv,160) for _,iv in specs], return_exceptions=True)
+    """تحلیل موازی 1H / 4H / 1D + تضاد"""
+    k1, k4, kd = await asyncio.gather(
+        _fetch_klines_interval(pair, "1h", 120),
+        _fetch_klines_interval(pair, "4h", 120),
+        _fetch_klines_interval(pair, "1d", 120),
+    )
+
     def pack(klines):
-        if isinstance(klines,Exception): klines=[]
-        o=[];h=[];l=[];c=[];v=[]
+        opens, highs, lows, closes, vols = [], [], [], [], []
         for k in klines or []:
-            try:o.append(float(k[1]));h.append(float(k[2]));l.append(float(k[3]));c.append(float(k[4]));v.append(float(k[5]))
-            except Exception: continue
-        if len(c)<30:return {},o,h,l,c
-        ta=_compute_ta(c,h,l,v);ta["atr"]=_atr(h,l,c,14);ta["patterns"]=_detect_candle_patterns(o,h,l,c)
-        sc,di,adx=_score_timeframe(ta);ta.update(tf_score=sc,tf_dir=di)
-        return ta,o,h,l,c
-    ps=[pack(k) for k in ks];tfs={n:ps[i][0] for i,(n,_) in enumerate(specs)}
-    dirs={n:(tfs[n] or {}).get("tf_dir","—") for n,_ in specs};scores={n:(tfs[n] or {}).get("tf_score") for n,_ in specs}
-    bull=sum(x=="صعودی" for x in dirs.values());bear=sum(x=="نزولی" for x in dirs.values())
-    weights={"15M":.10,"1H":.15,"4H":.25,"1D":.30,"1W":.20}
-    bias=sum(weights[n]*(1 if dirs[n]=="صعودی" else -1 if dirs[n]=="نزولی" else 0) for n in weights)
-    daily_adx=(tfs.get("1D") or {}).get("adx") or 0
-    return {"15m":tfs.get("15M",{}),"1h":tfs.get("1H",{}),"4h":tfs.get("4H",{}),"1d":tfs.get("1D",{}),"1w":tfs.get("1W",{}),"dirs":dirs,"scores":scores,"conflict":bull>0 and bear>0,"force_wait":bool(tfs.get("1D")) and daily_adx<18,"daily_adx":daily_adx,"bias":bias,"weekly":tfs.get("1W",{}),"daily_klines":ps[3][1:]}
+            try:
+                opens.append(float(k[1])); highs.append(float(k[2]))
+                lows.append(float(k[3])); closes.append(float(k[4]))
+                vols.append(float(k[5]))
+            except Exception:
+                continue
+        if len(closes) < 30:
+            return {}, opens, highs, lows, closes
+        ta = _compute_ta(closes, highs, lows, vols)
+        ta["atr"] = _atr(highs, lows, closes, 14)
+        ta["patterns"] = _detect_candle_patterns(opens, highs, lows, closes)
+        score, direction, adx = _score_timeframe(ta)
+        ta["tf_score"] = score
+        ta["tf_dir"] = direction
+        return ta, opens, highs, lows, closes
+
+    t1, *_ = pack(k1)
+    t4, *_ = pack(k4)
+    td, o_d, h_d, l_d, c_d = pack(kd)
+
+    dirs = {
+        "1H": (t1 or {}).get("tf_dir", "—"),
+        "4H": (t4 or {}).get("tf_dir", "—"),
+        "1D": (td or {}).get("tf_dir", "—"),
+    }
+    scores = {
+        "1H": (t1 or {}).get("tf_score"),
+        "4H": (t4 or {}).get("tf_score"),
+        "1D": (td or {}).get("tf_score"),
+    }
+
+    # تضاد
+    conflict = False
+    bull = sum(1 for d in dirs.values() if d == "صعودی")
+    bear = sum(1 for d in dirs.values() if d == "نزولی")
+    if bull >= 1 and bear >= 1:
+        conflict = True
+
+    daily_adx = (td or {}).get("adx") or 0
+    force_wait = daily_adx < 18 if td else False
+
+    return {
+        "1h": t1 or {},
+        "4h": t4 or {},
+        "1d": td or {},
+        "dirs": dirs,
+        "scores": scores,
+        "conflict": conflict,
+        "force_wait": force_wait,
+        "daily_adx": daily_adx,
+        "daily_klines": (o_d, h_d, l_d, c_d),
+    }
+
 
 
 def _market_structure(highs, lows, closes) -> dict:
@@ -340,178 +381,191 @@ def _demand_supply_zone(highs, lows, closes) -> tuple:
     return demand, supply
 
 
-def _mtf_convergence(mtf: dict) -> tuple:
-    dirs=mtf.get("dirs") or {}; scores=mtf.get("scores") or {}
-    vals=[dirs.get(k) for k in ("15M","1H","4H","1D","1W")]
-    bull=sum(d=="صعودی" for d in vals);bear=sum(d=="نزولی" for d in vals);valid=sum(d in ("صعودی","نزولی") for d in vals)
-    if not valid:return "داده MTF ناکافی",0
-    if bull==valid:return "همگرایی کامل صعودی",10
-    if bear==valid:return "همگرایی کامل نزولی",10
-    power=round(max(bull,bear)/valid*10)
-    return ("تمایل صعودی با تضاد تایم‌فریم" if bull>bear else "تمایل نزولی با تضاد تایم‌فریم"),power
+
+def _detect_chart_patterns(highs, lows, closes, atr=None):
+    """تشخیص محافظه‌کارانه الگوهای کلاسیک قیمت و وضعیت «در حال تشکیل».
+    فقط وقتی هندسه الگو به اندازه کافی واضح باشد خروجی می‌دهد؛ در غیر این صورت [] است.
+    """
+    n=len(closes)
+    if n < 45:
+        return []
+    atr=float(atr or 0)
+    scale=max(atr, abs(closes[-1])*0.002)
+
+    def swings(arr, mode):
+        pts=[]
+        for i in range(3, len(arr)-3):
+            w=arr[i-3:i+4]
+            if mode=='h' and arr[i] >= max(w): pts.append((i,float(arr[i])))
+            if mode=='l' and arr[i] <= min(w): pts.append((i,float(arr[i])))
+        return pts
+
+    sh=swings(highs,'h')[-8:]
+    sl=swings(lows,'l')[-8:]
+    out=[]
+    tol=max(scale*1.8, abs(closes[-1])*0.006)
+
+    # Double top / bottom: two comparable extrema separated by a meaningful valley/peak.
+    if len(sh)>=2:
+        a,b=sh[-2],sh[-1]
+        between=lows[a[0]:b[0]+1]
+        if b[0]-a[0]>=5 and between:
+            valley=min(between)
+            if abs(a[1]-b[1])<=tol and min(a[1],b[1])-valley>=scale*1.2:
+                neckline=valley
+                state='تکمیل‌شده' if closes[-1] < neckline else 'در حال تشکیل'
+                target=neckline-(max(a[1],b[1])-neckline)
+                out.append({'name':'دو قله (Double Top)','state':state,'trigger':neckline,'target':target,'bias':'نزولی'})
+    if len(sl)>=2:
+        a,b=sl[-2],sl[-1]
+        between=highs[a[0]:b[0]+1]
+        if b[0]-a[0]>=5 and between:
+            peak=max(between)
+            if abs(a[1]-b[1])<=tol and peak-max(a[1],b[1])>=scale*1.2:
+                neckline=peak
+                state='تکمیل‌شده' if closes[-1] > neckline else 'در حال تشکیل'
+                target=neckline+(neckline-min(a[1],b[1]))
+                out.append({'name':'دو کف (Double Bottom)','state':state,'trigger':neckline,'target':target,'bias':'صعودی'})
+
+    # Head & shoulders / inverse H&S.
+    if len(sh)>=3:
+        l,h,r=sh[-3],sh[-2],sh[-1]
+        lows_between=lows[l[0]:r[0]+1]
+        if h[1]>l[1]+scale and h[1]>r[1]+scale and abs(l[1]-r[1])<=tol and lows_between:
+            nl=(lows[l[0]:h[0]+1] and min(lows[l[0]:h[0]+1]), lows[h[0]:r[0]+1] and min(lows[h[0]:r[0]+1]))
+            neckline=sum(x for x in nl if x is not None)/len([x for x in nl if x is not None])
+            state='تکمیل‌شده' if closes[-1] < neckline else 'در حال تشکیل'
+            target=neckline-(h[1]-neckline)
+            out.append({'name':'سر و شانه (Head & Shoulders)','state':state,'trigger':neckline,'target':target,'bias':'نزولی'})
+    if len(sl)>=3:
+        l,h,r=sl[-3],sl[-2],sl[-1]
+        highs_between=highs[l[0]:r[0]+1]
+        if h[1]<l[1]-scale and h[1]<r[1]-scale and abs(l[1]-r[1])<=tol and highs_between:
+            hs=(max(highs[l[0]:h[0]+1]), max(highs[h[0]:r[0]+1]))
+            neckline=sum(hs)/2
+            state='تکمیل‌شده' if closes[-1] > neckline else 'در حال تشکیل'
+            target=neckline+(neckline-h[1])
+            out.append({'name':'سر و شانه معکوس (Inverse H&S)','state':state,'trigger':neckline,'target':target,'bias':'صعودی'})
+
+    # Triple top / bottom from three comparable swings.
+    if len(sh)>=3:
+        a,b,c=sh[-3:]
+        if min(b[0]-a[0],c[0]-b[0])>=4 and max(a[1],b[1],c[1])-min(a[1],b[1],c[1])<=tol:
+            nl=min(lows[a[0]:c[0]+1])
+            state='تکمیل‌شده' if closes[-1] < nl else 'در حال تشکیل'
+            out.append({'name':'سه قله (Triple Top)','state':state,'trigger':nl,'target':nl-(a[1]-nl),'bias':'نزولی'})
+    if len(sl)>=3:
+        a,b,c=sl[-3:]
+        if min(b[0]-a[0],c[0]-b[0])>=4 and max(a[1],b[1],c[1])-min(a[1],b[1],c[1])<=tol:
+            nl=max(highs[a[0]:c[0]+1])
+            state='تکمیل‌شده' if closes[-1] > nl else 'در حال تشکیل'
+            out.append({'name':'سه کف (Triple Bottom)','state':state,'trigger':nl,'target':nl+(nl-a[1]),'bias':'صعودی'})
+
+    # Triangles / wedges / flags are detected from compression of recent range.
+    recent=closes[-30:]
+    if len(recent)>=20:
+        first=max(recent[:10])-min(recent[:10]); last=max(recent[-10:])-min(recent[-10:])
+        if first>0 and last/first < 0.72:
+            if sh and sl:
+                hi_slope=sh[-1][1]-sh[-3][1] if len(sh)>=3 else 0
+                lo_slope=sl[-1][1]-sl[-3][1] if len(sl)>=3 else 0
+                if hi_slope<0 and lo_slope>0:
+                    out.append({'name':'مثلث متقارن (Symmetrical Triangle)','state':'در حال تشکیل','trigger':None,'target':None,'bias':'خنثی تا شکست'})
+                elif hi_slope<0 and lo_slope<0:
+                    out.append({'name':'مثلث نزولی (Descending Triangle)','state':'در حال تشکیل','trigger':min(lows[-10:]),'target':None,'bias':'نزولی در صورت شکست'})
+                elif hi_slope>0 and lo_slope>0:
+                    out.append({'name':'مثلث صعودی (Ascending Triangle)','state':'در حال تشکیل','trigger':max(highs[-10:]),'target':None,'bias':'صعودی در صورت شکست'})
+
+    # Rectangle / range: repeated touches near both boundaries without directional breakout.
+    if len(recent) >= 24:
+        rh=max(highs[-24:]); rl=min(lows[-24:]); mid=(rh+rl)/2
+        upper=sum(1 for x in highs[-24:] if abs(x-rh)<=tol)
+        lower=sum(1 for x in lows[-24:] if abs(x-rl)<=tol)
+        if upper>=2 and lower>=2 and (rh-rl) > scale*3 and not (closes[-1]>rh or closes[-1]<rl):
+            out.append({'name':'مستطیل / رنج (Rectangle)','state':'در حال تشکیل','trigger':rh,'target':None,'bias':'خنثی تا شکست'})
+
+    # Pennant/flag proxy: sharp prior impulse followed by tight consolidation.
+    if len(closes) >= 30:
+        impulse=abs(closes[-21]-closes[-30])
+        cons=max(closes[-12:])-min(closes[-12:])
+        if impulse > scale*5 and cons < impulse*0.45:
+            direction='صعودی' if closes[-21] > closes[-30] else 'نزولی'
+            out.append({'name':('پرچم/پرچم سه‌گوش صعودی (Bull Flag/Pennant)' if direction=='صعودی' else 'پرچم/پرچم سه‌گوش نزولی (Bear Flag/Pennant)'), 'state':'در حال تشکیل','trigger':max(highs[-12:]) if direction=='صعودی' else min(lows[-12:]), 'target':None, 'bias':direction+' در صورت شکست'})
+
+    # Cup & handle proxy: rounded recovery followed by a shallow pullback.
+    if len(closes) >= 50:
+        w=closes[-50:]; left=max(w[:15]); bottom=min(w[15:35]); right=max(w[35:45]); handle_low=min(w[-10:])
+        if left>bottom and right >= left*0.96 and handle_low < right and handle_low > bottom*1.03:
+            trigger=max(w[-10:])
+            out.append({'name':'فنجان و دسته (Cup & Handle)','state':'در حال تشکیل','trigger':trigger,'target':trigger+(trigger-bottom),'bias':'صعودی در صورت شکست'})
+
+    # Rising/falling wedge from opposing narrowing slopes.
+    if len(sh)>=3 and len(sl)>=3:
+        hs=sh[-3:]; ls=sl[-3:]
+        hdelta=hs[-1][1]-hs[0][1]; ldelta=ls[-1][1]-ls[0][1]
+        if hdelta>0 and ldelta>0 and hdelta < ldelta*0.9:
+            out.append({'name':'کنج صعودی (Rising Wedge)','state':'در حال تشکیل','trigger':None,'target':None,'bias':'نزولی محتمل پس از شکست'})
+        elif hdelta<0 and ldelta<0 and abs(hdelta) < abs(ldelta)*0.9:
+            out.append({'name':'کنج نزولی (Falling Wedge)','state':'در حال تشکیل','trigger':None,'target':None,'bias':'صعودی محتمل پس از شکست'})
+
+    # Deduplicate by name, prefer completed over forming.
+    final=[]
+    for x in out:
+        old=next((z for z in final if z['name']==x['name']),None)
+        if old is None or (x['state']=='تکمیل‌شده' and old['state']!='تکمیل‌شده'):
+            if old: final.remove(old)
+            final.append(x)
+    return final[:4]
 
 
-
-def _price_action_analysis(opens, highs, lows, closes, volumes=None, support=None, resistance=None, atr=None):
-    """Comprehensive practical price-action context from the selected timeframe OHLCV."""
-    n = len(closes)
-    if n < 10:
-        return {"valid": False, "reason": "داده کافی نیست"}
-    volumes = volumes or [0.0] * n
-    atr = float(atr) if atr else None
-    def body(i): return abs(closes[i] - opens[i])
-    def rng(i): return max(highs[i] - lows[i], 1e-12)
-    def upper(i): return highs[i] - max(opens[i], closes[i])
-    def lower(i): return min(opens[i], closes[i]) - lows[i]
-    # Confirmed local swings with a 2-bar fractal.
-    sh, sl = [], []
-    for i in range(2, n-2):
-        if highs[i] > highs[i-1] and highs[i] >= highs[i+1] and highs[i] > highs[i-2] and highs[i] >= highs[i+2]: sh.append(i)
-        if lows[i] < lows[i-1] and lows[i] <= lows[i+1] and lows[i] < lows[i-2] and lows[i] <= lows[i+2]: sl.append(i)
-    structure = []
-    if len(sh) >= 2:
-        structure.append("HH" if highs[sh[-1]] > highs[sh[-2]] else "LH")
-    if len(sl) >= 2:
-        structure.append("HL" if lows[sl[-1]] > lows[sl[-2]] else "LL")
-    structure_label = " / ".join(structure) if structure else "خنثی"
-    # BOS / CHOCH from the latest confirmed swing break.
-    last = n-1
-    bos = None
-    if sh and closes[last] > highs[sh[-1]]: bos = "BOS صعودی"
-    elif sl and closes[last] < lows[sl[-1]]: bos = "BOS نزولی"
-    prev_bias = "صعودی" if len(sl)>=2 and lows[sl[-1]] > lows[sl[-2]] else "نزولی" if len(sh)>=2 and highs[sh[-1]] < highs[sh[-2]] else None
-    if bos and prev_bias and ((bos.endswith("صعودی") and prev_bias=="نزولی") or (bos.endswith("نزولی") and prev_bias=="صعودی")):
-        bos = "CHOCH → " + bos.replace("BOS ", "")
-    patterns=[]
-    i=n-1; b=body(i); r=rng(i)
-    if b/r <= .12: patterns.append("Doji")
-    if lower(i) >= max(b, r*.05)*2 and upper(i) <= max(b, r*.05)*.7 and b/r < .4: patterns.append("Bullish Pin Bar")
-    if upper(i) >= max(b, r*.05)*2 and lower(i) <= max(b, r*.05)*.7 and b/r < .4: patterns.append("Bearish Pin Bar")
-    if n>=2:
-        if closes[i] > opens[i] and closes[i-1] < opens[i-1] and opens[i] <= closes[i-1] and closes[i] >= opens[i-1]: patterns.append("Bullish Engulfing")
-        if closes[i] < opens[i] and closes[i-1] > opens[i-1] and opens[i] >= closes[i-1] and closes[i] <= opens[i-1]: patterns.append("Bearish Engulfing")
-        if highs[i] <= highs[i-1] and lows[i] >= lows[i-1]: patterns.append("Inside Bar")
-    # Equal highs/lows (liquidity pools).
-    tol = (atr*.18 if atr else r*.25)
-    eqh = [highs[j] for j in range(max(0,n-20), n-1) if any(abs(highs[j]-highs[k])<=tol for k in range(max(0,n-20),j))]
-    eql = [lows[j] for j in range(max(0,n-20), n-1) if any(abs(lows[j]-lows[k])<=tol for k in range(max(0,n-20),j))]
-    # Sweep/rejection: wick takes a recent extreme but closes back inside.
-    recent_h=max(highs[max(0,n-21):n-1]); recent_l=min(lows[max(0,n-21):n-1])
-    sweep = None
-    if highs[i] > recent_h and closes[i] < recent_h: sweep="sweep نقدینگی بالای سقف"
-    elif lows[i] < recent_l and closes[i] > recent_l: sweep="sweep نقدینگی زیر کف"
-    vol_ratio = None
-    if len(volumes)>=20:
-        av=sum(volumes[-20:])/20
-        vol_ratio=volumes[-1]/av if av else None
-    impulse = None
-    if atr:
-        if r >= atr*1.5: impulse="Impulse"
-        elif r <= atr*.65: impulse="Compression"
-    location="داخل محدوده"
+def _price_action_analysis(opens, highs, lows, closes, vols, support=None, resistance=None, atr=None):
+    """تحلیل Price Action + الگوهای کلاسیک؛ خروجی خالیِ الگو یعنی چیزی با اطمینان کافی دیده نشده."""
+    if len(closes)<30:
+        return {'valid':False,'patterns':[],'chart_patterns':[]}
+    patterns=_detect_candle_patterns(opens, highs, lows, closes)
+    chart_patterns=_detect_chart_patterns(highs,lows,closes,atr)
+    struct=_market_structure(highs,lows,closes)
+    vol_ratio=None
+    if len(vols)>=20:
+        av=sum(vols[-20:])/20
+        vol_ratio=vols[-1]/av if av else 1.0
+    location='میانه رنج'
     cur=closes[-1]
-    if resistance is not None and cur >= float(resistance)*.995: location="نزدیک مقاومت"
-    elif support is not None and cur <= float(support)*1.005: location="نزدیک حمایت"
-    # Simple breakout/retest state from the latest 20 bars.
+    if support and cur <= support*1.01: location='نزدیک حمایت'
+    elif resistance and cur >= resistance*0.99: location='نزدیک مقاومت'
     breakout=None
-    if resistance is not None and closes[-2] <= float(resistance) < closes[-1]: breakout="شکست مقاومت"
-    elif support is not None and closes[-2] >= float(support) > closes[-1]: breakout="شکست حمایت"
+    if resistance and cur>resistance: breakout='شکست مقاومت'
+    elif support and cur<support: breakout='شکست حمایت'
+    score=5
+    if struct.get('structure','').startswith('صعودی'): score+=1
+    elif struct.get('structure','').startswith('نزولی'): score-=1
     return {
-        "valid": True, "structure": structure_label, "swing_high": highs[sh[-1]] if sh else None,
-        "swing_low": lows[sl[-1]] if sl else None, "bos_choch": bos, "patterns": patterns,
-        "equal_highs": max(eqh) if eqh else None, "equal_lows": min(eql) if eql else None,
-        "liquidity_sweep": sweep, "volume_ratio": vol_ratio, "impulse_state": impulse,
-        "location": location, "breakout": breakout,
-        "range_high": max(highs[-20:]), "range_low": min(lows[-20:]),
+        'valid':True,'patterns':patterns,'chart_patterns':chart_patterns,
+        'structure':struct.get('structure','رنج'),'bos_choch':struct.get('bos'),
+        'liquidity_sweep':None,'equal_highs':None,'equal_lows':None,
+        'location':location,'breakout':breakout,'impulse_state':'نرمال',
+        'volume_ratio':vol_ratio,'score':max(1,min(10,score)),
     }
 
-def _advanced_levels(closes, highs, lows, current=None, max_levels=3):
-    """Clustered support/resistance zones with strength scoring."""
-    if not closes or not highs or not lows:
-        return {"supports": [], "resistances": []}
-    price = float(current if current is not None else closes[-1])
-    atr = _atr(highs, lows, closes, 14) or (price * 0.01)
-    tol = max(atr * 0.45, price * 0.0025)
-    pivots = []
-    for i in range(2, len(closes) - 2):
-        if highs[i] >= max(highs[i-2:i+3]):
-            pivots.append((float(highs[i]), "R", i))
-        if lows[i] <= min(lows[i-2:i+3]):
-            pivots.append((float(lows[i]), "S", i))
-    def cluster(kind):
-        vals = sorted([(p, i) for p, k, i in pivots if k == kind], key=lambda x: x[0])
-        groups = []
-        for p, idx in vals:
-            if not groups or abs(p - groups[-1]["center"]) > tol:
-                groups.append({"prices": [p], "idx": [idx], "center": p})
-            else:
-                groups[-1]["prices"].append(p); groups[-1]["idx"].append(idx)
-                groups[-1]["center"] = sum(groups[-1]["prices"]) / len(groups[-1]["prices"])
-        out = []
-        for g in groups:
-            center = g["center"]
-            touches = len(g["prices"])
-            recency = max(g["idx"] or [0]) / max(1, len(closes)-1)
-            strength = min(100, 35 + touches * 12 + recency * 25)
-            out.append({"price": center, "low": min(g["prices"]), "high": max(g["prices"]), "touches": touches, "strength": round(strength)})
-        return out
-    supports = [x for x in cluster("S") if x["price"] < price * 0.999]
-    resistances = [x for x in cluster("R") if x["price"] > price * 1.001]
-    supports.sort(key=lambda x: (abs(price-x["price"]), -x["strength"]))
-    resistances.sort(key=lambda x: (abs(price-x["price"]), -x["strength"]))
-    return {"supports": supports[:max_levels], "resistances": resistances[:max_levels], "atr": atr}
+def _mtf_convergence(mtf: dict) -> tuple:
+    """(متن همگرایی، قدرت 1-10)"""
+    dirs = mtf.get("dirs") or {}
+    scores = mtf.get("scores") or {}
+    vals = [dirs.get(k) for k in ("1H", "4H", "1D")]
+    bull = sum(1 for d in vals if d == "صعودی")
+    bear = sum(1 for d in vals if d == "نزولی")
+    avg_sc = [scores.get(k) for k in ("1H", "4H", "1D") if scores.get(k)]
+    avg = sum(avg_sc) / len(avg_sc) if avg_sc else 5
+    if bull == 3:
+        return "همگرایی کامل صعودی ۳/۳", min(10, int(avg + 2))
+    if bear == 3:
+        return "همگرایی کامل نزولی ۳/۳", min(10, int(avg + 2))
+    if bull == 2 and bear == 0:
+        return "همگرایی جزئی صعودی ۲/۳", int(avg)
+    if bear == 2 and bull == 0:
+        return "همگرایی جزئی نزولی ۲/۳", int(avg)
+    if bull and bear:
+        return "عدم همگرایی — تضاد تایم‌فریم‌ها", max(1, int(avg - 2))
+    return "همگرایی ضعیف / رنج", max(1, int(avg - 1))
 
-
-
-def _professional_score(ta, mtf=None, structure=None, binance=None, fg=None, current=None, support=None, resistance=None, market=None):
-    """0-100 multi-factor score; missing data lowers confidence instead of inventing facts."""
-    ta=ta or {};mtf=mtf or {};structure=structure or {};binance=binance or {};market=market or {}
-    f={k:50.0 for k in ("trend","momentum","volume","structure","derivatives","sentiment","macro","market","onchain")}
-    trend=ta.get("trend");f["trend"]=78 if trend=="صعودی" else 22 if trend=="نزولی" else 50
-    rsi=ta.get("rsi");f["momentum"]=max(15,min(85,50+(float(rsi)-50)*1.4)) if rsi is not None else 50
-    vr=ta.get("vol_ratio");f["volume"]=max(20,min(80,50+(float(vr)-1)*25)) if vr is not None else 50
-    st=str(structure.get("structure","")).lower();f["structure"]=75 if "صعود" in st else 25 if "نزول" in st else 50
-    fr=binance.get("funding_rate");f["derivatives"]=max(20,min(80,50-float(fr)*180)) if fr is not None else 50
-    if fg and fg.get("value") is not None:f["sentiment"]=max(20,min(80,50+(float(fg["value"])-50)*.7))
-    ns=float((market.get("news") or {}).get("score") or 0);f["sentiment"]=max(15,min(85,f["sentiment"]+ns*4))
-    dxy=((market.get("macro") or {}).get("DXY") or {}).get("change_pct");f["macro"]=max(20,min(80,50-float(dxy)*12)) if dxy is not None else 50
-    dom=market.get("btc_dominance");f["market"]=max(25,min(75,50+(float(dom)-50)*1.2)) if dom is not None else 50
-    obi=binance.get("order_book_imbalance")
-    if obi is not None:
-        f["market"]=max(10,min(90,f["market"]+float(obi)*20))
-    liq_long=float(binance.get("liquidations_long") or 0); liq_short=float(binance.get("liquidations_short") or 0)
-    if liq_long or liq_short:
-        # liquidation imbalance is a contrarian stress signal, not a directional guarantee
-        f["derivatives"]=max(10,min(90,f["derivatives"]+(10 if liq_short>liq_long*1.5 else -10 if liq_long>liq_short*1.5 else 0)))
-    f["trend"]=max(10,min(90,f["trend"]+float(mtf.get("bias") or 0)*20))
-    onchain = market.get("onchain") or {}
-    if onchain.get("available"):
-        # Activity is used only as a real-data confidence/health signal; direction stays neutral
-        # unless a source supplies a directional metric.
-        activity = float(onchain.get("transactions_24h") or 0)
-        f["onchain"] = 55.0 if activity > 0 else 50.0
-        market["onchain_score"] = f["onchain"]
-    regime=detect_regime(ta, mtf, ta.get("vol_ratio"))
-    weights=dynamic_weights(regime)
-    # Empirical adaptation is bounded and activates only after enough settled outcomes.
-    symbol = str(getattr(_f, "_ADAPT_SYMBOL", "BTC"))
-    setup = str(getattr(_f, "_ADAPT_SETUP", "default"))
-    weights=adaptive_weights(weights, symbol, regime.get("label", ""), setup)
-    score=round(sum(f[k]*weights[k] for k in weights))
-    vals=[trend,rsi,vr,fr,fg,mtf.get("scores"),market.get("btc_dominance"),market.get("macro"),market.get("news"),market.get("onchain_score")]
-    avail=sum(x is not None and x!={} for x in vals)
-    confidence=min(96,max(35,45+avail*5-(12 if mtf.get("conflict") else 0)))
-    gate=quality_gate(score, confidence, mtf, float(market.get("data_quality") or 100), regime)
-    if not gate["allowed"]:
-        confidence=min(confidence, 54)
-    score, confidence, adaptive = adapt_score(score, confidence, symbol, regime.get("label", ""), setup)
-    gate=quality_gate(score, confidence, mtf, float(market.get("data_quality") or 100), regime)
-    blocked, kill_reason=kill_switch(adaptive, gate.get("allowed", True))
-    if blocked:
-        gate={**gate, "allowed":False, "label":"صبر / عدم‌تأیید", "reasons":list(gate.get("reasons",[]))+([kill_reason] if kill_reason else [])}
-        confidence=min(confidence,54)
-    return {"score":max(0,min(100,score)),"confidence":confidence,
-            "direction":"صعودی" if score>=60 else "نزولی" if score<=40 else "خنثی",
-            "factors":f,"weights":weights,"regime":regime,"quality_gate":gate,
-            "adaptive":adaptive}
 
