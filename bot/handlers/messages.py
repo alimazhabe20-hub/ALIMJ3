@@ -64,9 +64,6 @@ from bot.services.ai_service import (
     wants_voice_chat_mode, wants_end_voice_chat, is_voice_only_request,
     generate_music, analyze_video, translate_voice,
 )
-
-
-
 async def _safe_reply(update, text, **kwargs):
     """ارسال امن بدون کرش بابت Markdown"""
     kwargs.pop("parse_mode", None)
@@ -77,7 +74,6 @@ async def _safe_reply(update, text, **kwargs):
             await update.message.reply_text(str(text)[:4000], reply_markup=kwargs.get("reply_markup"))
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
-
 async def _keep_typing(bot, chat_id, stop_event):
     """تا وقتی پاسخ آماده نشده، مدام حالت «در حال نوشتن...» را نشان بده."""
     import asyncio
@@ -91,8 +87,6 @@ async def _keep_typing(bot, chat_id, stop_event):
             await asyncio.wait_for(stop_event.wait(), timeout=4)
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
-
-
 
 
 def _apply_voice_chat_flags(context, text: str) -> str | None:
