@@ -678,7 +678,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             from io import BytesIO
             from telegram import InputMediaPhoto
 
-            menu = get_crypto_analysis_keyboard(symbol)
+            from bot.utils.helpers import get_gold_analysis_keyboard
+            is_gold = symbol.lower() in ("gold", "xau", "xauusd", "xau/usd")
+            menu = get_gold_analysis_keyboard() if is_gold else get_crypto_analysis_keyboard(symbol)
 
             async def _smart_ai(base_txt: str, tf_name: str) -> tuple:
                 """جمع‌بندی + راهنما دقیق‌تر بر اساس تایم‌فریم"""
@@ -943,6 +945,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _edit_text(txt)
 
             elif action == "ref":
+                if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
+                    base = await analyze_gold("4h")
+                    await _edit_text(base)
+                    return
                 base = await analyze_crypto(symbol, timeframe="4h")
                 report = base
                 png, _ = await get_crypto_chart(symbol, 30)

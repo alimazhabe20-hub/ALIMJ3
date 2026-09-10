@@ -11,10 +11,10 @@ from bot.utils.helpers import (
     build_message, get_main_keyboard, get_refresh_button,
     get_country_keyboard, get_smart_settings_keyboard, get_iran_cities_keyboard, get_iraq_cities_keyboard,
     get_language_keyboard, get_more_keyboard, get_date_tools_keyboard,
-    get_religious_keyboard, get_market_keyboard, get_gold_analysis_keyboard, get_weather_geo_keyboard,
+    get_religious_keyboard, get_market_keyboard, get_weather_geo_keyboard,
     get_tools_keyboard, get_fun_keyboard, get_profile_keyboard, get_joke_keyboard,
     get_calendar_text, get_calendar_buttons, ALL_CITIES, CITY_COUNTRY,
-    get_azan_keyboard, get_ai_keyboard, get_ai_model_keyboard,
+    get_azan_keyboard, get_ai_keyboard, get_ai_model_keyboard, get_gold_analysis_keyboard,
 )
 from bot.api.calendar import get_today_tehran
 from bot.handlers.middleware import check_and_rate_limit
@@ -197,13 +197,11 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
 
     return False
 
-
 async def _send_ai_answer(update, user_id, answer: str, *, stream: bool = True):
     """ارسال جواب AI — بدون دکمه زیر پیام."""
     msg = update.message
     store_answer(user_id, answer)
     return await msg.reply_text(f"🤖 {answer}")
-
 
 async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
     """استریم AI و ویرایش تدریجی پیام؛ در شکست، پیام نیمه‌کاره حذف می‌شود."""
@@ -278,7 +276,6 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
             logger.debug("%s: %s", __name__, _exc)
         raise
 
-
 async def _send_ai_voice(update_or_msg, text: str, user_id: int, reply_markup=None):
     """ارسال ویس با پیام وضعیت «در حال ویس دادن»."""
     msg = getattr(update_or_msg, "message", None) or update_or_msg
@@ -324,7 +321,6 @@ async def _ask_ai_with_typing(update, context, user_id, text):
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
 
-
 async def _send_main(update, context, text, user_id):
     context.user_data.pop("waiting_for", None)
     await update.message.reply_text("🏠 منوی اصلی", reply_markup=get_main_keyboard(user_id))
@@ -333,15 +329,12 @@ async def _send_main(update, context, text, user_id):
     set_last_main_msg_id(user_id, msg.message_id)
     return msg
 
-
 def _is_back(text):
     t = text.strip()
     return t in ("🔙 بازگشت", "بازگشت") or "بازگشت" in t
 
-
 def _is_back_more(text):
     return "بازگشت به بیشتر" in text
-
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -357,7 +350,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ این بخش موقتاً در دسترس نیست. کمی بعد دوباره امتحان کنید.")
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
-
 
 async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -705,47 +697,11 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _show_azan_settings(update, user_id, city, note="همه اذان‌ها خاموش شدند.")
         return
 
-    # کلید اختصاصی تحلیل طلا در منوی بازار؛ تحلیل طلا دیگر زیر تحلیل کریپتو نمایش داده نمی‌شود.
-    if text in ("🥇 تحلیل طلا", "🟡 🥇 تحلیل طلا", "تحلیل طلا"):
-        try:
-            track_usage(user_id, "gold_analysis")
-            notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…")
-            report = await analyze_gold("1h")
-            try:
-                png, _ = await get_gold_chart("1h")
-            except Exception:
-                png = None
-            try:
-                await notice.delete()
-            except Exception:
-                pass
-            if png:
-                from io import BytesIO
-                bio = BytesIO(png)
-                bio.name = "gold_xauusd_1h.png"
-                await update.message.reply_photo(
-                    photo=bio,
-                    caption="🥇 <b>تحلیل طلا / XAUUSD — 1H</b>",
-                    parse_mode="HTML",
-                    reply_markup=get_gold_analysis_keyboard(),
-                )
-            chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
-            for chunk in chunks:
-                await update.message.reply_text(chunk, reply_markup=get_gold_analysis_keyboard() if chunk == chunks[-1] else None)
-            return
-        except Exception as exc:
-            logger.error("gold market button failed: %s", exc, exc_info=True)
-            await update.message.reply_text("⚠️ دریافت تحلیل طلا موقتاً ناموفق بود؛ دوباره تلاش کنید.", reply_markup=get_gold_analysis_keyboard())
-            return
-
-    if text in ("🟢 🔄 بروزرسانی تحلیل طلا", "بروزرسانی تحلیل طلا"):
-        text = "🥇 تحلیل طلا"
-
     # تحلیل مستقیم طلا: کاربر می‌تواند فقط «gold»، «طلا»، «اونس»، «XAUUSD» یا عبارت تحلیلی مشابه را بفرستد.
     # این مسیر قبل از fallback عمومی اجرا می‌شود تا Gold هرگز به‌عنوان «نماد نامعتبر» پاسخ داده نشود.
     _gold_text = re.sub(r"[\s\u200c_/\-]+", "", text.lower())
     _gold_aliases = ("gold", "xau", "xauusd", "طلا", "طلایجهانی", "اونس", "اونسجهانی")
-    if any(alias in _gold_text for alias in _gold_aliases):
+    if text in ("🥇 تحلیل طلا / XAUUSD", "🥇 تحلیل طلا") or any(alias in _gold_text for alias in _gold_aliases):
         # فقط وقتی پیام واقعاً درباره طلاست؛ اعداد/متن‌های نامرتبطی که کلمه gold را داخل جمله دارند هم به تحلیل طلا می‌روند.
         try:
             track_usage(user_id, "gold_analysis")
@@ -766,12 +722,12 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.message.reply_photo(
                     photo=bio,
                     caption="🥇 Gold / XAUUSD — 1H",
-                    reply_markup=get_gold_analysis_keyboard(),
+                    reply_markup=get_market_keyboard(),
                 )
             # گزارش کامل را به‌صورت پیام متنی می‌فرستیم تا محدودیت 1024 کاراکتری کپشن باعث ناقص شدن تحلیل نشود.
             chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
             for chunk in chunks:
-                await update.message.reply_text(chunk)
+                await update.message.reply_text(chunk, reply_markup=get_gold_analysis_keyboard())
             return
         except Exception as exc:
             logger.error("direct gold analysis failed: %s", exc, exc_info=True)
@@ -1042,7 +998,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         update_user_field(user_id, "city", text); update_user_field(user_id, "country", CITY_COUNTRY.get(text, "Iran"))
         await _send_main(update, context, f"✅ شهر → **{text}**\n\n" + await build_message(user_id, first_name, text), user_id); return
 
-
 async def _show_azan_settings(update, user_id, city, note: str = None):
     """نمایش پنل تنظیم اذان با وضعیت فعلی و اوقات شرعی"""
     from bot.api.prayer import get_prayer_times, get_next_prayer_time
@@ -1085,13 +1040,10 @@ async def _show_azan_settings(update, user_id, city, note: str = None):
         reply_markup=get_azan_keyboard(settings),
     )
 
-
 async def media_ai_handler(update, context):
     """Compatibility facade; implementation lives in media_handlers.py."""
     from bot.handlers.media_handlers import media_ai_handler as _impl
     return await _impl(update, context)
-
-
 
 async def lens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """اجرای Lens محلی روی عکسی که کاربر به آن Reply کرده است."""
@@ -1126,10 +1078,8 @@ async def lens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
 
-
 async def voice_ai_handler(update, context):
     """Compatibility facade; implementation lives in media_handlers.py."""
     from bot.handlers.media_handlers import voice_ai_handler as _impl
     return await _impl(update, context)
-
 
