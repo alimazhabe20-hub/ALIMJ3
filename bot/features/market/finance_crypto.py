@@ -686,11 +686,11 @@ def _build_smart_summary_pair(pair, trend, ta, support, resistance, signal, scor
         elif rsi <= 30:
             parts.append("RSI در ناحیه اشباع فروش است.")
     if adx is not None and adx >= 25:
-        parts.append(f"ADX تایم‌فریم فعلی ({tf_label}) قدرت حرکت را نشان می‌دهد.")
+        parts.append("ADX تایم‌فریم فعلی قدرت حرکت را نشان می‌دهد.")
     elif adx is not None:
         parts.append("ADX تایم‌فریم فعلی ضعیف است و روند قدرت کافی ندارد.")
     if "ADX روزانه ضعیف" in (exec_status or ""):
-        parts.append("با وجود ADX تایم‌فریم فعلی، ADX روزانه ضعیف است؛ بنابراین فیلتر صبر فعال است.")
+        parts.append("ADX روزانه ضعیف است؛ بنابراین فیلتر صبر فعال است و ورود باید تا تأیید شکست/قدرت روند به تعویق بیفتد.")
     if mfi_note:
         parts.append(mfi_note)
     if binance and binance.get("funding_rate") is not None:
