@@ -202,10 +202,21 @@ async def analyze_gold(timeframe: str = "4h") -> str:
     if demand: lines.append(f"🟢 تقاضا {tf.upper()}: ${f(demand[0])} – ${f(demand[1])}")
     if supply: lines.append(f"🔴 عرضه {tf.upper()}: ${f(supply[0])} – ${f(supply[1])}")
     if pa.get("valid"):
+        classic_patterns = []
+        for x in (pa.get("chart_patterns") or []):
+            item = f"{x.get('name', '—')} — {x.get('state', '—')}"
+            if x.get("bias"):
+                item += f" | چشم‌انداز: {x.get('bias')}"
+            if x.get("trigger") is not None:
+                item += f" | تریگر: {fmt_p(x.get('trigger'))}"
+            if x.get("target") is not None:
+                item += f" | هدف: {fmt_p(x.get('target'))}"
+            classic_patterns.append(item)
+        classic_patterns_text = ", ".join(classic_patterns) or "الگوی قابل اتکا شناسایی نشد"
         lines += ["", "🧠 تحلیل پرایس اکشن", f"🏗 ساختار: {pa.get('structure','—')}",
                   f"🔀 BOS/CHOCH: {pa.get('bos_choch') or 'ندارد'}",
                   f"🕯 الگو: {', '.join(pa.get('patterns') or []) or '—'}",
-                  f"📐 الگوی کلاسیک: {', '.join(_format_chart_pattern(x) for x in (pa.get('chart_patterns') or [])) or '—'}",
+                  f"📐 الگوی کلاسیک: {classic_patterns_text}",
                   f"💧 نقدینگی/Sweep: {pa.get('liquidity_sweep') or '—'}",
                   f"📍 موقعیت قیمت: {pa.get('location','—')}"]
     lines += ["", "⏱ همگرایی چندتایم‌فریم طلا"]
