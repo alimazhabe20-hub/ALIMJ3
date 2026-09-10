@@ -183,7 +183,6 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
                 logger.debug("%s: %s", __name__, _exc)
         return True
     return False
-
 def _split_telegram_text(text: str, limit: int = 3900) -> list[str]:
     """تقسیم امن متن بلند؛ هیچ کاراکتری در مرز chunk حذف نمی‌شود."""
     text = (text or "").strip()
@@ -199,8 +198,6 @@ def _split_telegram_text(text: str, limit: int = 3900) -> list[str]:
         text = text[cut:]
     parts.append(text)
     return parts
-
-
 async def _reply_long_text(msg, text: str, *, prefix: str = "🤖 "):
     body = (text or "").strip()
     chunks = _split_telegram_text(prefix + body, 3900) or [prefix + "پاسخی دریافت نشد."]
@@ -222,7 +219,6 @@ async def _reply_long_text(msg, text: str, *, prefix: str = "🤖 "):
         if not sent:
             raise RuntimeError(f"AI reply chunk {i+1}/{len(chunks)} could not be delivered")
     return first
-
 async def _send_ai_answer(update, user_id, answer: str, *, stream: bool = True):
     """ارسال جواب AI کامل؛ روی پیام اول دکمه «ادامه پاسخ» هم قرار می‌گیرد."""
     msg = update.message
@@ -235,7 +231,6 @@ async def _send_ai_answer(update, user_id, answer: str, *, stream: bool = True):
     return first
 async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
     """استریم AI و ویرایش تدریجی پیام؛ در شکست، پیام نیمه‌کاره حذف می‌شود."""
-    import asyncio
     from bot.services.ai_service import ask_ai_stream
     msg = update.message
     sent = await msg.reply_text("✍️ در حال نوشتن...")
@@ -273,8 +268,8 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
         chunks = _split_telegram_text("🤖 " + answer, 3900)
         if not chunks:
             chunks = ["🤖 پاسخی دریافت نشد."]
-        # اگر آخرین ویرایش دقیقاً همان متن نهایی بوده، دوباره پیام نفرست.
         # این جلوی Duplicate Reply را در خطای «Message is not modified» می‌گیرد.
+        # اگر آخرین ویرایش دقیقاً همان متن نهایی بوده، دوباره پیام نفرست.
         final = chunks[0]
         if final != last_rendered:
             try:
