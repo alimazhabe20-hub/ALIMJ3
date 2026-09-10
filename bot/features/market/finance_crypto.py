@@ -427,11 +427,27 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
         f"ℹ️ راهنما: {ai_guide}",
     ]
     if pa.get("valid"):
+        classic_patterns = []
+        for x in (pa.get("chart_patterns") or []):
+            item = f"{x.get('name') or '—'} — {x.get('state') or '—'}"
+            if x.get("bias"):
+                item += f" | چشم‌انداز: {x.get('bias')}"
+            if x.get("trigger") is not None:
+                item += f" | تریگر: {fmt_p(x.get('trigger'))}"
+            if x.get("target") is not None:
+                item += f" | هدف: {fmt_p(x.get('target'))}"
+            classic_patterns.append(item)
+
+        classic_patterns_text = (
+            ", ".join(classic_patterns)
+            or "الگوی قابل اتکا شناسایی نشد"
+        )
+
         lines += ["", "▎🧠 تحلیل پرایس اکشن",
                   f"🏗 ساختار: {pa.get('structure','—')}",
                   f"🔀 BOS/CHOCH: {pa.get('bos_choch') or 'ندارد'}",
                   f"🕯 الگوی کندلی: {', '.join(pa.get('patterns') or []) or 'سیگنال قوی ندارد'}",
-                  f"📐 الگوی کلاسیک: {', '.join(x.get('name') + ' — ' + x.get('state') + (' | چشم‌انداز: ' + x.get('bias') if x.get('bias') else '') + (f" | تریگر: {fmt_p(x.get('trigger'))}" if x.get('trigger') is not None else '') + (f" | هدف: {fmt_p(x.get('target'))}" if x.get('target') is not None else '') for x in (pa.get('chart_patterns') or [])) or 'الگوی قابل اتکا شناسایی نشد'}",
+                  f"📐 الگوی کلاسیک: {classic_patterns_text}",
                   f"💧 نقدینگی: {pa.get('liquidity_sweep') or 'Sweep مشخصی دیده نشد'}",
                   f"⚖️ Equal High/Low: {fmt_p(pa.get('equal_highs')) if pa.get('equal_highs') else '—'} / {fmt_p(pa.get('equal_lows')) if pa.get('equal_lows') else '—'}",
                   f"📍 موقعیت قیمت: {pa.get('location','—')}",
