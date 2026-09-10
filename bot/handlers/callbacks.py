@@ -721,53 +721,79 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "ai_continue":
         await _safe_answer(query, "در حال ادامه دادن پاسخ…", show_alert=False)
         try:
-            # دکمه را فوراً حذف کن تا کلیک‌های پشت‌سرهم درخواست موازی نسازند.
-            await query.edit_message_reply_markup(reply_markup=None)
-        except Exception as exc:
-            logger.debug("AI continuation button cleanup skipped: %s", exc)
-        try:
             from bot.services.ai_service import ask_ai
             from bot.services.ai_extras import get_last_answer, store_answer
+
             last_answer = get_last_answer(user_id)
             if not last_answer:
                 await query.message.reply_text("⚠️ پاسخ قبلی برای ادامه پیدا نشد. دوباره سؤال را بفرست.")
                 return
 
+            # ادامه باید روی همان پیامِ دارای دکمه اعمال شود، نه اینکه یک پیام جدید بسازیم.
+            # متن پیام فعلی همان بخشی است که کاربر دکمه «ادامه پاسخ» را زیر آن دیده است.
+            current_text = (query.message.text or query.message.caption or "").strip()
+            if not current_text:
+                current_text = "🤖 " + last_answer
+
             continuation_prompt = (
                 "پاسخ قبلی خودت را ادامه بده. فقط ادامهٔ محتوایی را بنویس و هیچ بخش قبلی را تکرار نکن. "
                 "از همان نقطه‌ای که پاسخ قبلی تمام شده ادامه بده. اگر جمله، فهرست، کد یا جدول نیمه‌تمام است، "
                 "ابتدا همان را کامل کن. هیچ مقدمه، عنوان «ادامه پاسخ» یا توضیح درباره این درخواست ننویس. "
-                "اگر پاسخ قبلی کامل شده، فقط نکات تکمیلی واقعاً مفید را اضافه کن."
+                "پاسخ را تا حد ممکن فشرده و بدون تکرار بنویس."
             )
             answer, _provider = await ask_ai(user_id, continuation_prompt)
             answer = (answer or "").strip()
             if not answer:
-                await query.message.reply_text("⚠️ ادامه‌ای برای پاسخ دریافت نشد.")
+                # همان پیام را نگه می‌داریم و فقط دکمه را حذف می‌کنیم.
+                try:
+                    await query.edit_message_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
                 return
-            store_answer(user_id, answer)
 
-            chunks = []
-            remaining = answer
-            while len(remaining) > 3600:
-                cut = remaining.rfind("\n", 0, 3601)
-                if cut < 1200:
-                    cut = remaining.rfind(" ", 0, 3601)
-                cut = cut if cut > 0 else 3600
-                chunks.append(remaining[:cut].strip())
-                remaining = remaining[cut:].lstrip()
-            if remaining:
-                chunks.append(remaining)
-            if not chunks:
-                chunks = ["پاسخی برای ادامه دریافت نشد."]
+            # Telegram حداکثر 4096 کاراکتر برای متن پیام اجازه می‌دهد.
+            # بنابراین ادامه را به همان پیام اضافه می‌کنیم و اگر جا کم بود، در مرز مناسب کوتاه می‌کنیم.
+            separator = "\n\n"
+            max_total = 4096
+            available = max_total - len(current_text) - len(separator)
+            if available <= 0:
+                await query.edit_message_reply_markup(reply_markup=None)
+                return
 
-            is_long = len(answer) >= 2500
-            for idx, chunk in enumerate(chunks, start=1):
-                prefix = "🤖 ادامه پاسخ" if idx == 1 else f"🤖 ادامه ({idx}/{len(chunks)})"
-                markup = get_ai_answer_keyboard(user_id) if is_long and idx == len(chunks) else None
-                await query.message.reply_text(f"{prefix}\n{chunk}", reply_markup=markup)
+            continuation = answer[:available]
+            if len(answer) > available:
+                # تا حد امکان وسط کلمه/خط قطع نکن.
+                cut = continuation.rfind("\n")
+                if cut < max(80, available // 3):
+                    cut = continuation.rfind(" ")
+                if cut >= max(80, available // 3):
+                    continuation = continuation[:cut].rstrip()
+
+            combined = current_text + separator + continuation
+            # دکمه فقط وقتی باقی می‌ماند که هنوز از پاسخ تولیدشده چیزی ناتمام مانده باشد
+            # و پیام نیز ظرفیت لازم برای کلیک بعدی داشته باشد.
+            still_remaining = len(answer) > len(continuation)
+            markup = get_ai_answer_keyboard(user_id) if still_remaining else None
+
+            try:
+                await query.edit_message_text(combined, reply_markup=markup)
+            except BadRequest as edit_error:
+                # اگر متن به‌علت محدودیت/ویرایش تکراری رد شد، حداقل همان پیام را بدون دکمه نگه می‌داریم.
+                logger.warning("AI continuation same-message edit failed: %s", edit_error)
+                try:
+                    await query.edit_message_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
+                return
+
+            # حافظهٔ پاسخ باید نسخهٔ کاملِ قابل‌ادامه را نگه دارد، نه فقط قطعهٔ جدید را.
+            store_answer(user_id, combined.removeprefix("🤖 ").strip())
         except Exception as exc:
             logger.error("AI continuation failed: %s", exc, exc_info=True)
-            await query.message.reply_text("⚠️ ادامه پاسخ انجام نشد. لطفاً دوباره سؤال را بفرست.")
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
         return
 
     if data == "ai_models":
