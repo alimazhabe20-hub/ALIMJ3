@@ -29,7 +29,15 @@ FF_FALLBACK_URLS = (
     "https://cdn-nfs.faireconomy.media/ff_calendar_nextweek.json",
 )
 CACHE_TTL = 5 * 60
-HISTORICAL_HTML_URL = "https://www.forexfactory.com/calendar?week={slug}"
+HISTORICAL_HTML_URLS = (
+    "https://calendar.forexfactory.com/calendar?day={day}",
+    "https://www.forexfactory.com/calendar?day={day}",
+    "https://mds-wss.forexfactory.com/calendar?day={day}",
+    "https://calendar.forexfactory.com/calendar?week={slug}",
+    "https://www.forexfactory.com/calendar?week={slug}",
+    "https://calendar.forexfactory.com/calendar/",
+    "https://www.forexfactory.com/calendar/",
+)
 HISTORICAL_TZ = pytz.timezone("Europe/London")
 _MAX_EVENTS = 600
 
@@ -223,11 +231,11 @@ def _parse_ff_historical_html(text: str, year_hint: int) -> list[dict[str, Any]]
     out: list[dict[str, Any]] = []
     current_date: datetime | None = None
 
-    rows = soup.select("tr.calendar__row.calendar_row, tr.calendar_row")
+    rows = soup.select("tr.calendar__row.calendar_row, tr.calendar_row, tr.calendar__row")
     for tr in rows:
         # The date cell is often populated only on the first event of a day;
         # subsequent rows inherit it through current_date.
-        date_cell = tr.select_one(".calendar__date")
+        date_cell = tr.select_one("td.calendar__cell.calendar__date.date, .calendar__date")
         if date_cell:
             parsed_day = _parse_ff_date(date_cell.get_text(" ", strip=True), year_hint)
             if parsed_day:
@@ -241,14 +249,14 @@ def _parse_ff_historical_html(text: str, year_hint: int) -> list[dict[str, Any]]
                 current_date = parsed_day
             continue
 
-        cur = tr.select_one(".calendar__currency")
-        event = tr.select_one(".calendar__event")
+        cur = tr.select_one("td.calendar__cell.calendar__currency.currency, .calendar__currency, td.currency")
+        event = tr.select_one("td.calendar__cell.calendar__event.event, .calendar__event, .calendar__event-title")
         if not cur or not event or not current_date:
             continue
 
         currency = cur.get_text(" ", strip=True).upper()
         title = event.get_text(" ", strip=True)
-        time_cell = tr.select_one(".calendar__time")
+        time_cell = tr.select_one("td.calendar__cell.calendar__time.time, .calendar__time, td.time")
         parsed_time = _parse_ff_time(time_cell.get_text(" ", strip=True) if time_cell else "")
         if parsed_time:
             dt_local = HISTORICAL_TZ.localize(
@@ -270,9 +278,9 @@ def _parse_ff_historical_html(text: str, year_hint: int) -> list[dict[str, Any]]
             "utc": dt_local.astimezone(timezone.utc),
             "country": currency,
             "title": title,
-            "actual": cell_value(".calendar__actual", ".calendar-actual"),
-            "forecast": cell_value(".calendar__forecast", ".calendar-forecast"),
-            "previous": cell_value(".calendar__previous", ".calendar-previous"),
+            "actual": cell_value("td.calendar__cell.calendar__actual.actual", ".calendar__actual", ".calendar-actual"),
+            "forecast": cell_value("td.calendar__cell.calendar__forecast.forecast", ".calendar__forecast", ".calendar-forecast"),
+            "previous": cell_value("td.calendar__cell.calendar__previous.previous", ".calendar__previous", ".calendar-previous"),
         })
     return out
 
@@ -382,21 +390,38 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
             # Current week first; yesterday/previous week is only needed for
             # history enrichment and is intentionally best-effort.
             current_slug = _week_slug(now_utc)
-            current_html = await asyncio.to_thread(
-                _fetch_historical_html, HISTORICAL_HTML_URL.format(slug=current_slug)
-            )
-            html_rows.extend(_parse_ff_historical_html(current_html, now_utc.year))
+            current_day = now_utc.strftime("%b%-d.%Y").lower()
+            current_errors = []
+            for template in HISTORICAL_HTML_URLS:
+                try:
+                    url = template.format(slug=current_slug, day=current_day)
+                    current_html = await asyncio.to_thread(_fetch_historical_html, url)
+                    parsed = _parse_ff_historical_html(current_html, now_utc.year)
+                    if parsed:
+                        html_rows.extend(parsed)
+                        break
+                except Exception as exc:
+                    current_errors.append(str(exc))
+            if not html_rows and current_errors:
+                logger.debug("economic calendar current HTML fallbacks failed: %s", " | ".join(current_errors[:4]))
 
             if normalized:
                 previous_dt = now_utc - timedelta(days=7)
-                try:
-                    previous_html = await asyncio.to_thread(
-                        _fetch_historical_html,
-                        HISTORICAL_HTML_URL.format(slug=_week_slug(previous_dt)),
-                    )
-                    html_rows.extend(_parse_ff_historical_html(previous_html, previous_dt.year))
-                except Exception as exc:
-                    logger.debug("economic calendar previous-week HTML enrichment failed: %s", exc)
+                previous_errors = []
+                for template in HISTORICAL_HTML_URLS:
+                    try:
+                        previous_slug = _week_slug(previous_dt)
+                        previous_day = previous_dt.strftime("%b%-d.%Y").lower()
+                        url = template.format(slug=previous_slug, day=previous_day)
+                        previous_html = await asyncio.to_thread(_fetch_historical_html, url)
+                        parsed = _parse_ff_historical_html(previous_html, previous_dt.year)
+                        if parsed:
+                            html_rows.extend(parsed)
+                            break
+                    except Exception as exc:
+                        previous_errors.append(str(exc))
+                if previous_errors and not any(r.get("utc").date() == previous_dt.date() for r in html_rows if r.get("utc")):
+                    logger.debug("economic calendar previous-week HTML fallbacks failed: %s", " | ".join(previous_errors[:4]))
 
             if html_rows:
                 if normalized:
