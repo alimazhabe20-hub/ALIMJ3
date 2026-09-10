@@ -408,20 +408,59 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "«معنی خبر»، «کریپتو»، «دلار/DXY»، «طلا»، «سهام»، «اوراق و بازدهی»، «سناریوی Actual در برابر Forecast»، «جمع‌بندی». "
                     "در «جمع‌بندی» یک جهت‌گیری احتمالی کلی برای ریسک‌پذیری بازار بده (مثلاً ریسک‌پذیرتر، ریسک‌گریزتر یا خنثی) و دلیلش را کوتاه بگو. "
                     "اگر Actual منتشر نشده است، تحلیل را بر اساس سناریوهای بالاتر/پایین‌تر/مطابق انتظار انجام بده و آن را به‌عنوان نتیجه واقعی معرفی نکن.\n\n"
-                    "داده رویداد:\n" + ai_context([e], tz_name)
+                    "داده رویداد هدف:\n" + ai_context([e], tz_name) +
+                    "\n\nکانتکست تقویم اقتصادی مرتبط:\n" + ai_context(events, tz_name, limit=60)
                 )
                 answer, _ = await ask_ai(user_id, prompt)
                 from html import escape
-                body = escape((answer or "تحلیل در دسترس نیست.").strip(), quote=False)
-                if len(body) > 2700:
-                    body = body[:2690] + "…"
+
+                # Telegram text messages support up to 4096 chars. Never truncate an
+                # AI answer mid-sentence: split it at paragraph/line boundaries and
+                # keep the event message + first analysis part on the original message.
+                def _split_ai_text(txt: str, limit: int = 3800):
+                    txt = (txt or "").strip()
+                    if not txt:
+                        return ["تحلیل در دسترس نیست."]
+                    parts, buf, size = [], [], 0
+                    for line in txt.splitlines():
+                        piece = line.strip()
+                        add = len(piece) + (1 if buf else 0)
+                        if buf and size + add > limit:
+                            parts.append("\n".join(buf).strip())
+                            buf, size = [], 0
+                        if len(piece) > limit:
+                            if buf:
+                                parts.append("\n".join(buf).strip())
+                                buf, size = [], 0
+                            while len(piece) > limit:
+                                parts.append(piece[:limit])
+                                piece = piece[limit:]
+                            if piece:
+                                buf, size = [piece], len(piece)
+                        elif piece:
+                            buf.append(piece)
+                            size += add
+                    if buf:
+                        parts.append("\n".join(buf).strip())
+                    return parts or ["تحلیل در دسترس نیست."]
+
+                chunks = _split_ai_text(answer, 3600)
+                first = escape(chunks[0], quote=False)
                 text = event_detail(e, tz_name) + (
                     "\n\n🤖 <b>تحلیل هوشمند بازار</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"<blockquote>{body}</blockquote>"
+                    f"<blockquote>{first}</blockquote>"
                 )
-                # تحلیل باید همان پیام رویداد را ویرایش کند، نه اینکه یک پیام جدید بسازد.
+                # بخش اول روی همان پیام رویداد قرار می‌گیرد. ادامه تحلیل بدون حذف
+                # یا کوتاه‌کردن، در پیام‌های بعدی ارسال می‌شود.
                 await query.edit_message_text(text, parse_mode="HTML", reply_markup=get_event_keyboard(event_id))
+                for idx, chunk in enumerate(chunks[1:], start=2):
+                    continuation = (
+                        f"🤖 <b>ادامه تحلیل هوشمند بازار ({idx}/{len(chunks)})</b>\n"
+                        "━━━━━━━━━━━━━━━━━━━━\n"
+                        f"<blockquote>{escape(chunk, quote=False)}</blockquote>"
+                    )
+                    await query.message.reply_text(continuation, parse_mode="HTML")
                 return
             if data == "ec:back":
                 _set_ec_view(context, mode="today", impact="all")
