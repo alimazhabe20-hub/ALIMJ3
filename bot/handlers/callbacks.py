@@ -21,6 +21,7 @@ from bot.config import config
 from bot.logger import logger
 import jdatetime
 import asyncio
+import html
 
 
 # جلوگیری از اجرای همزمان چند بروزرسانی برای یک کاربر
@@ -507,7 +508,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "back_to_main":
-        from bot.logger import logger
         await _safe_answer(query)
         try:
             user_row = get_user(user_id)
@@ -724,9 +724,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         return
                     # بدون عکس جدید
                     if msg.photo:
-                        await msg.edit_caption(caption=cap, reply_markup=menu)
+                        await msg.edit_caption(caption=cap, parse_mode="HTML", reply_markup=menu)
                     else:
-                        await msg.edit_text(cap[:4000], reply_markup=menu)
+                        await msg.edit_text(cap[:4000], parse_mode="HTML", reply_markup=menu)
                 except Exception:
                     # اگر ویرایش ممکن نبود (مثلاً پیام خیلی قدیمی)، به‌عنوان آخرین راه
                     try:
@@ -745,7 +745,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     if msg.photo:
                         # روی پیام عکسی: کپشن را عوض کن (حد ۱۰۲۴)
-                        await msg.edit_caption(caption=text[:1024], parse_mode="HTML", reply_markup=menu)
+                        await msg.edit_caption(caption=text[:1024], reply_markup=menu)
                     else:
                         await msg.edit_text(text, parse_mode="HTML", reply_markup=menu)
                 except Exception:
@@ -755,44 +755,44 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         logger.debug("%s: %s", __name__, _exc)
 
             if action == "gold":
-                txt = await analyze_gold("4h")
-                await _edit_text(txt)
-                return
-
-            if action == "pa":
-                # پرایس‌اکشن با OHLCV همان نماد/تایم‌فریم؛ برای طلا مسیر XAU/USD اختصاصی است.
-                if symbol.lower() in ("gold", "xau", "xauusd"):
-                    txt = await analyze_gold("1h")
-                else:
-                    from bot.features.market.finance import analyze_crypto
-                    base_pa = await analyze_crypto(symbol, timeframe="4h")
-                    txt = "<b>🧠 تحلیل پرایس اکشن</b>\n<i>━━━━━━━━━━━━━━━━━━━━</i>\n" + base_pa
-                await _edit_text(txt)
+                txt = await analyze_gold("1h")
+                try:
+                    png, _cap = await get_crypto_chart("PAXG", 7)
+                except Exception:
+                    png = None
+                await _edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
                 return
 
             if action == "ai":
-                # AI فقط با درخواست صریح کاربر اجرا می‌شود؛ تحلیل عادی سریع می‌ماند.
+                # گزارش هوشمند باید کل داده قابل‌استفاده را تحلیل کند، نه اینکه آن را به جدول تبدیل کند.
                 base = await analyze_crypto(symbol, timeframe="4h")
                 from bot.services.ai_service import ask_ai
                 prompt = (
-                    "تو یک تحلیل‌گر ارشد بازارهای مالی و کریپتو هستی. داده‌های زیر از منابع زنده سیستم آمده‌اند. "
-                    "هیچ داده، قیمت یا سطحی را حدس نزن و اگر داده‌ای موجود نیست صریح بگو. تحلیل باید حرفه‌ای و ساختاریافته باشد. "
-                    "ساختار بازار و BOS/CHOCH، روند 1H/4H/1D، حمایت و مقاومت، عرضه/تقاضا، RSI/ADX/ATR، حجم، واگرایی، "
-                    "Funding/OI و Long/Short در صورت وجود، Fear & Greed، شکست/رد و invalidation را بررسی کن. "
-                    "اثر BTC/ETH/آلت‌کوین‌ها و DXY/طلا را فقط بر اساس داده موجود توضیح بده. "
-                    "برای سناریوها شرط فعال‌شدن، هدف و invalidation بده. درصد احتمال ساختگی و تضمین سود نده. "
-                    "اگر کیفیت داده یا همگرایی ضعیف است، «عدم‌تأیید / صبر» اعلام کن.\n\n" + base[:6000]
+                    "تو تحلیل‌گر ارشد Price Action و بازارهای مالی هستی. داده‌های زیر از منابع زنده سیستم آمده‌اند. "
+                    "همه داده‌های موجود را بررسی کن و هیچ قیمت، سطح یا درصدی را حدس نزن. "
+                    "خروجی را برای Telegram و به‌صورت گزارش خوانا بنویس؛ جدول Markdown نساز. "
+                    "بخش‌ها: وضعیت بازار، ساختار HH/HL/LH/LL، BOS/CHOCH، کندل‌ها و rejection، حمایت/مقاومت همان تایم‌فریم، "
+                    "عرضه/تقاضا، نقدینگی و Equal High/Low، شکست و retest، RSI/ADX/ATR، حجم، واگرایی، Funding/OI/Long-Short، "
+                    "MTF، سناریوی Long، سناریوی Short، invalidation، و نتیجه نهایی. اگر داده‌ای نیست صریح بگو. "
+                    "از عبارت‌های کوتاه و تیترهای واضح استفاده کن. در بازار ضعیف یا متناقض، ورود را تأیید نکن.\n\n" + base[:12000]
                 )
                 answer, _ = await ask_ai(query.from_user.id, prompt)
-                await _edit_text("<b>🧠 تحلیل هوشمند حرفه‌ای</b>\n<i>━━━━━━━━━━━━━━━━━━━━</i>\n" + ((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip()))
+                safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip())
+                out = "🧠 <b>تحلیل هوشمند حرفه‌ای</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
+                png, _cap = await get_crypto_chart(symbol, 7)
+                await _edit_photo_caption(png, out)
+                return
+
+            if action == "pa":
+                if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
+                    txt = await analyze_gold("1h")
+                else:
+                    txt = await analyze_crypto(symbol, timeframe="4h")
+                await _edit_text("🧠 <b>تحلیل پرایس اکشن</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
                 return
 
             if action == "day":
                 # تحلیل روزانه + نمودار روزانه روی همان پیام
-                if symbol.lower() in ("gold", "xau", "xauusd"):
-                    report = await analyze_gold("1d")
-                    await _edit_text(report)
-                    return
                 base = await analyze_crypto(symbol, timeframe="1d")
                 report = base
                 png, _cap = await get_crypto_chart(symbol, 90)
@@ -800,12 +800,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _edit_photo_caption(png, caption)
 
             elif action == "hr":
-                if symbol.lower() in ("gold", "xau", "xauusd"):
-                    report = await analyze_gold("1h")
-                    png = None
-                else:
-                    report = await analyze_crypto(symbol, timeframe="1h")
-                    png, _cap = await get_crypto_chart(symbol, 7)
+                base = await analyze_crypto(symbol, timeframe="1h")
+                report = base
+                png, _cap = await get_crypto_chart(symbol, 7)
                 caption = (report or "")[:1024]
                 await _edit_photo_caption(png, caption)
 

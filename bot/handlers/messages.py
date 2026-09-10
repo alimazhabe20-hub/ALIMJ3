@@ -783,13 +783,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data["waiting_for"] = "profit"; track_usage(user_id, "profit")
         await update.message.reply_text("📈 `1000 1200` یا `1000 1200 5`", reply_markup=get_market_keyboard()); return
 
-    if text in ("🥇 تحلیل طلا / XAUUSD", "تحلیل طلا", "XAUUSD", "XAU/USD"):
-        context.user_data.pop("waiting_for", None)
-        from bot.features.market.finance import analyze_gold, get_crypto_analysis_keyboard
-        txt = await analyze_gold("4h")
-        await update.message.reply_text(txt, parse_mode="HTML", reply_markup=get_crypto_analysis_keyboard("gold"))
-        return
-
     if text in (
         "📊 نمودار و تحلیل ارز دیجیتال",
         "نمودار و تحلیل ارز دیجیتال",
