@@ -29,6 +29,8 @@ FF_FALLBACK_URLS = (
     "https://cdn-nfs.faireconomy.media/ff_calendar_nextweek.json",
 )
 CACHE_TTL = 5 * 60
+MAJOR_CURRENCIES = ("USD", "EUR", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF")
+
 _MAX_EVENTS = 600
 
 _cache: list[dict[str, Any]] = []
@@ -863,11 +865,16 @@ async def get_calendar_for_user(
         end = start + timedelta(days=days)
     out = []
     cur = (currency or "").upper().strip()
+    # فقط ارزهای اصلی بازار؛ لیست شلوغ کشورها نمایش داده نمی‌شود.
+    majors_only = True
     for e in events:
         local = e["utc"].astimezone(tz)
         if not (start <= local < end):
             continue
-        if cur and e["country"] != cur:
+        country = (e.get("country") or "").upper()
+        if cur and country != cur:
+            continue
+        if majors_only and country not in MAJOR_CURRENCIES:
             continue
         if impact and impact != "all" and e["impact"].lower() != impact.lower():
             continue
