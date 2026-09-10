@@ -253,7 +253,7 @@ async def _gemini_with_media(
     for key in keys:
         try:
             working = list(contents)
-            for round_no in range(4):
+            for round_no in range(7):
                 payload = {
                     "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
                     "contents": working,
@@ -308,6 +308,20 @@ async def _gemini_with_media(
                 text = "".join(p.get("text", "") for p in out_parts if isinstance(p, dict)).strip()
                 if not text:
                     raise RuntimeError(f"Gemini پاسخ متنی خالی داد: {str(data)[:700]}")
+                finish_reason = str((candidates[0] or {}).get("finishReason") or (candidates[0] or {}).get("finish_reason") or "").upper()
+                # Gemini وقتی به maxOutputTokens برسد MAX_TOKENS می‌دهد.
+                # ادامه را خودکار می‌گیریم تا کاربر پاسخ نصفه نبیند.
+                if finish_reason in {"MAX_TOKENS", "MAX_OUTPUT_TOKENS"} and round_no < 6:
+                    working.append({"role": "model", "parts": out_parts})
+                    working.append({
+                        "role": "user",
+                        "parts": [{"text": (
+                            "پاسخ قبلی به سقف خروجی رسید. دقیقاً از همان نقطه ادامه بده. "
+                            "هیچ بخش قبلی را تکرار نکن، مقدمه نده و فقط ادامهٔ طبیعی پاسخ را بنوی. "
+                            "اگر بخش یا جدول نیمه‌تمام است ابتدا همان را کامل کن."
+                        )}],
+                    })
+                    continue
                 _advance_rr("gemini")
                 return text
         except RuntimeError as exc:

@@ -357,7 +357,7 @@ async def _openai_compatible(
         max_tool_rounds = 2 if tools_enabled else 0
         # یک دور اضافه فقط برای synthesis نهایی است؛ اگر مدل در آخرین دور
         # دوباره tool-call بدهد، نتیجه ابزار را می‌گیرد و پاسخ طبیعی را می‌سازد.
-        total_rounds = max_tool_rounds + 2 if tools_enabled else 1
+        total_rounds = max_tool_rounds + 5 if tools_enabled else 4
 
         try:
             for _round in range(total_rounds):
@@ -463,6 +463,20 @@ async def _openai_compatible(
                     continue
 
                 text = _extract_openai(data)
+                finish_reason = str((choices[0] or {}).get("finish_reason") or "").lower()
+                # اگر مدل به سقف خروجی رسیده، همان‌جا پاسخ را تحویل نده؛
+                # چند دور ادامهٔ خودکار می‌گیریم تا پاسخ واقعاً کامل شود.
+                if finish_reason in {"length", "max_tokens", "max_output_tokens"} and text and _round < total_rounds - 1:
+                    messages.append({"role": "assistant", "content": text})
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "پاسخ قبلی به سقف خروجی رسید. دقیقاً از همان نقطه ادامه بده. "
+                            "هیچ بخش قبلی را تکرار نکن، مقدمه نده و فقط ادامهٔ طبیعی پاسخ را بنویس. "
+                            "اگر یک بخش/جدول/فهرست نیمه‌تمام است ابتدا همان را کامل کن."
+                        ),
+                    })
+                    continue
                 _advance_rr(provider)
                 return text
 
