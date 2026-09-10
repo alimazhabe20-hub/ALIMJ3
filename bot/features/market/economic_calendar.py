@@ -278,6 +278,114 @@ def _refresh_ff_html_values(events: list[dict[str, Any]]) -> None:
         _merge_ff_html_values(events, all_rows)
 
 
+
+BIQUOTE_URL = "https://biquote.io/api/calendar"
+
+
+def _to_str_num(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, float):
+        if value != value:  # NaN
+            return ""
+        s = f"{value:.6f}".rstrip("0").rstrip(".")
+        return s
+    return str(value).strip()
+
+
+def _biquote_importance(value: str) -> str:
+    v = (value or "").lower().strip()
+    return {"high": "High", "medium": "Medium", "low": "Low"}.get(v, value or "")
+
+
+def _fetch_biquote(day_from: str, day_to: str) -> list[dict[str, Any]]:
+    r = requests.get(
+        BIQUOTE_URL,
+        params={"from": day_from, "to": day_to},
+        timeout=18,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+        },
+    )
+    r.raise_for_status()
+    data = r.json()
+    if not isinstance(data, list):
+        raise ValueError("biquote calendar format invalid")
+    return data
+
+
+def _merge_biquote_values(events: list[dict[str, Any]], rows: list[dict[str, Any]]) -> None:
+    """Fill blank actual/forecast/previous from biquote when FF JSON is empty."""
+    if not events or not rows:
+        return
+    # Index by UTC minute + currency for robust matching.
+    by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for r in rows:
+        t = str(r.get("time") or "").replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(t).astimezone(timezone.utc)
+        except Exception:
+            continue
+        cur = str(r.get("currency") or r.get("countryCode") or "").upper().strip()
+        if not cur:
+            continue
+        key = (dt.strftime("%Y-%m-%d %H:%M"), cur)
+        by_key.setdefault(key, []).append(r)
+
+    for e in events:
+        local_key = (e["utc"].astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M"), e["country"])
+        candidates = by_key.get(local_key, [])
+        if not candidates:
+            # ±2 hour window same currency + fuzzy title
+            ek = _title_key(e["title"])
+            for (stamp, cur), vals in by_key.items():
+                if cur != e["country"]:
+                    continue
+                try:
+                    stamp_dt = datetime.strptime(stamp, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+                except Exception:
+                    continue
+                if abs((stamp_dt - e["utc"]).total_seconds()) > 2 * 3600:
+                    continue
+                for r in vals:
+                    tk = _title_key(str(r.get("name") or ""))
+                    if ek and tk and (ek == tk or ek in tk or tk in ek):
+                        candidates.append(r)
+        if not candidates:
+            continue
+        # Prefer the candidate that already has actual/forecast filled.
+        candidates = sorted(
+            candidates,
+            key=lambda r: (
+                0 if r.get("actual") is not None else 1,
+                0 if r.get("forecast") is not None else 1,
+            ),
+        )
+        r = candidates[0]
+        mapping = {
+            "actual": _to_str_num(r.get("actual")),
+            "forecast": _to_str_num(r.get("forecast")),
+            "previous": _to_str_num(r.get("previous") if r.get("previous") is not None else r.get("revisedPrevious")),
+        }
+        for field, value in mapping.items():
+            if value and not str(e.get(field) or "").strip():
+                e[field] = value
+
+
+def _refresh_biquote_values(events: list[dict[str, Any]]) -> None:
+    if not events:
+        return
+    days = sorted({e["utc"].astimezone(timezone.utc).strftime("%Y-%m-%d") for e in events})
+    if not days:
+        return
+    day_from = days[0]
+    # exclusive-ish end: last day + 1 handled by API range inclusivity; pass last+1 day string loosely
+    last = datetime.strptime(days[-1], "%Y-%m-%d").date()
+    day_to = (last + timedelta(days=1)).isoformat()
+    rows = _fetch_biquote(day_from, day_to)
+    _merge_biquote_values(events, rows)
+
 def _fetch_json(url: str) -> list[dict[str, Any]]:
     r = requests.get(url, timeout=18, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -326,6 +434,10 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
             await asyncio.to_thread(_refresh_ff_html_values, normalized)
         except Exception as exc:
             logger.debug("economic calendar HTML enrichment failed: %s", exc)
+        try:
+            await asyncio.to_thread(_refresh_biquote_values, normalized)
+        except Exception as exc:
+            logger.debug("economic calendar biquote enrichment failed: %s", exc)
         if normalized:
             _cache = normalized
             _cache_fetched_at = time.time()
@@ -430,7 +542,7 @@ def calendar_text(events, *, title: str, tz_name: str = "", limit: int = 25) -> 
         lines += [f"… <i>{remaining} رویداد دیگر هم وجود دارد.</i>", ""]
     lines += [
         "<b>راهنمای اهمیت:</b> 🔴 زیاد  🟠 متوسط  🟡 کم",
-        "ℹ️ <i>مقادیر واقعی ممکن است تا زمان انتشار خالی باشند.</i>",
+        "ℹ️ <i>مقادیر واقعی پس از انتشار از چند منبع تکمیل می‌شوند؛ اگر هنوز خالی است یعنی هنوز در منبع رسمی ثبت نشده.</i>",
     ]
     return "\n".join(lines)
 
@@ -482,20 +594,22 @@ def ai_context(events, tz_name: str = "", limit: int = 40) -> str:
     return "\n".join(rows)
 
 
-def get_calendar_keyboard(user_id: int, *, mode: str = "today", impact: str = "all", events=None):
+def get_calendar_keyboard(user_id: int, *, mode: str = "today", impact: str = "all", events=None, currency: str = "", selected_date=None, **_kwargs):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     rows = [
         [InlineKeyboardButton("📅 امروز", callback_data="ec:today"), InlineKeyboardButton("📆 فردا", callback_data="ec:tomorrow"), InlineKeyboardButton("🗓 هفته", callback_data="ec:week")],
         [InlineKeyboardButton("🔴 فقط مهم", callback_data="ec:impact:high"), InlineKeyboardButton("📋 همه خبرها", callback_data="ec:impact:all")],
         [InlineKeyboardButton("🤖 تحلیل هوشمند", callback_data="ec:ai"), InlineKeyboardButton("🔔 اعلان‌ها", callback_data="ec:settings")],
         [InlineKeyboardButton("💵 USD", callback_data="ec:cur:USD"), InlineKeyboardButton("💶 EUR", callback_data="ec:cur:EUR"), InlineKeyboardButton("💷 GBP", callback_data="ec:cur:GBP")],
+        [InlineKeyboardButton("🔄 بروزرسانی", callback_data="ec:refresh")],
     ]
+    # دکمه جدا برای هر خبر (حداکثر ۲۰ تا تا کیبورد شلوغ نشود)
     if events:
-        for e in list(events)[:6]:
-            rows.append([InlineKeyboardButton(
-                f"{IMPACT_ICON.get(e['impact'], '⚪')} {e['country']} {e['title_fa'][:38]}",
-                callback_data=f"ec:event:{e['id']}",
-            )])
+        tz_name = getattr(config, "TIMEZONE", "Asia/Tehran")
+        for e in list(events)[:20]:
+            local = e["utc"].astimezone(_tz(tz_name))
+            label = f"{IMPACT_ICON.get(e['impact'], '⚪')} {local.strftime('%H:%M')} {e['country']} {e['title_fa'][:28]}"
+            rows.append([InlineKeyboardButton(label, callback_data=f"ec:event:{e['id']}")])
     rows.append([InlineKeyboardButton("🕐 تنظیم ساعت و فیلتر", callback_data="ec:settings")])
     return InlineKeyboardMarkup(rows)
 
