@@ -157,3 +157,14 @@ async def _h_crypto_chart(u, c, t, uid):
 
 async def _h_crypto_analyze(u, c, t, uid):
     return await _h_crypto_full(u, c, t, uid)
+
+async def _h_economic_calendar(u, c, t, uid):
+    """تقویم اقتصادی زنده + تحلیل هوشمند فارسی."""
+    c.user_data.pop("waiting_for", None)
+    from bot.features.market.economic_calendar import get_calendar_for_user, calendar_text, get_calendar_keyboard
+    try:
+        events, tz_name = await get_calendar_for_user(uid, "today", "all")
+        text = calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name)
+        await u.message.reply_text(text, reply_markup=get_calendar_keyboard(uid, events=events))
+    except Exception as e:
+        await u.message.reply_text(f"⚠️ تقویم اقتصادی فعلاً در دسترس نیست.\n{e}", reply_markup=get_market_keyboard())

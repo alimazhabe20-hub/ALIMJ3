@@ -17,6 +17,8 @@ from bot.utils.helpers import (
 )
 from bot.api.calendar import get_today_tehran
 from bot.handlers.middleware import check_and_rate_limit
+from bot.config import config
+from bot.logger import logger
 import jdatetime
 import asyncio
 
@@ -63,6 +65,147 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
     user_id = update.effective_user.id
+
+    # ───────────────── تقویم اقتصادی بازار ─────────────────
+    if data and data.startswith("ec:"):
+        from bot.features.market.economic_calendar import (
+            get_calendar_for_user, calendar_text, get_calendar_keyboard,
+            get_settings_keyboard, get_lead_keyboard, get_tz_keyboard,
+            get_event_keyboard, get_event, refresh_calendar, event_detail,
+            ai_context,
+        )
+        from bot.database import get_economic_calendar_preferences, set_economic_calendar_preferences
+        try:
+            if data == "ec:today":
+                events, tz_name = await get_calendar_for_user(user_id, "today", "all")
+                await _safe_answer(query)
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), reply_markup=get_calendar_keyboard(user_id, events=events))
+                return
+            if data == "ec:tomorrow":
+                events, tz_name = await get_calendar_for_user(user_id, "tomorrow", "all")
+                await _safe_answer(query)
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی فردا", tz_name=tz_name), reply_markup=get_calendar_keyboard(user_id, events=events))
+                return
+            if data == "ec:week":
+                events, tz_name = await get_calendar_for_user(user_id, "week", "all")
+                await _safe_answer(query)
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی هفته", tz_name=tz_name), reply_markup=get_calendar_keyboard(user_id, events=events))
+                return
+            if data == "ec:impact:high":
+                events, tz_name = await get_calendar_for_user(user_id, "today", "high")
+                await _safe_answer(query, "فقط خبرهای مهم")
+                await query.edit_message_text(calendar_text(events, title="خبرهای مهم اقتصادی امروز", tz_name=tz_name), reply_markup=get_calendar_keyboard(user_id, events=events))
+                return
+            if data == "ec:impact:all":
+                events, tz_name = await get_calendar_for_user(user_id, "today", "all")
+                await _safe_answer(query)
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), reply_markup=get_calendar_keyboard(user_id, events=events))
+                return
+            if data.startswith("ec:cur:"):
+                cur = data.split(":", 2)[2].upper()
+                events, tz_name = await get_calendar_for_user(user_id, "today", "all", cur)
+                await _safe_answer(query, f"فیلتر {cur}")
+                await query.edit_message_text(calendar_text(events, title=f"خبرهای {cur} امروز", tz_name=tz_name), reply_markup=get_calendar_keyboard(user_id, events=events))
+                return
+            if data == "ec:settings":
+                await _safe_answer(query)
+                await query.edit_message_reply_markup(reply_markup=get_settings_keyboard(user_id))
+                return
+            if data == "ec:toggle_alert":
+                p = get_economic_calendar_preferences(user_id)
+                set_economic_calendar_preferences(user_id, alerts=not p["alerts"])
+                await _safe_answer(query, "اعلان‌ها روشن شد ✅" if not p["alerts"] else "اعلان‌ها خاموش شد 🔕")
+                await query.edit_message_reply_markup(reply_markup=get_settings_keyboard(user_id))
+                return
+            if data == "ec:lead_menu":
+                await _safe_answer(query)
+                await query.edit_message_reply_markup(reply_markup=get_lead_keyboard())
+                return
+            if data.startswith("ec:lead:"):
+                minutes = int(data.split(":", 2)[2])
+                set_economic_calendar_preferences(user_id, lead_minutes=minutes)
+                await _safe_answer(query, f"هشدار {minutes} دقیقه قبل تنظیم شد")
+                await query.edit_message_reply_markup(reply_markup=get_settings_keyboard(user_id))
+                return
+            if data == "ec:tz_menu":
+                await _safe_answer(query)
+                await query.edit_message_reply_markup(reply_markup=get_tz_keyboard())
+                return
+            if data.startswith("ec:tz:"):
+                tz_name = data.split(":", 2)[2]
+                set_economic_calendar_preferences(user_id, timezone=tz_name)
+                await _safe_answer(query, "منطقه زمانی ذخیره شد ✅")
+                await query.edit_message_reply_markup(reply_markup=get_settings_keyboard(user_id))
+                return
+            if data == "ec:impact_menu":
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                await _safe_answer(query)
+                await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔴 فقط زیاد", callback_data="ec:setimpact:high"), InlineKeyboardButton("🟠 زیاد + متوسط", callback_data="ec:setimpact:medium")],
+                    [InlineKeyboardButton("📋 همه", callback_data="ec:setimpact:all")],
+                    [InlineKeyboardButton("↩️ برگشت", callback_data="ec:settings")],
+                ]))
+                return
+            if data.startswith("ec:setimpact:"):
+                impact = data.split(":", 2)[2]
+                set_economic_calendar_preferences(user_id, impact=impact)
+                await _safe_answer(query, "فیلتر اهمیت ذخیره شد ✅")
+                await query.edit_message_reply_markup(reply_markup=get_settings_keyboard(user_id))
+                return
+            if data == "ec:ai":
+                await _safe_answer(query, "در حال تحلیل هوشمند…")
+                events, tz_name = await get_calendar_for_user(user_id, "today", "all")
+                context_text = ai_context(events, tz_name, 35)
+                from bot.services.ai_service import ask_ai
+                prompt = (
+                    "تو تحلیل‌گر حرفه‌ای تقویم اقتصادی هستی. پاسخ را کاملاً فارسی، روشن و کاربردی بنویس. "
+                    "از داده‌های زیر خارج نشو و عدد/خبر جدید اختراع نکن. برای هر خبر مهم، اهمیت، زمان، ارز، "
+                    "پیش‌بینی و قبلی را توضیح بده و بگو چرا ممکن است روی بازار اثر بگذارد. در پایان یک جمع‌بندی "
+                    "از مهم‌ترین ریسک‌های امروز بده. توصیه قطعی خرید/فروش نده.\n\nداده تقویم:\n" + context_text[:6500]
+                )
+                answer, _ = await ask_ai(user_id, prompt)
+                await query.message.reply_text("🤖 تحلیل هوشمند تقویم اقتصادی\n────────────────────\n" + (answer or "تحلیل در دسترس نیست." )[:3800], reply_markup=get_calendar_keyboard(user_id, events=events))
+                return
+            if data.startswith("ec:event:"):
+                event_id = data.split(":", 2)[2]
+                events = await refresh_calendar()
+                p = get_economic_calendar_preferences(user_id)
+                tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
+                e = get_event(events, event_id)
+                if not e:
+                    await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست.", show_alert=True)
+                    return
+                await _safe_answer(query)
+                await query.edit_message_text(event_detail(e, tz_name), reply_markup=get_event_keyboard(event_id))
+                return
+            if data.startswith("ec:analyze:"):
+                event_id = data.split(":", 2)[2]
+                events = await refresh_calendar()
+                p = get_economic_calendar_preferences(user_id)
+                tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
+                e = get_event(events, event_id)
+                if not e:
+                    await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست.", show_alert=True)
+                    return
+                await _safe_answer(query, "در حال تحلیل…")
+                from bot.services.ai_service import ask_ai
+                prompt = (
+                    "این رویداد اقتصادی را فقط بر اساس داده‌های داده‌شده تحلیل کن. کاملاً فارسی. "
+                    "توضیح بده اگر واقعی بالاتر/پایین‌تر از پیش‌بینی باشد معمولاً چه برداشتی برای ارز مربوطه دارد، "
+                    "اما سناریوی قطعی یا توصیه سرمایه‌گذاری نده.\n\n" + ai_context([e], tz_name)
+                )
+                answer, _ = await ask_ai(user_id, prompt)
+                await query.message.reply_text(event_detail(e, tz_name) + "\n\n🤖 تحلیل AI:\n" + (answer or "تحلیل در دسترس نیست.")[:2500], reply_markup=get_event_keyboard(event_id))
+                return
+            if data == "ec:back":
+                events, tz_name = await get_calendar_for_user(user_id, "today", "all")
+                await _safe_answer(query)
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), reply_markup=get_calendar_keyboard(user_id, events=events))
+                return
+        except Exception as e:
+            logger.error("economic calendar callback failed: %s", e, exc_info=True)
+            await _safe_answer(query, "⚠️ خطا در تقویم اقتصادی.", show_alert=True)
+            return
 
     if data == "ai_models":
         await _safe_answer(query)

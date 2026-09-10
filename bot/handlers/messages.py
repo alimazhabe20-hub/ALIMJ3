@@ -22,7 +22,7 @@ from bot.handlers.feature_handlers import (
     _h_date_convert, _h_age_calc, _h_birthday, _h_zodiac, _h_lunar,
     _h_date_diff, _h_age_diff, _h_event_search, _h_countdown, _h_calc,
     _h_profit, _h_currency, _h_crypto_full, _h_crypto_pos, _h_crypto_chart,
-    _h_crypto_analyze, _h_distance, _h_birth_save, _h_count_text,
+    _h_crypto_analyze, _h_economic_calendar, _h_distance, _h_birth_save, _h_count_text,
     _h_font_text, _h_font_all,
 )
 from bot.utils.motivation import get_motivation
@@ -744,6 +744,11 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             "اسم محصول، قیمت، لینک خرید یا عکس محصول را بفرست؛ خودم جستجوی فروشگاهی و مقایسه را انجام می‌دهم.",
             reply_markup=get_ai_keyboard(user_id),
         )
+        return
+
+    if text in ("🗓 تقویم اقتصادی", "تقویم اقتصادی", "📅 تقویم اقتصادی"):
+        track_usage(user_id, "economic_calendar")
+        await _h_economic_calendar(update, context, text, user_id)
         return
 
     if text in ("💵 قیمت کامل بازار", "قیمت کامل بازار"):
