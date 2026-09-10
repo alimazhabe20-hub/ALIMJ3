@@ -188,7 +188,12 @@ def _ff_html_text(node) -> str:
 
 
 def _parse_ff_html(url: str) -> list[dict[str, Any]]:
-    r = requests.get(url, timeout=18, headers={"User-Agent": "Mozilla/5.0 ALIMJ Economic Calendar"})
+    r = requests.get(url, timeout=18, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json,text/html,*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.forexfactory.com/",
+    })
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
     out: list[dict[str, Any]] = []
@@ -274,7 +279,12 @@ def _refresh_ff_html_values(events: list[dict[str, Any]]) -> None:
 
 
 def _fetch_json(url: str) -> list[dict[str, Any]]:
-    r = requests.get(url, timeout=18, headers={"User-Agent": "Mozilla/5.0 ALIMJ Economic Calendar"})
+    r = requests.get(url, timeout=18, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json,text/html,*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.forexfactory.com/",
+    })
     r.raise_for_status()
     data = r.json()
     if not isinstance(data, list):
@@ -381,8 +391,10 @@ def format_event(e: dict[str, Any], tz_name: str = "") -> str:
     icon = IMPACT_ICON.get(e["impact"], "⚪")
     title_fa = _esc(e["title_fa"])
     title_en = _esc(e["title"])
+    now = datetime.now(_tz(tz_name))
+    past_mark = " ✅" if local < now else ""
     return (
-        f"{icon} <b>{local.strftime('%H:%M')} | {_esc(e['country'])} | {title_fa}</b>\n"
+        f"{icon} <b>{local.strftime('%H:%M')} | {_esc(e['country'])} | {title_fa}</b>{past_mark}\n"
         f"   <i>{title_en}</i>\n"
         f"   🚦 <b>اهمیت:</b> {_esc(_impact_label(e))}"
         f"  •  📢 <b>واقعی:</b> {_esc(format_value(e['actual']))}"
@@ -537,7 +549,8 @@ async def get_calendar_for_user(user_id: int, mode: str = "today", impact: str =
     tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
     days = 7 if mode == "week" else 2 if mode == "tomorrow" else 1
     events = await refresh_calendar()
-    # برای فردا فقط روز دوم؛ برای امروز فقط امروز.
+    # تقویم «امروز» باید کل روز را نشان بدهد (از ۰۰:۰۰)، نه فقط رویدادهای باقی‌مانده.
+    # در غیر این صورت بعد از ظهر فقط آخرین رویدادها (مثل Bond Auction) دیده می‌شود.
     tz = _tz(tz_name)
     now = datetime.now(tz)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -546,8 +559,6 @@ async def get_calendar_for_user(user_id: int, mode: str = "today", impact: str =
         end = start + timedelta(days=1)
     else:
         end = start + timedelta(days=days)
-        if mode == "today":
-            start = now
     out = []
     for e in events:
         local = e["utc"].astimezone(tz)
