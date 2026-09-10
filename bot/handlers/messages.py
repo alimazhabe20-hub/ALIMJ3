@@ -276,22 +276,22 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
         chunks = _split_telegram_text("🤖 " + answer, 3900)
         if not chunks:
             chunks = ["🤖 پاسخی دریافت نشد."]
-        # پیام اول: ویرایش همان «در حال نوشتن»
-        first = chunks[0]
-        if first != last_rendered:
+        # پیام نهایی اول: ویرایش همان «در حال نوشتن»
+        final = chunks[0]
+        if final != last_rendered:
             try:
-                await sent.edit_text(first)
-                last_rendered = first
+                await sent.edit_text(final)
+                last_rendered = final
             except Exception as edit_error:
                 logger.warning("AI final edit failed; retrying same message: %s", edit_error)
                 try:
                     await asyncio.sleep(0.15)
-                    await sent.edit_text(first)
-                    last_rendered = first
+                    await sent.edit_text(final)
+                    last_rendered = final
                 except Exception as retry_error:
                     logger.warning("AI final edit retry failed: %s", retry_error)
                     try:
-                        await msg.reply_text(first)
+                        await msg.reply_text(final)
                     except Exception:
                         pass
         # ادامه‌ها در پیام‌های بعدی تا هیچ بخشی حذف نشود
