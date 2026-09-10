@@ -683,18 +683,27 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 from io import BytesIO
                 bio = BytesIO(png)
                 bio.name = "gold_xauusd_1h.png"
+                # کلیدهای Inline را روی خود پیام تصویر قرار می‌دهیم؛ از این به بعد
+                # تغییر تایم‌فریم همان فایل تصویر را با edit_message_media به‌روزرسانی می‌کند.
+                caption = "🥇 <b>تحلیل طلا / XAUUSD — 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n"
+                preview = (report or "داده کافی برای تحلیل طلا در دسترس نیست.").strip()
+                if len(preview) > 850:
+                    preview = preview[:840].rsplit("\n", 1)[0] + "…"
+                caption += preview
                 await update.message.reply_photo(
                     photo=bio,
-                    caption="🥇 <b>تحلیل طلا / XAUUSD — 1H</b>",
+                    caption=caption,
                     parse_mode="HTML",
+                    reply_markup=menu,
                 )
-            chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
-            for i, chunk in enumerate(chunks):
-                await update.message.reply_text(
-                    chunk,
-                    parse_mode="HTML",
-                    reply_markup=menu if i == len(chunks) - 1 else None,
-                )
+            else:
+                chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
+                for i, chunk in enumerate(chunks):
+                    await update.message.reply_text(
+                        chunk,
+                        parse_mode="HTML",
+                        reply_markup=menu if i == len(chunks) - 1 else None,
+                    )
             return
         except Exception as exc:
             logger.error("gold market button failed: %s", exc, exc_info=True)
@@ -728,7 +737,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.message.reply_photo(
                     photo=bio,
                     caption="🥇 Gold / XAUUSD — 1H",
-                    reply_markup=get_market_keyboard(),
+                    reply_markup=get_crypto_analysis_keyboard("gold"),
                 )
             # گزارش کامل را به‌صورت پیام متنی می‌فرستیم تا محدودیت 1024 کاراکتری کپشن باعث ناقص شدن تحلیل نشود.
             chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]

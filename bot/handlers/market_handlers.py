@@ -85,7 +85,20 @@ async def _h_crypto_full(u, c, t, uid):
         try:
             bio = BytesIO(png)
             bio.name = f"{symbol}_analysis.png"
-            await u.message.reply_photo(photo=bio, caption=f"📈 <b>نمودار تحلیل {html.escape(symbol.upper())}</b>", parse_mode="HTML")
+            # کیبورد Inline روی خود تصویر قرار می‌گیرد تا callback تایم‌فریم
+            # بتواند همان پیام تصویر را با edit_message_media به‌روزرسانی کند.
+            preview = (report or "").strip()
+            if len(preview) > 820:
+                preview = preview[:810].rsplit("\n", 1)[0] + "…"
+            caption = f"📈 <b>نمودار تحلیل {html.escape(symbol.upper())}</b>"
+            if preview:
+                caption += "\n━━━━━━━━━━━━━━━━━━━━\n" + preview
+            await u.message.reply_photo(
+                photo=bio,
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=menu,
+            )
         except Exception as e:
             chart_note = f"⚠️ ارسال نمودار ناموفق بود: {e}"
     if chart_note and not png:
@@ -127,14 +140,14 @@ async def _h_crypto_full(u, c, t, uid):
         chunks = ["❌ داده‌ای برای تحلیل دریافت نشد."]
     for i, chunk in enumerate(chunks):
         kwargs = {"parse_mode": "HTML"}
-        if i == len(chunks) - 1:
+        if i == len(chunks) - 1 and not png:
             kwargs["reply_markup"] = menu
         try:
             await u.message.reply_text(chunk, **kwargs)
         except Exception:
             # اگر HTML به هر دلیل نامعتبر بود، متن ساده را کامل و امن بفرست.
             plain = re.sub(r"<[^>]+>", "", chunk)
-            await u.message.reply_text(plain[:3500], reply_markup=menu if i == len(chunks)-1 else None)
+            await u.message.reply_text(plain[:3500], reply_markup=menu if (i == len(chunks)-1 and not png) else None)
 
 async def _h_crypto_pos(u, c, t, uid):
     """پاسخ به ورودی سایز پوزیشن یا قیمت هشدار"""
@@ -166,6 +179,7 @@ async def _h_economic_calendar(u, c, t, uid):
     c.user_data.pop("waiting_for", None)
     from bot.features.market.economic_calendar import get_calendar_for_user, calendar_text, get_calendar_keyboard
     try:
+        c.user_data["ec_view"] = {"mode": "today", "impact": "all", "currency": "", "date_str": ""}
         events, tz_name = await get_calendar_for_user(uid, "today", "all")
         text = calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name)
         await u.message.reply_text(text, parse_mode="HTML", reply_markup=get_calendar_keyboard(uid, events=events))
