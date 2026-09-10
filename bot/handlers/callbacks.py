@@ -408,56 +408,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "«معنی خبر»، «کریپتو»، «دلار/DXY»، «طلا»، «سهام»، «اوراق و بازدهی»، «سناریوی Actual در برابر Forecast»، «جمع‌بندی». "
                     "در «جمع‌بندی» یک جهت‌گیری احتمالی کلی برای ریسک‌پذیری بازار بده (مثلاً ریسک‌پذیرتر، ریسک‌گریزتر یا خنثی) و دلیلش را کوتاه بگو. "
                     "اگر Actual منتشر نشده است، تحلیل را بر اساس سناریوهای بالاتر/پایین‌تر/مطابق انتظار انجام بده و آن را به‌عنوان نتیجه واقعی معرفی نکن.\n\n"
-                    "داده رویداد هدف:\n" + ai_context([e], tz_name, 1) +
-                    "\n\nکانتکست تقویم مرتبط (برای تشخیص هم‌زمانی خبرها و اثرات متقابل):\n" +
-                    ai_context(events, tz_name, 60)
+                    "داده رویداد:\n" + ai_context([e], tz_name)
                 )
                 answer, _ = await ask_ai(user_id, prompt)
                 from html import escape
-                answer_text = (answer or "تحلیل در دسترس نیست.").strip()
-
-                # Telegram حدود 4096 کاراکتر برای پیام متنی دارد. به‌جای بریدن
-                # کورکورانه وسط تحلیل، بخش اول را روی همان پیام رویداد قرار می‌دهیم
-                # و اگر لازم بود ادامه را در پیام‌های بعدی می‌فرستیم.
-                event_text = event_detail(e, tz_name)
-                header = (
+                body = escape((answer or "تحلیل در دسترس نیست.").strip(), quote=False)
+                if len(body) > 2700:
+                    body = body[:2690] + "…"
+                text = event_detail(e, tz_name) + (
                     "\n\n🤖 <b>تحلیل هوشمند بازار</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
+                    f"<blockquote>{body}</blockquote>"
                 )
-                max_first_body = max(900, 4000 - len(event_text) - len(header) - 80)
-
-                def _split_naturally(text: str, size: int):
-                    if len(text) <= size:
-                        return [text]
-                    parts = []
-                    rest = text.strip()
-                    while len(rest) > size:
-                        cut = max(rest.rfind("\n", 0, size), rest.rfind(". ", 0, size))
-                        if cut < int(size * 0.65):
-                            cut = size
-                        elif rest[cut:cut + 2] == ". ":
-                            cut += 1
-                        parts.append(rest[:cut].strip())
-                        rest = rest[cut:].strip()
-                    if rest:
-                        parts.append(rest)
-                    return parts
-
-                chunks = _split_naturally(answer_text, max_first_body)
-                first = escape(chunks[0], quote=False)
-                text = event_text + header + f"<blockquote>{first}</blockquote>"
-                if len(chunks) > 1:
-                    text += "\n\n📌 <i>ادامه تحلیل در پیام بعدی…</i>"
                 # تحلیل باید همان پیام رویداد را ویرایش کند، نه اینکه یک پیام جدید بسازد.
                 await query.edit_message_text(text, parse_mode="HTML", reply_markup=get_event_keyboard(event_id))
-
-                for idx, chunk in enumerate(chunks[1:], 2):
-                    continuation = (
-                        f"🤖 <b>ادامه تحلیل هوشمند بازار ({idx}/{len(chunks)})</b>\n"
-                        "━━━━━━━━━━━━━━━━━━━━\n"
-                        f"<blockquote>{escape(chunk, quote=False)}</blockquote>"
-                    )
-                    await query.message.reply_text(continuation, parse_mode="HTML", reply_markup=get_event_keyboard(event_id) if idx == len(chunks) else None)
                 return
             if data == "ec:back":
                 _set_ec_view(context, mode="today", impact="all")
@@ -991,14 +955,47 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         kwargs["reply_markup"] = reply_markup
                     await target.reply_text(**kwargs)
 
+            async def _update_market_analysis_text(full_text: str):
+                """متن تحلیل جدا از عکس: پیام اول ویرایش، پیام‌های اضافی حذف/بازسازی می‌شوند."""
+                ids = list(context.user_data.get("market_analysis_text_ids") or [])
+                chat_id = context.user_data.get("market_analysis_chat_id") or query.message.chat_id
+                chunks = _split_telegram_text(full_text, limit=3900) or ["داده کافی نیست."]
+                bot = context.bot
+                # پیام اول موجود را ویرایش کن؛ این کار باعث می‌شود تحلیل قبلی ناقص نماند.
+                if ids:
+                    try:
+                        await bot.edit_message_text(
+                            chat_id=chat_id, message_id=ids[0], text=chunks[0], parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
+                    # پیام‌های قبلی اضافه را حذف کن تا تکه‌های قدیمی باقی نمانند.
+                    for old_id in ids[1:]:
+                        try:
+                            await bot.delete_message(chat_id=chat_id, message_id=old_id)
+                        except Exception:
+                            pass
+                else:
+                    m = await bot.send_message(chat_id=chat_id, text=chunks[0], parse_mode="HTML")
+                    ids = [m.message_id]
+                # ادامه تحلیل در پیام‌های متنی جداگانه
+                for chunk in chunks[1:]:
+                    m = await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="HTML")
+                    ids.append(m.message_id)
+                context.user_data["market_analysis_text_ids"] = ids
+                context.user_data["market_analysis_chat_id"] = chat_id
+
             async def _edit_photo_caption(png: bytes | None, caption: str):
-                """ویرایش همان پیام نمودار؛ هرگز برای تغییر تایم‌فریم پیام/عکس جدید نفرست."""
+                """فقط خود تصویر/کپشن کوتاه را روی همان پیام به‌روزرسانی کن؛ متن تحلیل جداست."""
                 msg = query.message
-                full = (caption or "").strip()
-                caption_chunks = _split_telegram_text(full, limit=1000)
-                cap = caption_chunks[0] if caption_chunks else "داده کافی نیست."
-                if len(caption_chunks) > 1:
-                    cap += "\n\n📄 ادامه تحلیل در پیام‌های متنی قبلی/جداگانه موجود است."
+                full_input = (caption or "📈 نمودار تحلیل").strip()
+                # هر تحلیل کامل که از branchها می‌آید، جداگانه در پیام متن قرار می‌گیرد.
+                if len(full_input) > 1000 or "━━━━━━━━━━━━━━━━━━━━" in full_input or "تحلیل هوشمند" in full_input:
+                    try:
+                        await _update_market_analysis_text(full_input)
+                    except Exception as _txt_exc:
+                        logger.debug("market analysis text update: %s", _txt_exc)
+                cap = full_input.split("\n━━━━━━━━━━━━━━━━━━━━", 1)[0].strip()[:1000]
                 try:
                     if msg.photo:
                         if png:
@@ -1009,23 +1006,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         else:
                             await msg.edit_caption(caption=cap, parse_mode="HTML", reply_markup=menu)
                         return
-
-                    # سازگاری با پیام‌های قدیمی: اگر callback از یک پیام متنی قدیمی آمده،
-                    # فقط همان پیام را ویرایش کن و عکس تازه نفرست.
-                    chunks = _split_telegram_text(full) or ["داده کافی نیست."]
-                    await msg.edit_text(chunks[0], parse_mode="HTML", reply_markup=menu)
-                    if len(chunks) > 1:
-                        # پیام جدید در این مسیر قدیمی عمداً ساخته نمی‌شود؛ کاربر همان پیام را می‌بیند.
-                        logger.debug("legacy text callback: analysis has %d chunks", len(chunks))
+                    # پیام قدیمی متنی: عکس جدید نفرست؛ فقط همان متن را نگه دار.
+                    await msg.edit_text(cap, parse_mode="HTML", reply_markup=menu)
                 except Exception as exc:
                     logger.warning("market chart same-message edit failed: %s", exc)
-                    try:
-                        if msg.photo:
-                            await msg.edit_caption(caption=cap, parse_mode="HTML", reply_markup=menu)
-                        else:
-                            await msg.edit_text(cap, parse_mode="HTML", reply_markup=menu)
-                    except Exception as exc2:
-                        logger.warning("market chart fallback edit failed: %s", exc2)
 
             async def _edit_text(txt: str):
                 """Edit first message and send remaining chunks; never truncate at 4000."""

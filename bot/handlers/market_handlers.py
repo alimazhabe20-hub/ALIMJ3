@@ -85,20 +85,7 @@ async def _h_crypto_full(u, c, t, uid):
         try:
             bio = BytesIO(png)
             bio.name = f"{symbol}_analysis.png"
-            # کیبورد Inline روی خود تصویر قرار می‌گیرد تا callback تایم‌فریم
-            # بتواند همان پیام تصویر را با edit_message_media به‌روزرسانی کند.
-            preview = (report or "").strip()
-            if len(preview) > 820:
-                preview = preview[:810].rsplit("\n", 1)[0] + "…"
-            caption = f"📈 <b>نمودار تحلیل {html.escape(symbol.upper())}</b>"
-            if preview:
-                caption += "\n━━━━━━━━━━━━━━━━━━━━\n" + preview
-            await u.message.reply_photo(
-                photo=bio,
-                caption=caption,
-                parse_mode="HTML",
-                reply_markup=menu,
-            )
+            await u.message.reply_photo(photo=bio, caption=f"📈 <b>نمودار تحلیل {html.escape(symbol.upper())}</b>", parse_mode="HTML")
         except Exception as e:
             chart_note = f"⚠️ ارسال نمودار ناموفق بود: {e}"
     if chart_note and not png:
@@ -123,31 +110,17 @@ async def _h_crypto_full(u, c, t, uid):
             return f"<b>{esc}</b>"
         return esc
 
-    # بخش‌ها را در پیام‌های حداکثر ~3500 کاراکتری HTML می‌شکنیم.
-    lines = [render(x) for x in (report or "❌ داده‌ای برای تحلیل دریافت نشد.").splitlines()]
-    chunks, current = [], ""
-    for line in lines:
-        candidate = (current + "\n" + line).strip() if current else line
-        if len(candidate) > 3400 and current:
-            chunks.append(current)
-            current = line
-        else:
-            current = candidate
-    if current:
-        chunks.append(current)
-
-    if not chunks:
-        chunks = ["❌ داده‌ای برای تحلیل دریافت نشد."]
-    for i, chunk in enumerate(chunks):
-        kwargs = {"parse_mode": "HTML"}
-        if i == len(chunks) - 1 and not png:
-            kwargs["reply_markup"] = menu
+    # متن تحلیل کاملاً جدا از تصویر ارسال می‌شود؛ کیبورد فقط روی تصویر می‌ماند.
+    text_ids = []
+    for chunk in chunks:
         try:
-            await u.message.reply_text(chunk, **kwargs)
+            mtxt = await u.message.reply_text(chunk, parse_mode="HTML")
         except Exception:
-            # اگر HTML به هر دلیل نامعتبر بود، متن ساده را کامل و امن بفرست.
             plain = re.sub(r"<[^>]+>", "", chunk)
-            await u.message.reply_text(plain[:3500], reply_markup=menu if (i == len(chunks)-1 and not png) else None)
+            mtxt = await u.message.reply_text(plain[:3500])
+        text_ids.append(mtxt.message_id)
+    c.user_data["market_analysis_text_ids"] = text_ids
+    c.user_data["market_analysis_chat_id"] = u.effective_chat.id
 
 async def _h_crypto_pos(u, c, t, uid):
     """پاسخ به ورودی سایز پوزیشن یا قیمت هشدار"""
@@ -179,7 +152,6 @@ async def _h_economic_calendar(u, c, t, uid):
     c.user_data.pop("waiting_for", None)
     from bot.features.market.economic_calendar import get_calendar_for_user, calendar_text, get_calendar_keyboard
     try:
-        c.user_data["ec_view"] = {"mode": "today", "impact": "all", "currency": "", "date_str": ""}
         events, tz_name = await get_calendar_for_user(uid, "today", "all")
         text = calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name)
         await u.message.reply_text(text, parse_mode="HTML", reply_markup=get_calendar_keyboard(uid, events=events))
