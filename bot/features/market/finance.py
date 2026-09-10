@@ -1201,12 +1201,15 @@ async def market_scanner(limit: int = 10) -> str:
 def get_crypto_analysis_keyboard(symbol: str) -> "InlineKeyboardMarkup":
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     s = (symbol or "btc").lower().replace("usdt", "").strip()
-    return InlineKeyboardMarkup(
-        [
+    rows = [
             [
                 InlineKeyboardButton("📅 تحلیل و نمودار روزانه", callback_data=f"cx:day:{s}"),
                 InlineKeyboardButton("⏰ تحلیل و نمودار ساعتی", callback_data=f"cx:hr:{s}"),
             ],
+    ]
+    if s in ("gold", "xau", "xauusd", "xau/usd"):
+        rows.append([InlineKeyboardButton("🕒 تحلیل 15 دقیقه‌ای طلا", callback_data="cx:15m:gold")])
+    rows += [
             [
                 InlineKeyboardButton("🎯 توصیه معاملاتی", callback_data=f"cx:rec:{s}"),
                 InlineKeyboardButton("📡 رادار مشتقات", callback_data=f"cx:der:{s}"),
@@ -1223,7 +1226,7 @@ def get_crypto_analysis_keyboard(symbol: str) -> "InlineKeyboardMarkup":
             [InlineKeyboardButton("🥇 تحلیل طلا", callback_data="cx:gold:gold")],
             [InlineKeyboardButton("🔄 بروزرسانی تحلیل", callback_data=f"cx:ref:{s}")],
         ]
-    )
+    return InlineKeyboardMarkup(rows)
 
 
 def _pair_from_symbol(symbol: str) -> str:
