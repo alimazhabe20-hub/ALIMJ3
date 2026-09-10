@@ -14,7 +14,7 @@ from bot.utils.helpers import (
     get_religious_keyboard, get_market_keyboard, get_weather_geo_keyboard,
     get_tools_keyboard, get_fun_keyboard, get_profile_keyboard, get_joke_keyboard,
     get_calendar_text, get_calendar_buttons, ALL_CITIES, CITY_COUNTRY,
-    get_azan_keyboard, get_ai_keyboard, get_ai_model_keyboard,
+    get_azan_keyboard, get_ai_keyboard, get_ai_answer_keyboard, get_ai_model_keyboard,
 )
 from bot.api.calendar import get_today_tehran
 from bot.handlers.middleware import check_and_rate_limit
@@ -224,10 +224,15 @@ async def _reply_long_text(msg, text: str, *, prefix: str = "🤖 "):
     return first
 
 async def _send_ai_answer(update, user_id, answer: str, *, stream: bool = True):
-    """ارسال جواب AI کامل — در صورت نیاز چند پیام ادامه."""
+    """ارسال جواب AI کامل؛ روی پیام اول دکمه «ادامه پاسخ» هم قرار می‌گیرد."""
     msg = update.message
     store_answer(user_id, answer)
-    return await _reply_long_text(msg, answer, prefix="🤖 ")
+    chunks = _split_telegram_text("🤖 " + (answer or "").strip(), 3900) or ["🤖 پاسخی دریافت نشد."]
+    first = await msg.reply_text(chunks[0], reply_markup=get_ai_answer_keyboard(user_id))
+    for i, chunk in enumerate(chunks[1:], start=2):
+        body = chunk[2:].lstrip() if chunk.startswith("🤖 ") else chunk
+        await msg.reply_text(f"🤖 ادامه ({i}/{len(chunks)})\\n{body}", reply_markup=get_ai_answer_keyboard(user_id))
+    return first
 async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
     """استریم AI و ویرایش تدریجی پیام؛ در شکست، پیام نیمه‌کاره حذف می‌شود."""
     import asyncio
@@ -273,13 +278,13 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
         final = chunks[0]
         if final != last_rendered:
             try:
-                await sent.edit_text(final)
+                await sent.edit_text(final, reply_markup=get_ai_answer_keyboard(user_id))
                 last_rendered = final
             except Exception as edit_error:
                 logger.warning("AI final edit failed; retrying same message: %s", edit_error)
                 try:
                     await asyncio.sleep(0.15)
-                    await sent.edit_text(final)
+                    await sent.edit_text(final, reply_markup=get_ai_answer_keyboard(user_id))
                     last_rendered = final
                 except Exception as retry_error:
                     logger.warning("AI final edit retry failed: %s", retry_error)
@@ -288,7 +293,7 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
             sent_cont = False
             for attempt in range(3):
                 try:
-                    await msg.reply_text(f"🤖 ادامه ({i}/{len(chunks)})\n{body}")
+                    await msg.reply_text(f"🤖 ادامه ({i}/{len(chunks)})\n{body}", reply_markup=get_ai_answer_keyboard(user_id))
                     sent_cont = True
                     break
                 except Exception as cont_err:

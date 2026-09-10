@@ -11,7 +11,7 @@ from bot.services.ai_service import (
 from bot.utils.helpers import (
     build_message,
     get_refresh_button,
-    get_main_keyboard, get_more_keyboard, get_ai_keyboard, get_ai_model_keyboard,
+    get_main_keyboard, get_more_keyboard, get_ai_keyboard, get_ai_answer_keyboard, get_ai_model_keyboard,
     get_calendar_buttons,
     get_calendar_text,
 )
@@ -717,6 +717,47 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
             return
+
+    if data == "ai_continue":
+        await _safe_answer(query, "در حال ادامه دادن پاسخ…", show_alert=False)
+        try:
+            from bot.services.ai_service import ask_ai
+            from bot.services.ai_extras import get_last_answer
+            last_answer = get_last_answer(user_id)
+            if not last_answer:
+                await query.message.reply_text("⚠️ پاسخ قبلی برای ادامه پیدا نشد. دوباره سؤال را بفرست.")
+                return
+            continuation_prompt = (
+                "پاسخ قبلی خودت را ادامه بده. فقط ادامه‌ی محتوایی پاسخ را بنویس و از ابتدا تکرار نکن. "
+                "از همان جایی که پاسخ قبلی متوقف شده ادامه بده؛ اگر پاسخ قبلی به‌خاطر محدودیت طول ناقص مانده، "
+                "باقی بخش‌های لازم را کامل کن. هیچ مقدمه‌ای مثل «ادامه پاسخ» یا توضیح درباره این درخواست ننویس."
+            )
+            answer, provider = await ask_ai(user_id, continuation_prompt)
+            from bot.services.ai_extras import store_answer
+            store_answer(user_id, answer)
+            chunks = []
+            remaining = (answer or "").strip()
+            while len(remaining) > 3600:
+                cut = remaining.rfind("\n", 0, 3601)
+                if cut < 1200:
+                    cut = remaining.rfind(" ", 0, 3601)
+                cut = cut if cut > 0 else 3600
+                chunks.append(remaining[:cut].strip())
+                remaining = remaining[cut:].lstrip()
+            if remaining:
+                chunks.append(remaining)
+            if not chunks:
+                chunks = ["پاسخی برای ادامه دریافت نشد."]
+            for idx, chunk in enumerate(chunks, start=1):
+                prefix = "🤖 ادامه پاسخ" if idx == 1 else f"🤖 ادامه ({idx}/{len(chunks)})"
+                await query.message.reply_text(
+                    f"{prefix}\n{chunk}",
+                    reply_markup=get_ai_answer_keyboard(user_id),
+                )
+        except Exception as exc:
+            logger.error("AI continuation failed: %s", exc, exc_info=True)
+            await query.message.reply_text("⚠️ ادامه پاسخ انجام نشد. لطفاً دوباره روی «ادامه پاسخ» بزن.")
+        return
 
     if data == "ai_models":
         await _safe_answer(query)
