@@ -22,6 +22,7 @@ from bot.logger import logger
 import jdatetime
 import asyncio
 import html
+import re
 
 
 # جلوگیری از اجرای همزمان چند بروزرسانی برای یک کاربر
@@ -711,46 +712,124 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception:
                     return "", ""
 
+            def _split_telegram_text(txt: str, limit: int = 3900):
+                """Split long Telegram messages without losing whole analysis sections.
+
+                Telegram text messages are limited to 4096 chars and captions to 1024.
+                We keep a safety margin and prefer line/section boundaries.
+                """
+                raw = (txt or "").strip()
+                if not raw:
+                    return []
+                chunks = []
+                current = ""
+                for line in raw.splitlines():
+                    candidate = line if not current else current + "\n" + line
+                    if len(candidate) <= limit:
+                        current = candidate
+                        continue
+                    if current:
+                        chunks.append(current)
+                        current = ""
+                    if len(line) <= limit:
+                        current = line
+                        continue
+                    # Extremely long AI line: strip HTML tags before hard-splitting so
+                    # a partial <b>...</b> tag can never corrupt Telegram parsing.
+                    plain = re.sub(r"<[^>]*>", "", line)
+                    plain = html.unescape(plain)
+                    while len(plain) > limit:
+                        chunks.append(plain[:limit].rstrip())
+                        plain = plain[limit:]
+                    current = plain
+                if current:
+                    chunks.append(current)
+                return chunks
+
+            async def _send_full_text(txt: str, *, reply_to=None, reply_markup=None):
+                """Send the complete analysis as one or more Telegram messages."""
+                chunks = _split_telegram_text(txt)
+                if not chunks:
+                    return
+                target = reply_to or query.message
+                for i, chunk in enumerate(chunks):
+                    kwargs = {"text": chunk, "parse_mode": "HTML"}
+                    if i == len(chunks) - 1 and reply_markup is not None:
+                        kwargs["reply_markup"] = reply_markup
+                    await target.reply_text(**kwargs)
+
             async def _edit_photo_caption(png: bytes | None, caption: str):
-                """همان پیام را ویرایش کن (عکس+کپشن یا فقط کپشن/متن)"""
-                cap = (caption or "")[:1024]
+                """Update the visual message, then deliver the FULL text separately.
+
+                This avoids Telegram's 1024-char photo-caption limit, which previously
+                caused long AI/analysis reports to end abruptly mid-section.
+                """
                 msg = query.message
+                full = (caption or "").strip()
+                caption_chunks = _split_telegram_text(full, limit=1000)
+                cap = caption_chunks[0] if caption_chunks else "داده کافی نیست."
+                if len(caption_chunks) > 1:
+                    cap += "\n\n📄 ادامه تحلیل در پیام‌های بعدی…"
                 try:
                     if png:
                         bio = BytesIO(png)
                         bio.name = f"{symbol}.png"
                         media = InputMediaPhoto(media=bio, caption=cap, parse_mode="HTML")
                         await msg.edit_media(media=media, reply_markup=menu)
+                        for chunk in _split_telegram_text("\n".join(caption_chunks[1:]), limit=3900):
+                            await msg.reply_text(chunk, parse_mode="HTML")
                         return
-                    # بدون عکس جدید
                     if msg.photo:
                         await msg.edit_caption(caption=cap, parse_mode="HTML", reply_markup=menu)
+                        if len(caption_chunks) > 1:
+                            remainder = "\n".join(caption_chunks[1:])
+                            await _send_full_text(remainder, reply_to=msg, reply_markup=menu)
                     else:
-                        await msg.edit_text(cap[:4000], parse_mode="HTML", reply_markup=menu)
+                        chunks = _split_telegram_text(full)
+                        first = chunks[0] if chunks else "داده کافی نیست."
+                        await msg.edit_text(first, parse_mode="HTML", reply_markup=menu)
+                        for chunk in chunks[1:]:
+                            await msg.reply_text(chunk, parse_mode="HTML")
                 except Exception:
-                    # اگر ویرایش ممکن نبود (مثلاً پیام خیلی قدیمی)، به‌عنوان آخرین راه
                     try:
                         if png:
                             bio = BytesIO(png)
                             bio.name = f"{symbol}.png"
-                            await msg.reply_photo(photo=bio, caption=cap, reply_markup=menu)
+                            await msg.reply_photo(photo=bio, caption=cap, parse_mode="HTML", reply_markup=menu)
+                            if len(caption_chunks) > 1:
+                                remainder = "\n".join(caption_chunks[1:])
+                                await _send_full_text(remainder, reply_to=msg, reply_markup=menu)
                         else:
-                            await msg.reply_text(cap[:4000], reply_markup=menu)
+                            await _send_full_text(full, reply_to=msg, reply_markup=menu)
                     except Exception as e2:
                         await _safe_answer(query, f"خطا: {e2}", show_alert=True)
 
             async def _edit_text(txt: str):
-                text = (txt or "")[:4000]
+                """Edit first message and send remaining chunks; never truncate at 4000."""
+                text = (txt or "").strip()
                 msg = query.message
+                chunks = _split_telegram_text(text)
+                if not chunks:
+                    chunks = ["داده کافی نیست."]
                 try:
                     if msg.photo:
-                        # روی پیام عکسی: کپشن را عوض کن (حد ۱۰۲۴)
-                        await msg.edit_caption(caption=text[:1024], reply_markup=menu)
+                        # Captions are limited to 1024; keep a compact header here and
+                        # send the complete analysis as normal Telegram messages.
+                        caption_chunks = _split_telegram_text(text, limit=1000)
+                        cap = caption_chunks[0] if caption_chunks else "داده کافی نیست."
+                        if len(caption_chunks) > 1:
+                            cap += "\n\n📄 ادامه تحلیل در پیام‌های بعدی…"
+                        await msg.edit_caption(caption=cap, parse_mode="HTML", reply_markup=menu)
+                        if len(caption_chunks) > 1:
+                            remainder = "\n".join(caption_chunks[1:])
+                            await _send_full_text(remainder, reply_to=msg, reply_markup=menu)
                     else:
-                        await msg.edit_text(text, parse_mode="HTML", reply_markup=menu)
+                        await msg.edit_text(chunks[0], parse_mode="HTML", reply_markup=menu)
+                        for chunk in chunks[1:]:
+                            await msg.reply_text(chunk, parse_mode="HTML")
                 except Exception:
                     try:
-                        await msg.reply_text(text, parse_mode="HTML", reply_markup=menu)
+                        await _send_full_text(text, reply_to=msg, reply_markup=menu)
                     except Exception as _exc:
                         logger.debug("%s: %s", __name__, _exc)
 
@@ -826,8 +905,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 base = await analyze_crypto(symbol, timeframe="1d")
                 report = base
                 png, _cap = await get_crypto_chart(symbol, 90)
-                caption = (report or "")[:1024]
-                await _edit_photo_caption(png, caption)
+                await _edit_photo_caption(png, report or "داده کافی نیست.")
 
             elif action == "hr":
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
@@ -837,8 +915,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 base = await analyze_crypto(symbol, timeframe="1h")
                 report = base
                 png, _cap = await get_crypto_chart(symbol, 7)
-                caption = (report or "")[:1024]
-                await _edit_photo_caption(png, caption)
+                await _edit_photo_caption(png, report or "داده کافی نیست.")
 
             elif action == "rec":
                 txt = await trading_recommendation(symbol)
@@ -869,7 +946,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 base = await analyze_crypto(symbol, timeframe="4h")
                 report = base
                 png, _ = await get_crypto_chart(symbol, 30)
-                await _edit_photo_caption(png, (report or "")[:1024])
+                await _edit_photo_caption(png, report or "داده کافی نیست.")
 
             else:
                 await _edit_text("❌ گزینه ناشناخته")
