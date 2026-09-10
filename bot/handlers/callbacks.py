@@ -759,6 +759,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _edit_text(txt)
                 return
 
+            if action == "pa":
+                # پرایس‌اکشن با OHLCV همان نماد/تایم‌فریم؛ برای طلا مسیر XAU/USD اختصاصی است.
+                if symbol.lower() in ("gold", "xau", "xauusd"):
+                    txt = await analyze_gold("1h")
+                else:
+                    from bot.features.market.finance import analyze_crypto
+                    base_pa = await analyze_crypto(symbol, timeframe="4h")
+                    txt = "🧠 تحلیل پرایس اکشن\n────────────────────\n" + base_pa
+                await _edit_text(txt)
+                return
+
             if action == "ai":
                 # AI فقط با درخواست صریح کاربر اجرا می‌شود؛ تحلیل عادی سریع می‌ماند.
                 base = await analyze_crypto(symbol, timeframe="4h")
@@ -778,6 +789,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if action == "day":
                 # تحلیل روزانه + نمودار روزانه روی همان پیام
+                if symbol.lower() in ("gold", "xau", "xauusd"):
+                    report = await analyze_gold("1d")
+                    await _edit_text(report)
+                    return
                 base = await analyze_crypto(symbol, timeframe="1d")
                 report = base
                 png, _cap = await get_crypto_chart(symbol, 90)
@@ -785,9 +800,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _edit_photo_caption(png, caption)
 
             elif action == "hr":
-                base = await analyze_crypto(symbol, timeframe="1h")
-                report = base
-                png, _cap = await get_crypto_chart(symbol, 7)
+                if symbol.lower() in ("gold", "xau", "xauusd"):
+                    report = await analyze_gold("1h")
+                    png = None
+                else:
+                    report = await analyze_crypto(symbol, timeframe="1h")
+                    png, _cap = await get_crypto_chart(symbol, 7)
                 caption = (report or "")[:1024]
                 await _edit_photo_caption(png, caption)
 
