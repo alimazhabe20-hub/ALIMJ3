@@ -447,66 +447,50 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             if data.startswith("ec:analyze:"):
                 event_id = data.split(":", 2)[2]
+                await _safe_answer(query, "در حال تحلیل…")
                 try:
-                    await _safe_answer(query, "در حال تحلیل…")
-                except Exception:
-                    pass
-                try:
+                    msg_target = query.message or update.effective_message
                     p = get_economic_calendar_preferences(user_id)
-                    tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
+                    tz_name = p.get("timezone") or getattr(config, "TIMEZONE", "Asia/Tehran")
+
+                    e = None
                     snap = (context.user_data or {}).get("ec_events") or {}
-                    e = snap.get(event_id)
+                    if isinstance(snap, dict):
+                        e = snap.get(event_id)
                     if not e:
                         events = await refresh_calendar()
                         e = get_event(events, event_id)
                         if events:
                             context.user_data["ec_events"] = {x["id"]: x for x in events}
                     if not e:
-                        await query.message.reply_text(
-                            "⚠️ این خبر در فهرست فعلی پیدا نشد. یک‌بار «بروزرسانی» بزنید و دوباره تحلیل کنید."
-                        )
-                        return
-                    from bot.services.ai_service import ask_ai
-                    prompt = (
-                        "تو یک تحلیل‌گر حرفه‌ای اقتصاد کلان و بازارهای مالی هستی. "
-                        "پاسخ را کاملاً فارسی، کامل و بدون جمله ناتمام بنویس. "
-                        "فقط از داده همین رویداد استفاده کن و عدد یا خبر جعلی نساز. "
-                        "اگر Actual خالی یا منتشر نشده است، سناریوها را جدا بنویس. "
-                        "فارکس را تحلیل نکن. "
-                        "حتماً این تیترها را به ترتیب بنویس:\n"
-                        "معنی خبر\nکریپتو\nدلار/DXY\nطلا\nسهام\nاوراق و بازدهی\nسناریوی Actual در برابر Forecast\nجمع‌بندی\n"
-                        "هر تیتر حداکثر ۲ جمله. کل پاسخ حداکثر ۱۸۰۰ کاراکتر. بدون Markdown و جدول.\n\n"
-                        "داده رویداد:\n" + ai_context([e], tz_name)
-                    )
-                    try:
-                        answer, provider = await ask_ai(user_id, prompt)
-                    except Exception as ai_err:
-                        logger.error("ec event-analyze ask_ai failed: %s", ai_err, exc_info=True)
-                        msg = str(ai_err).strip() or "سرویس AI پاسخ نداد"
-                        if len(msg) > 280:
-                            msg = msg[:280] + "…"
-                        await query.message.reply_text(
-                            "⚠️ تحلیل این خبر الان ممکن نیست.\n"
-                            + msg
-                            + "\n\nلطفاً کلید/سرویس AI را در تنظیمات سرور بررسی کنید."
+                        await msg_target.reply_text(
+                            "⚠️ این خبر پیدا نشد. یک‌بار بروزرسانی بزنید و دوباره تلاش کنید."
                         )
                         return
 
-                    from html import escape as _esc_html
-                    body = _esc_html((answer or "تحلیل در دسترس نیست.").strip(), quote=False)
-                    # چند پیام کوتاه تا سقف تلگرام نشکنیم
-                    chunks = []
-                    while body:
-                        if len(body) <= 3500:
-                            chunks.append(body)
-                            break
-                        cut = body.rfind("\n", 0, 3500)
-                        if cut < 1000:
-                            cut = 3500
-                        chunks.append(body[:cut].strip())
-                        body = body[cut:].strip()
-                    if not chunks:
-                        chunks = ["تحلیل در دسترس نیست."]
+                    from bot.services.ai_service import ask_ai
+
+                    try:
+                        ctx = ai_context([e], tz_name)
+                    except Exception:
+                        ctx = (
+                            f"title={e.get('title')} | country={e.get('country')} | "
+                            f"impact={e.get('impact')} | actual={e.get('actual')} | "
+                            f"forecast={e.get('forecast')} | previous={e.get('previous')}"
+                        )
+                    prompt = (
+                        "تو تحلیل‌گر اقتصاد کلان و بازارهای مالی هستی. فقط فارسی بنویس.\n"
+                        "فقط از داده زیر استفاده کن؛ عدد جعلی نساز.\n"
+                        "فارکس را تحلیل نکن.\n"
+                        "اگر Actual خالی یا منتشر نشده است، بگو هنوز منتشر نشده و سناریو بده.\n"
+                        "پاسخ را کامل و بدون جمله ناتمام بنویس با همین تیترها:\n"
+                        "معنی خبر\nکریپتو\nدلار/DXY\nطلا\nسهام\nاوراق و بازدهی\nسناریوی Actual در برابر Forecast\nجمع‌بندی\n"
+                        "هر بخش ۲ تا ۳ جمله. کل پاسخ را کامل تمام کن.\n\n"
+                        "داده رویداد:\n" + ctx
+                    )
+
+                    answer, _used = await ask_ai(user_id, prompt)
+                    answer = (answer or "").strip() or "تحلیل در دسترس نیست."
 
                     try:
                         await query.edit_message_text(
@@ -514,28 +498,41 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             parse_mode="HTML",
                             reply_markup=get_event_keyboard(e.get("id") or event_id),
                         )
-                    except Exception as edit_err:
-                        logger.debug("ec analyze edit_message skipped: %s", edit_err)
+                    except Exception:
+                        pass
 
-                    for idx, chunk in enumerate(chunks, start=1):
-                        header = "🤖 <b>تحلیل هوشمند بازار</b>" if idx == 1 else f"🤖 <b>ادامه تحلیل ({idx}/{len(chunks)})</b>"
-                        msg = f"{header}\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>{chunk}</blockquote>"
+                    header = "🤖 تحلیل هوشمند بازار\n━━━━━━━━━━━━━━━━━━━━\n"
+                    full = header + answer
+                    max_len = 3500
+                    parts = []
+                    while full:
+                        if len(full) <= max_len:
+                            parts.append(full)
+                            break
+                        cut = full.rfind("\n", 0, max_len)
+                        if cut < 500:
+                            cut = max_len
+                        parts.append(full[:cut].strip())
+                        full = full[cut:].strip()
+                        if full:
+                            full = "🤖 ادامه تحلیل\n━━━━━━━━━━━━━━━━━━━━\n" + full
+
+                    for part in parts:
                         try:
-                            await query.message.reply_text(msg, parse_mode="HTML")
-                        except Exception:
-                            # fallback plain text if HTML fails
-                            await query.message.reply_text(
-                                (("تحلیل هوشمند بازار\n" if idx == 1 else f"ادامه تحلیل ({idx})\n")
-                                 + "━━━━━━━━━━━━━━━━━━━━\n"
-                                 + _esc_html(chunk, quote=False).replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")[:3500])
-                            )
+                            await msg_target.reply_text(part)
+                        except Exception as send_err:
+                            logger.error("ec analyze send failed: %s", send_err)
+                            try:
+                                await msg_target.reply_text(part[:3500])
+                            except Exception:
+                                pass
                     return
-                except Exception as outer_err:
-                    logger.error("ec analyze outer failed: %s", outer_err, exc_info=True)
+                except Exception as err:
+                    logger.error("ec analyze failed: %s", err, exc_info=True)
                     try:
-                        await query.message.reply_text(
-                            "⚠️ تحلیل این خبر با خطا مواجه شد.\n"
-                            + str(outer_err)[:300]
+                        target = query.message or update.effective_message
+                        await target.reply_text(
+                            "⚠️ خطا در تحلیل خبر:\n" + str(err)[:400]
                         )
                     except Exception:
                         pass
