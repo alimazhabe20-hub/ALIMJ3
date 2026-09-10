@@ -52,16 +52,14 @@ _request_with_retry = _f.request_with_retry
 safe_json = _f.safe_json
 logger = _f.logger
 
-# Shared formatter: both crypto and gold reports use it. Keeping it at module
-# scope prevents NameError when analyze_crypto renders support/resistance.
 def fmt_p(v):
+    """فرمت امن قیمت؛ باید قبل از همه formatterهای تحلیل در دسترس باشد."""
     if v is None:
         return "—"
     try:
-        v = float(v)
-    except Exception:
-        return "—"
-    return f"{v:,.2f}" if abs(v) >= 1 else f"{v:,.4f}"
+        return f"{float(v):,.2f}"
+    except (TypeError, ValueError):
+        return str(v)
 
 if _format_fear_greed is None:
     def _format_fear_greed(data):
@@ -186,7 +184,6 @@ async def analyze_gold(timeframe: str = "4h") -> str:
 
     def f(x):
         return "—" if x is None else f"{float(x):,.2f}"
-
     lines=[
         "🥇 تحلیل حرفه‌ای طلا / XAUUSD", "━━━━━━━━━━━━━━━━━━━━",
         f"تایم‌فریم اصلی: {tf.upper()} | منبع تکنیکال: {selected_source}",
@@ -387,6 +384,21 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
     else:
         signal_fa = f"{signal} {signal_emoji}"
 
+    def fmt_p(v):
+        if v is None:
+            return "—"
+        try:
+            v = float(v)
+        except Exception:
+            return "—"
+        if v >= 1000:
+            return f"{v:,.2f}"
+        if v >= 100:
+            return f"{v:,.2f}"
+        if v >= 1:
+            return f"{v:,.2f}"
+        return f"{v:,.4f}"
+
     # MFI تقریبی از حجم+قیمت برای متن جمع‌بندی
     mfi_note = ""
     rsi = ta.get("rsi")
@@ -416,7 +428,7 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
         "",
         f"🧭 <b>روند:</b> {trend_arrow}",
         f"🎯 <b>سیگنال:</b> {signal_fa}",
-        f"⭐️ <b>کیفیت ستاپ:</b> {float(setup_score):.1f}/10",
+        f"⭐️ <b>کیفیت ستاپ:</b> {setup_score}.0/10",
         f"🔖 <b>وضعیت اجرا:</b> {exec_status}",
         "",
         "<b>📍 سطوح مهم</b>",

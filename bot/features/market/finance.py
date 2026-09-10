@@ -1227,7 +1227,6 @@ def get_crypto_analysis_keyboard(symbol: str) -> "InlineKeyboardMarkup":
                 InlineKeyboardButton("🔔 هشدار ورود", callback_data=f"cx:al:{s}"),
             ],
             [InlineKeyboardButton("🧠 تحلیل هوشمند حرفه‌ای", callback_data=f"cx:ai:{s}")],
-            [InlineKeyboardButton("🥇 تحلیل طلا", callback_data="cx:gold:gold")],
             [InlineKeyboardButton("🔄 بروزرسانی تحلیل", callback_data=f"cx:ref:{s}")],
         ]
     return InlineKeyboardMarkup(rows)
