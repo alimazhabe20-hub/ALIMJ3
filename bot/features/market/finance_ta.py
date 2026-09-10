@@ -351,6 +351,80 @@ def _mtf_convergence(mtf: dict) -> tuple:
     return ("تمایل صعودی با تضاد تایم‌فریم" if bull>bear else "تمایل نزولی با تضاد تایم‌فریم"),power
 
 
+
+def _price_action_analysis(opens, highs, lows, closes, volumes=None, support=None, resistance=None, atr=None):
+    """Comprehensive practical price-action context from the selected timeframe OHLCV."""
+    n = len(closes)
+    if n < 10:
+        return {"valid": False, "reason": "داده کافی نیست"}
+    volumes = volumes or [0.0] * n
+    atr = float(atr) if atr else None
+    def body(i): return abs(closes[i] - opens[i])
+    def rng(i): return max(highs[i] - lows[i], 1e-12)
+    def upper(i): return highs[i] - max(opens[i], closes[i])
+    def lower(i): return min(opens[i], closes[i]) - lows[i]
+    # Confirmed local swings with a 2-bar fractal.
+    sh, sl = [], []
+    for i in range(2, n-2):
+        if highs[i] > highs[i-1] and highs[i] >= highs[i+1] and highs[i] > highs[i-2] and highs[i] >= highs[i+2]: sh.append(i)
+        if lows[i] < lows[i-1] and lows[i] <= lows[i+1] and lows[i] < lows[i-2] and lows[i] <= lows[i+2]: sl.append(i)
+    structure = []
+    if len(sh) >= 2:
+        structure.append("HH" if highs[sh[-1]] > highs[sh[-2]] else "LH")
+    if len(sl) >= 2:
+        structure.append("HL" if lows[sl[-1]] > lows[sl[-2]] else "LL")
+    structure_label = " / ".join(structure) if structure else "خنثی"
+    # BOS / CHOCH from the latest confirmed swing break.
+    last = n-1
+    bos = None
+    if sh and closes[last] > highs[sh[-1]]: bos = "BOS صعودی"
+    elif sl and closes[last] < lows[sl[-1]]: bos = "BOS نزولی"
+    prev_bias = "صعودی" if len(sl)>=2 and lows[sl[-1]] > lows[sl[-2]] else "نزولی" if len(sh)>=2 and highs[sh[-1]] < highs[sh[-2]] else None
+    if bos and prev_bias and ((bos.endswith("صعودی") and prev_bias=="نزولی") or (bos.endswith("نزولی") and prev_bias=="صعودی")):
+        bos = "CHOCH → " + bos.replace("BOS ", "")
+    patterns=[]
+    i=n-1; b=body(i); r=rng(i)
+    if b/r <= .12: patterns.append("Doji")
+    if lower(i) >= max(b, r*.05)*2 and upper(i) <= max(b, r*.05)*.7 and b/r < .4: patterns.append("Bullish Pin Bar")
+    if upper(i) >= max(b, r*.05)*2 and lower(i) <= max(b, r*.05)*.7 and b/r < .4: patterns.append("Bearish Pin Bar")
+    if n>=2:
+        if closes[i] > opens[i] and closes[i-1] < opens[i-1] and opens[i] <= closes[i-1] and closes[i] >= opens[i-1]: patterns.append("Bullish Engulfing")
+        if closes[i] < opens[i] and closes[i-1] > opens[i-1] and opens[i] >= closes[i-1] and closes[i] <= opens[i-1]: patterns.append("Bearish Engulfing")
+        if highs[i] <= highs[i-1] and lows[i] >= lows[i-1]: patterns.append("Inside Bar")
+    # Equal highs/lows (liquidity pools).
+    tol = (atr*.18 if atr else r*.25)
+    eqh = [highs[j] for j in range(max(0,n-20), n-1) if any(abs(highs[j]-highs[k])<=tol for k in range(max(0,n-20),j))]
+    eql = [lows[j] for j in range(max(0,n-20), n-1) if any(abs(lows[j]-lows[k])<=tol for k in range(max(0,n-20),j))]
+    # Sweep/rejection: wick takes a recent extreme but closes back inside.
+    recent_h=max(highs[max(0,n-21):n-1]); recent_l=min(lows[max(0,n-21):n-1])
+    sweep = None
+    if highs[i] > recent_h and closes[i] < recent_h: sweep="sweep نقدینگی بالای سقف"
+    elif lows[i] < recent_l and closes[i] > recent_l: sweep="sweep نقدینگی زیر کف"
+    vol_ratio = None
+    if len(volumes)>=20:
+        av=sum(volumes[-20:])/20
+        vol_ratio=volumes[-1]/av if av else None
+    impulse = None
+    if atr:
+        if r >= atr*1.5: impulse="Impulse"
+        elif r <= atr*.65: impulse="Compression"
+    location="داخل محدوده"
+    cur=closes[-1]
+    if resistance is not None and cur >= float(resistance)*.995: location="نزدیک مقاومت"
+    elif support is not None and cur <= float(support)*1.005: location="نزدیک حمایت"
+    # Simple breakout/retest state from the latest 20 bars.
+    breakout=None
+    if resistance is not None and closes[-2] <= float(resistance) < closes[-1]: breakout="شکست مقاومت"
+    elif support is not None and closes[-2] >= float(support) > closes[-1]: breakout="شکست حمایت"
+    return {
+        "valid": True, "structure": structure_label, "swing_high": highs[sh[-1]] if sh else None,
+        "swing_low": lows[sl[-1]] if sl else None, "bos_choch": bos, "patterns": patterns,
+        "equal_highs": max(eqh) if eqh else None, "equal_lows": min(eql) if eql else None,
+        "liquidity_sweep": sweep, "volume_ratio": vol_ratio, "impulse_state": impulse,
+        "location": location, "breakout": breakout,
+        "range_high": max(highs[-20:]), "range_low": min(lows[-20:]),
+    }
+
 def _advanced_levels(closes, highs, lows, current=None, max_levels=3):
     """Clustered support/resistance zones with strength scoring."""
     if not closes or not highs or not lows:
