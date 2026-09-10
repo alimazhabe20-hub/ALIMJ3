@@ -15,6 +15,7 @@ from typing import Any
 
 import pytz
 import requests
+from bs4 import BeautifulSoup
 
 from bot.config import config
 from bot.logger import logger
@@ -27,7 +28,9 @@ FF_FALLBACK_URLS = (
     "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
     "https://cdn-nfs.faireconomy.media/ff_calendar_nextweek.json",
 )
-CACHE_TTL = 30 * 60
+CACHE_TTL = 5 * 60
+HISTORICAL_HTML_URL = "https://www.forexfactory.com/calendar?week={slug}"
+HISTORICAL_TZ = pytz.timezone("Europe/London")
 _MAX_EVENTS = 600
 
 _cache: list[dict[str, Any]] = []
@@ -150,14 +153,6 @@ def _fa_title(title: str) -> str:
     return out
 
 
-def _raw_value(raw: dict[str, Any], *keys: str) -> Any:
-    """اولین مقدار واقعاً موجود را برمی‌گرداند؛ صفر مقدار معتبر است."""
-    for key in keys:
-        if key in raw and raw.get(key) not in (None, ""):
-            return raw.get(key)
-    return ""
-
-
 def _normalize(raw: dict[str, Any]) -> dict[str, Any] | None:
     dt = _parse_dt(raw.get("date", ""))
     if not dt:
@@ -173,9 +168,9 @@ def _normalize(raw: dict[str, Any]) -> dict[str, Any] | None:
         "impact": impact,
         "title": title,
         "title_fa": _fa_title(title),
-        "actual": _raw_value(raw, "actual", "Actual", "actualValue"),
-        "forecast": _raw_value(raw, "forecast", "Forecast", "forecastValue", "estimate"),
-        "previous": _raw_value(raw, "previous", "Previous", "previousValue"),
+        "actual": raw.get("actual") or "",
+        "forecast": raw.get("forecast") or "",
+        "previous": raw.get("previous") or "",
         "source": "Forex Factory",
     }
 
@@ -187,6 +182,117 @@ def _fetch_json(url: str) -> list[dict[str, Any]]:
     if not isinstance(data, list):
         raise ValueError("فرمت داده تقویم نامعتبر است")
     return data
+
+
+def _week_slug(dt: datetime) -> str:
+    """Forex Factory week parameter: mon like sep7.2026."""
+    local = dt.astimezone(HISTORICAL_TZ)
+    monday = (local - timedelta(days=local.weekday())).date()
+    return monday.strftime("%b").lower() + f"{monday.day}.{monday.year}"
+
+
+def _parse_ff_date(text: str, year_hint: int) -> datetime | None:
+    text = re.sub(r"\s+", " ", (text or "").strip())
+    m = re.search(r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+([A-Za-z]{3})\s+(\d{1,2})\b", text)
+    if not m:
+        m = re.search(r"\b([A-Za-z]{3})\s+(\d{1,2})\b", text)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(f"{m.group(1)} {m.group(2)} {year_hint}", "%b %d %Y")
+    except Exception:
+        return None
+
+
+def _parse_ff_time(text: str) -> tuple[int, int] | None:
+    m = re.search(r"\b(\d{1,2}):(\d{2})\s*([ap]m)\b", (text or "").lower())
+    if not m:
+        return None
+    hour, minute = int(m.group(1)), int(m.group(2))
+    if m.group(3) == "pm" and hour != 12:
+        hour += 12
+    if m.group(3) == "am" and hour == 12:
+        hour = 0
+    return hour, minute
+
+
+def _parse_ff_historical_html(text: str, year_hint: int) -> list[dict[str, Any]]:
+    """Extract actual/forecast/previous from Forex Factory's rendered calendar.
+
+    The JSON feed can lag behind the public calendar for already-published values.
+    This parser is intentionally tolerant of small markup changes and only returns
+    rows that have a recognizable date, currency and event title.
+    """
+    soup = BeautifulSoup(text, "html.parser")
+    out: list[dict[str, Any]] = []
+    current_date: datetime | None = None
+    for tr in soup.select("tr"):
+        classes = " ".join(tr.get("class") or [])
+        row_text = tr.get_text(" ", strip=True)
+        if "day-break" in classes or "calendar__day" in classes:
+            parsed_day = _parse_ff_date(row_text, year_hint)
+            if parsed_day:
+                current_date = parsed_day
+            continue
+        if not current_date:
+            parsed_day = _parse_ff_date(row_text, year_hint)
+            if parsed_day and not tr.select_one(".calendar__event"):
+                current_date = parsed_day
+                continue
+        cur = tr.select_one(".calendar__currency")
+        event = tr.select_one(".calendar__event")
+        if not cur or not event:
+            continue
+        currency = cur.get_text(" ", strip=True).upper()
+        title = event.get_text(" ", strip=True)
+        time_cell = tr.select_one(".calendar__time")
+        parsed_time = _parse_ff_time(time_cell.get_text(" ", strip=True) if time_cell else "")
+        if parsed_time:
+            dt_local = HISTORICAL_TZ.localize(current_date.replace(hour=parsed_time[0], minute=parsed_time[1]))
+            dt_utc = dt_local.astimezone(timezone.utc)
+        else:
+            dt_utc = HISTORICAL_TZ.localize(current_date).astimezone(timezone.utc)
+        def cell_value(cls: str) -> str:
+            node = tr.select_one(cls)
+            return node.get_text(" ", strip=True) if node else ""
+        out.append({
+            "utc": dt_utc,
+            "country": currency,
+            "title": title,
+            "actual": cell_value(".calendar__actual"),
+            "forecast": cell_value(".calendar__forecast"),
+            "previous": cell_value(".calendar__previous"),
+        })
+    return out
+
+
+def _fetch_historical_html(url: str) -> str:
+    r = requests.get(url, timeout=18, headers={"User-Agent": "Mozilla/5.0 ALIMJ Economic Calendar"})
+    r.raise_for_status()
+    return r.text
+
+
+def _merge_historical_values(events: list[dict[str, Any]], rows: list[dict[str, Any]]) -> None:
+    """Merge non-empty historical values without allowing stale blanks to win."""
+    for row in rows:
+        candidates = []
+        row_date = row["utc"].date()
+        for e in events:
+            if e.get("country") != row.get("country"):
+                continue
+            if e.get("title", "").strip().lower() != row.get("title", "").strip().lower():
+                continue
+            if e["utc"].date() != row_date:
+                continue
+            delta = abs((e["utc"] - row["utc"]).total_seconds())
+            candidates.append((delta, e))
+        if not candidates:
+            continue
+        _, event = min(candidates, key=lambda x: x[0])
+        for field in ("actual", "forecast", "previous"):
+            value = str(row.get(field) or "").strip()
+            if value:
+                event[field] = value
 
 
 async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
@@ -217,14 +323,26 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
         normalized = [e for e in (_normalize(x) for x in all_rows) if e]
         dedup = {e["id"]: e for e in normalized}
         normalized = sorted(dedup.values(), key=lambda e: e["utc"])[:_MAX_EVENTS]
+
+        # The public HTML calendar is the authoritative fallback for already
+        # released Actual values. The JSON feed can remain stale/blank for a
+        # while, especially for historical days. Fetch current + previous week
+        # and merge only non-empty values.
+        try:
+            now_utc = datetime.now(timezone.utc)
+            html_rows: list[dict[str, Any]] = []
+            for week_dt in (now_utc, now_utc - timedelta(days=7)):
+                slug = _week_slug(week_dt)
+                html_text = await asyncio.to_thread(
+                    _fetch_historical_html, HISTORICAL_HTML_URL.format(slug=slug)
+                )
+                html_rows.extend(_parse_ff_historical_html(html_text, week_dt.year))
+            if normalized and html_rows:
+                _merge_historical_values(normalized, html_rows)
+        except Exception as exc:
+            # HTML is a fallback only; never make the calendar unavailable if it fails.
+            logger.debug("economic calendar historical HTML fallback failed: %s", exc)
         if normalized:
-            # قبل از جایگزینی cache، داده‌ها را دائمی نگه می‌داریم تا Actual و
-            # رویدادهای روزهای گذشته حتی بعد از خروج از feed زنده باقی بمانند.
-            try:
-                from bot.database import upsert_economic_calendar_events
-                upsert_economic_calendar_events(normalized)
-            except Exception as exc:
-                logger.warning("economic calendar history persist failed: %s", exc)
             _cache = normalized
             _cache_fetched_at = time.time()
             _cache_expires = time.monotonic() + CACHE_TTL
@@ -289,13 +407,11 @@ def format_event(e: dict[str, Any], tz_name: str = "") -> str:
     icon = IMPACT_ICON.get(e["impact"], "⚪")
     title_fa = _esc(e["title_fa"])
     title_en = _esc(e["title"])
-    actual = format_value(e["actual"])
-    status = "🟢 اعلام شد" if actual != "—" else "⏳ هنوز اعلام نشده"
     return (
         f"{icon} <b>{local.strftime('%H:%M')} | {_esc(e['country'])} | {title_fa}</b>\n"
         f"   <i>{title_en}</i>\n"
-        f"   🚦 <b>اهمیت:</b> {_esc(_impact_label(e))}\n"
-        f"   {status}  •  📢 <b>واقعی:</b> {_esc(actual)}"
+        f"   🚦 <b>اهمیت:</b> {_esc(_impact_label(e))}"
+        f"  •  📢 <b>واقعی:</b> {_esc(format_value(e['actual']))}"
         f"  •  🔮 <b>پیش‌بینی:</b> {_esc(format_value(e['forecast']))}"
         f"  •  ◀️ <b>قبلی:</b> {_esc(format_value(e['previous']))}"
     )
@@ -380,30 +496,12 @@ def ai_context(events, tz_name: str = "", limit: int = 40) -> str:
     return "\n".join(rows)
 
 
-def get_calendar_keyboard(user_id: int, *, mode: str = "today", impact: str = "all", events=None, selected_date: str = ""):
+def get_calendar_keyboard(user_id: int, *, mode: str = "today", impact: str = "all", events=None):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    if not selected_date:
-        try:
-            from bot.database import get_economic_calendar_preferences
-            pref = get_economic_calendar_preferences(user_id)
-            user_tz = pref.get("timezone") or getattr(config, "TIMEZONE", "Asia/Tehran")
-        except Exception:
-            user_tz = getattr(config, "TIMEZONE", "Asia/Tehran")
-        selected_date = datetime.now(_tz(user_tz)).strftime("%Y-%m-%d")
-    selected = selected_date
-    try:
-        d = datetime.strptime(selected, "%Y-%m-%d").date()
-    except Exception:
-        d = datetime.now(_tz()).date()
-    prev_d = (d - timedelta(days=1)).isoformat()
-    next_d = (d + timedelta(days=1)).isoformat()
     rows = [
-        [InlineKeyboardButton("⬅️ روز قبل", callback_data=f"ec:date:{prev_d}"),
-         InlineKeyboardButton("📅 امروز", callback_data="ec:today"),
-         InlineKeyboardButton("روز بعد ➡️", callback_data=f"ec:date:{next_d}")],
-        [InlineKeyboardButton("📆 فردا", callback_data="ec:tomorrow"), InlineKeyboardButton("🗓 هفته", callback_data="ec:week")],
+        [InlineKeyboardButton("📅 امروز", callback_data="ec:today"), InlineKeyboardButton("📆 فردا", callback_data="ec:tomorrow"), InlineKeyboardButton("🗓 هفته", callback_data="ec:week")],
         [InlineKeyboardButton("🔴 فقط مهم", callback_data="ec:impact:high"), InlineKeyboardButton("📋 همه خبرها", callback_data="ec:impact:all")],
-        [InlineKeyboardButton("🤖 تحلیل هوشمند", callback_data="ec:ai"), InlineKeyboardButton("🔄 بروزرسانی", callback_data="ec:refresh")],
+        [InlineKeyboardButton("🤖 تحلیل هوشمند", callback_data="ec:ai"), InlineKeyboardButton("🔔 اعلان‌ها", callback_data="ec:settings")],
         [InlineKeyboardButton("💵 USD", callback_data="ec:cur:USD"), InlineKeyboardButton("💶 EUR", callback_data="ec:cur:EUR"), InlineKeyboardButton("💷 GBP", callback_data="ec:cur:GBP")],
     ]
     if events:
@@ -459,90 +557,31 @@ def get_event_keyboard(event_id: str):
     ])
 
 
-async def get_calendar_for_user(user_id: int, mode: str = "today", impact: str = "all", currency: str = "", date_str: str = ""):
-    """تقویم کاربر با پشتیبانی از تاریخچه و روز قبل/بعد.
-
-    today شامل تمام رویدادهای همان روز است، حتی رویدادهایی که زمانشان گذشته؛
-    بنابراین Actual بعد از انتشار از صفحه حذف نمی‌شود.
-    """
-    from bot.database import get_economic_calendar_preferences, get_economic_calendar_events
+async def get_calendar_for_user(user_id: int, mode: str = "today", impact: str = "all", currency: str = ""):
+    from bot.database import get_economic_calendar_preferences
     p = get_economic_calendar_preferences(user_id)
     tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
+    days = 7 if mode == "week" else 2 if mode == "tomorrow" else 1
+    events = await refresh_calendar()
+    # برای فردا فقط روز دوم؛ برای امروز فقط امروز.
     tz = _tz(tz_name)
     now = datetime.now(tz)
-
-    # یک refresh سبک برای دریافت Actualهای تازه؛ تاریخچه از DB جداگانه خوانده می‌شود.
-    await refresh_calendar()
-
-    if date_str:
-        try:
-            selected = datetime.strptime(str(date_str), "%Y-%m-%d").date()
-        except Exception:
-            selected = now.date()
-    elif mode == "tomorrow":
-        selected = (now + timedelta(days=1)).date()
-    elif mode == "yesterday":
-        selected = (now - timedelta(days=1)).date()
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if mode == "tomorrow":
+        start += timedelta(days=1)
+        end = start + timedelta(days=1)
     else:
-        selected = now.date()
-
-    if mode == "week":
-        start_date = now.date()
-        end_date = start_date + timedelta(days=7)
-    else:
-        start_date = selected
-        end_date = selected + timedelta(days=1)
-
-    start_local = tz.localize(datetime.combine(start_date, datetime.min.time()))
-    end_local = tz.localize(datetime.combine(end_date, datetime.min.time()))
-    start_utc = start_local.astimezone(timezone.utc)
-    end_utc = end_local.astimezone(timezone.utc)
-
-    # cache زنده + تاریخچه DB؛ DB مرجع رویدادهای گذشته است.
-    merged: dict[str, dict[str, Any]] = {}
-    for e in _cache:
-        merged[e["id"]] = e
-    try:
-        rows = get_economic_calendar_events(start_utc, end_utc)
-        for row in rows:
-            e = {
-                "id": row[0], "utc": _parse_dt(row[1]), "country": row[2] or "",
-                "currency_name": row[3] or row[2] or "نامشخص", "impact": row[4] or "",
-                "title": row[5] or "رویداد اقتصادی", "title_fa": row[6] or _fa_title(row[5] or "رویداد اقتصادی"),
-                "actual": row[7] if row[7] is not None else "",
-                "forecast": row[8] if row[8] is not None else "",
-                "previous": row[9] if row[9] is not None else "",
-                "source": row[10] or "Forex Factory",
-            }
-            if e["utc"] is not None:
-                # DB may contain an older snapshot with blank Actual/Forecast/Previous.
-                # Never let that stale blank overwrite fresher live values from _cache.
-                # Conversely, keep any nonblank historical values stored in DB.
-                existing = merged.get(e["id"])
-                if existing:
-                    for field in ("actual", "forecast", "previous"):
-                        if not e.get(field) and existing.get(field):
-                            e[field] = existing[field]
-                    # Prefer the fresher/nonblank live metadata when available.
-                    for field in ("country", "currency_name", "impact", "title", "title_fa", "source"):
-                        if not e.get(field) and existing.get(field):
-                            e[field] = existing[field]
-                merged[e["id"]] = e
-    except Exception as exc:
-        logger.warning("economic calendar history read failed: %s", exc)
-
+        end = start + timedelta(days=days)
+        if mode == "today":
+            start = now
     out = []
-    for e in merged.values():
-        if not e.get("utc"):
-            continue
+    for e in events:
         local = e["utc"].astimezone(tz)
-        if not (start_local <= local < end_local):
+        if not (start <= local < end):
             continue
         if currency and e["country"] != currency.upper():
             continue
         if impact and impact != "all" and e["impact"].lower() != impact.lower():
             continue
         out.append(e)
-    out.sort(key=lambda e: e["utc"])
     return out, tz_name
-
