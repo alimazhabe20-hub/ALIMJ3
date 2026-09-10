@@ -24,7 +24,7 @@ _TOOL_TIMEOUT = max(5.0, float(os.getenv("AI_TOOL_TIMEOUT", "25")))
 _TOOL_CACHE_MAX = max(64, int(os.getenv("AI_TOOL_CACHE_MAX", "1024")))
 _TOOL_CACHEABLE = {
     "get_weather", "get_weather_forecast", "get_air_quality",
-    "get_market_prices", "get_top_crypto", "get_user_city",
+    "get_market_prices", "get_top_crypto", "get_user_city", "get_economic_calendar",
 }
 
 

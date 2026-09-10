@@ -317,6 +317,19 @@ async def _crypto_chart_info(symbol: str = "", days: int = 7) -> str:
     return caption or "داده نمودار در دسترس نیست."
 
 
+async def _get_economic_calendar(days: int = 1, currency: str = "", impact: str = "all", timezone: str = "", user_id: int = 0) -> str:
+    """داده زنده تقویم اقتصادی برای استفاده مستقیم AI."""
+    from bot.features.market.economic_calendar import get_calendar_for_user, calendar_text, ai_context
+    mode = "week" if int(days or 1) >= 7 else "today"
+    if int(days or 1) == 2:
+        mode = "tomorrow"
+    events, user_tz = await get_calendar_for_user(user_id, mode, impact or "all", currency or "")
+    tz_name = timezone.strip() if timezone.strip() else user_tz
+    if not events:
+        return "برای این فیلتر رویداد اقتصادی‌ای پیدا نشد."
+    return "منبع: تقویم اقتصادی زنده\nمنطقه زمانی: %s\n\n%s" % (tz_name, ai_context(events, tz_name, 60))
+
+
 async def _tool_web_search(query: str = "") -> str:
     from bot.services.ai_extras import web_search
     return await web_search(query)
@@ -480,6 +493,25 @@ def _register_builtin_tools() -> None:
         },
         handler=_analyze_crypto,
         keywords=[r"تحلیل\s*(ارز|کریپتو|رمزارز)|analyze\s*crypto|تحلیل\s*بیت\s*کوین"],
+    )
+    register_tool(
+        name="get_economic_calendar",
+        description=(
+            "تقویم اقتصادی زنده با زمان، ارز، اهمیت، واقعی، پیش‌بینی و مقدار قبلی. "
+            "برای پرسش‌هایی مثل خبرهای اقتصادی امروز، فردا، هفته، CPI، PPI، NFP، FOMC، ECB و نرخ بهره استفاده کن. "
+            "داده را اختراع نکن و اگر مقدار واقعی خالی است بگو هنوز منتشر نشده یا منبع فید آن را ارائه نکرده است."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "minimum": 1, "maximum": 7},
+                "currency": {"type": "string", "description": "مثل USD یا EUR؛ خالی یعنی همه"},
+                "impact": {"type": "string", "enum": ["all", "high", "medium", "low"]},
+                "timezone": {"type": "string", "description": "مثل Asia/Tehran یا Asia/Baku"},
+            },
+        },
+        handler=_get_economic_calendar,
+        keywords=[r"تقویم\s*اقتصادی|اخبار\s*اقتصادی|خبر\s*(اقتصادی|فاندامنتال)|CPI|PPI|NFP|FOMC|ECB|نرخ\s*بهره"],
     )
     register_tool(
         name="crypto_chart_info",
