@@ -1024,7 +1024,7 @@ def get_economic_calendar_preferences(user_id):
             (user_id,),
         ).fetchone()
         if not row:
-            return {"alerts": False, "lead_minutes": 15, "timezone": "", "currencies": [], "impact": "high"}
+            return {"alerts": False, "lead_minutes": 15, "timezone": "", "currencies": [], "impact": "all"}
         return {
             "alerts": bool(row[0]),
             "lead_minutes": max(1, min(120, int(row[1] or 15))),
