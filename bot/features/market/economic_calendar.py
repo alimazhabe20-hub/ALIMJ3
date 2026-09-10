@@ -515,6 +515,18 @@ async def get_calendar_for_user(user_id: int, mode: str = "today", impact: str =
                 "source": row[10] or "Forex Factory",
             }
             if e["utc"] is not None:
+                # DB may contain an older snapshot with blank Actual/Forecast/Previous.
+                # Never let that stale blank overwrite fresher live values from _cache.
+                # Conversely, keep any nonblank historical values stored in DB.
+                existing = merged.get(e["id"])
+                if existing:
+                    for field in ("actual", "forecast", "previous"):
+                        if not e.get(field) and existing.get(field):
+                            e[field] = existing[field]
+                    # Prefer the fresher/nonblank live metadata when available.
+                    for field in ("country", "currency_name", "impact", "title", "title_fa", "source"):
+                        if not e.get(field) and existing.get(field):
+                            e[field] = existing[field]
                 merged[e["id"]] = e
     except Exception as exc:
         logger.warning("economic calendar history read failed: %s", exc)
