@@ -50,6 +50,21 @@ def get_ai_keyboard(user_id=None):
         [InlineKeyboardButton("🧹 حذف حافظه", callback_data="ai_clear_memory")],
     ])
 
+def get_ai_answer_keyboard(user_id=None):
+    """دکمه‌های مخصوص زیر پاسخ AI؛ ادامه فقط برای پاسخ‌های واقعی AI نمایش داده می‌شود."""
+    from bot.services.ai_service import get_selected_model, _PROVIDER_PRETTY
+    selected = get_selected_model(user_id) if user_id is not None else None
+    selected_text = "🎛 انتخاب مدل AI"
+    if selected:
+        provider = selected[0]
+        pretty = _PROVIDER_PRETTY.get(provider, provider)
+        selected_text = f"🎛 فعال: {pretty}"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➡️ ادامه پاسخ", callback_data="ai_continue")],
+        [InlineKeyboardButton(selected_text, callback_data="ai_models")],
+        [InlineKeyboardButton("🧹 حذف حافظه", callback_data="ai_clear_memory")],
+    ])
+
 def get_ai_model_keyboard(user_id=None):
     """
     لیست ارائه‌دهنده‌ها (نه تک‌تک مدل‌ها).
