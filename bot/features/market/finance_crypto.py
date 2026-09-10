@@ -34,7 +34,7 @@ _mtf_convergence = _f._mtf_convergence
 _advanced_levels = _f._advanced_levels
 _market_regime = _f._market_regime
 _professional_score = _f._professional_score
-from bot.features.market.trading_intelligence import (backtest_directional, walk_forward, calibration, alert_flags, risk_plan)
+from bot.features.market.trading_intelligence import (backtest_directional, walk_forward, calibration, alert_flags, risk_plan, dedupe_alerts)
 from bot.features.market.trading_adaptation import settle_signals, record_signal, adaptive_profile, performance_summary
 _fetch_fundamentals = _f._fetch_fundamentals
 _build_smart_summary = _f._build_smart_summary
@@ -373,6 +373,7 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
     gate = pro.get("quality_gate") or {}
     adaptive = pro.get("adaptive") or adaptive_profile(base, regime, signal or "default")
     alerts = alert_flags(current, support, resistance, ta, {**(binance or {}), **(orderflow or {})}, market)
+    alerts = dedupe_alerts(alerts, key=f"{base}|{regime}")
     # Non-lookahead historical proxy scores for robustness metrics.
     hist_scores=[]
     if len(closes) >= 40:

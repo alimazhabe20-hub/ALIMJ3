@@ -3,6 +3,7 @@ Pure helpers are intentionally dependency-free so they can be unit-tested offlin
 """
 from __future__ import annotations
 import math
+import time
 from statistics import mean
 
 
@@ -136,3 +137,25 @@ def alert_flags(current, support=None, resistance=None, ta=None, binance=None, m
     if bool((market.get("news") or {}).get("count")) and (market.get("news") or {}).get("label") in ("مثبت","منفی"):
         flags.append("news_sentiment_shift")
     return flags
+
+
+def dedupe_alerts(alerts, *, key="default", ttl_seconds=900, now=None):
+    """Return only newly-seen alert flags for a bounded process-local window."""
+    now = time.time() if now is None else float(now)
+    store = getattr(dedupe_alerts, "_seen", {})
+    previous = store.get(str(key), {})
+    out = []
+    for alert in list(alerts or []):
+        stamp = float(previous.get(alert, 0.0))
+        if now - stamp >= max(1, int(ttl_seconds)):
+            out.append(alert)
+            previous[alert] = now
+    store[str(key)] = previous
+    # Keep the structure bounded for long-running bots.
+    if len(store) > 512:
+        cutoff = now - max(1, int(ttl_seconds))
+        for k in list(store):
+            if all(float(v) < cutoff for v in store[k].values()):
+                store.pop(k, None)
+    dedupe_alerts._seen = store
+    return out
