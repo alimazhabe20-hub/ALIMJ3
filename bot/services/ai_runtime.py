@@ -31,7 +31,7 @@ GEMINI_SAFETY_SETTINGS = [
 
 MAX_INPUT = int(os.getenv("AI_MAX_INPUT", "6000"))
 # سقف خروجی بالاتر تا جواب‌ها کامل و مفصل باشند
-MAX_OUTPUT = int(os.getenv("AI_MAX_OUTPUT", "4096"))
+MAX_OUTPUT = int(os.getenv("AI_MAX_OUTPUT", "8192"))
 HISTORY_ITEMS = max(2, int(os.getenv("AI_HISTORY_ITEMS", "8")))
 # timeout کمی بالاتر چون جواب‌های کامل‌تر زمان بیشتری می‌گیرند
 TIMEOUT = float(os.getenv("AI_TIMEOUT", "40"))
