@@ -278,9 +278,40 @@ def _parse_ff_historical_html(text: str, year_hint: int) -> list[dict[str, Any]]
 
 
 def _fetch_historical_html(url: str) -> str:
-    r = requests.get(url, timeout=18, headers={"User-Agent": "Mozilla/5.0 ALIMJ Economic Calendar"})
+    r = requests.get(
+        url,
+        timeout=18,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "Chrome/131.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.8",
+        },
+    )
     r.raise_for_status()
     return r.text
+
+
+def _html_rows_to_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert FF HTML rows into the same normalized shape used by the JSON feed."""
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        utc = row.get("utc")
+        if not isinstance(utc, datetime):
+            continue
+        raw = {
+            "date": utc.isoformat(),
+            "country": row.get("country", ""),
+            "title": row.get("title", ""),
+            "impact": row.get("impact", ""),
+            "actual": row.get("actual", ""),
+            "forecast": row.get("forecast", ""),
+            "previous": row.get("previous", ""),
+        }
+        event = _normalize(raw)
+        if event:
+            out.append(event)
+    return out
 
 
 def _merge_historical_values(events: list[dict[str, Any]], rows: list[dict[str, Any]]) -> None:
@@ -340,24 +371,40 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
                 except Exception as exc2:
                     errors.append(f"fallback: {exc2}")
         normalized = [e for e in (_normalize(x) for x in all_rows) if e]
-        dedup = {e["id"]: e for e in normalized}
-        normalized = sorted(dedup.values(), key=lambda e: e["utc"])[:_MAX_EVENTS]
 
-        # JSON feed may lag on already-published Actual values. Use the public
-        # historical calendar as a secondary source and merge only non-empty values.
+        # The JSON export is convenient but can be unavailable/blocked. The public
+        # Forex Factory calendar page is a reliable fallback and also contains the
+        # already-published Actual values. When JSON is empty, build the calendar
+        # entirely from HTML instead of returning "source unavailable".
+        html_rows: list[dict[str, Any]] = []
         try:
             now_utc = datetime.now(timezone.utc)
-            html_rows: list[dict[str, Any]] = []
-            for week_dt in (now_utc, now_utc - timedelta(days=7)):
-                slug = _week_slug(week_dt)
-                html_text = await asyncio.to_thread(
-                    _fetch_historical_html, HISTORICAL_HTML_URL.format(slug=slug)
-                )
-                html_rows.extend(_parse_ff_historical_html(html_text, week_dt.year))
-            if normalized and html_rows:
-                _merge_historical_values(normalized, html_rows)
+            # Current week first; yesterday/previous week is only needed for
+            # history enrichment and is intentionally best-effort.
+            current_slug = _week_slug(now_utc)
+            current_html = await asyncio.to_thread(
+                _fetch_historical_html, HISTORICAL_HTML_URL.format(slug=current_slug)
+            )
+            html_rows.extend(_parse_ff_historical_html(current_html, now_utc.year))
+
+            if normalized:
+                previous_dt = now_utc - timedelta(days=7)
+                try:
+                    previous_html = await asyncio.to_thread(
+                        _fetch_historical_html,
+                        HISTORICAL_HTML_URL.format(slug=_week_slug(previous_dt)),
+                    )
+                    html_rows.extend(_parse_ff_historical_html(previous_html, previous_dt.year))
+                except Exception as exc:
+                    logger.debug("economic calendar previous-week HTML enrichment failed: %s", exc)
+
+            if html_rows:
+                if normalized:
+                    _merge_historical_values(normalized, html_rows)
+                else:
+                    normalized = _html_rows_to_events(html_rows)
         except Exception as exc:
-            logger.debug("economic calendar historical HTML fallback failed: %s", exc)
+            logger.debug("economic calendar HTML source failed: %s", exc)
 
         if normalized:
             # قبل از جایگزینی cache، داده‌ها را دائمی نگه می‌داریم تا Actual و
