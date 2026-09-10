@@ -276,13 +276,17 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
         chunks = _split_telegram_text("🤖 " + answer, 3900)
         if not chunks:
             chunks = ["🤖 پاسخی دریافت نشد."]
-        # پیام نهایی اول: ویرایش همان «در حال نوشتن»
+        # اگر آخرین ویرایش دقیقاً همان متن نهایی بوده، دوباره پیام نفرست.
+        # این جلوی Duplicate Reply را در خطای «Message is not modified» می‌گیرد.
         final = chunks[0]
         if final != last_rendered:
             try:
                 await sent.edit_text(final)
                 last_rendered = final
             except Exception as edit_error:
+                # یک retry روی همان پیام؛ هرگز fallback به reply_text نکن،
+                # چون ممکن است درخواست edit سمت تلگرام موفق شده باشد و فقط
+                # پاسخ شبکه از دست رفته باشد؛ reply مجدد در این حالت دو جواب می‌سازد.
                 logger.warning("AI final edit failed; retrying same message: %s", edit_error)
                 try:
                     await asyncio.sleep(0.15)
@@ -290,10 +294,6 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
                     last_rendered = final
                 except Exception as retry_error:
                     logger.warning("AI final edit retry failed: %s", retry_error)
-                    try:
-                        await msg.reply_text(final)
-                    except Exception:
-                        pass
         # ادامه‌ها در پیام‌های بعدی تا هیچ بخشی حذف نشود
         for i, chunk in enumerate(chunks[1:], start=2):
             try:
