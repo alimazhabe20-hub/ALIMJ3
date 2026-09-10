@@ -356,7 +356,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "«سناریوی نزولی برای ریسک‌پذیری» و «مهم‌ترین ریسک/ابهام» را کوتاه جمع‌بندی کن. اگر داده‌ای برای مقایسه وجود ندارد، "
                     "صریحاً بگو «داده کافی برای مقایسه وجود ندارد». پاسخ را بدون Markdown و بدون جدول بده. "
                     "پاسخ باید کامل باشد و هیچ جمله یا تیتر ناتمام نماند.\n\n"
-                    "داده تقویم:\n" + context_text[:6500]
+                    "داده تقویم:\n" + context_text[:4000]
                 )
                 answer, _ = await ask_ai(user_id, prompt)
                 from html import escape
@@ -513,7 +513,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
         except Exception as e:
             logger.error("economic calendar callback failed: %s", e, exc_info=True)
-            await _safe_answer(query, "⚠️ خطا در تقویم اقتصادی.", show_alert=True)
+            try:
+                await _safe_answer(query, "⚠️ خطا در تقویم اقتصادی.", show_alert=True)
+            except Exception:
+                pass
+            try:
+                msg = str(e).strip() or "خطای ناشناخته"
+                if len(msg) > 300:
+                    msg = msg[:300] + "…"
+                # پیام قابل‌فهم برای کاربر بدون لو دادن مسیر داخلی
+                if "AI" in msg or "api" in msg.lower() or "key" in msg.lower() or "مدل" in msg or "سرویس" in msg:
+                    user_msg = f"⚠️ تحلیل هوشمند الان در دسترس نیست.\n{msg}"
+                else:
+                    user_msg = f"⚠️ موقتاً مشکلی در تقویم اقتصادی پیش آمد.\n{msg}"
+                await query.message.reply_text(user_msg)
+            except Exception:
+                pass
             return
 
     if data == "ai_models":
