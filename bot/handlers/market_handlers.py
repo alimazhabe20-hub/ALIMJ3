@@ -165,6 +165,6 @@ async def _h_economic_calendar(u, c, t, uid):
     try:
         events, tz_name = await get_calendar_for_user(uid, "today", "all")
         text = calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name)
-        await u.message.reply_text(text, reply_markup=get_calendar_keyboard(uid, events=events))
+        await u.message.reply_text(text, parse_mode="HTML", reply_markup=get_calendar_keyboard(uid, events=events))
     except Exception as e:
         await u.message.reply_text(f"⚠️ تقویم اقتصادی فعلاً در دسترس نیست.\n{e}", reply_markup=get_market_keyboard())

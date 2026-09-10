@@ -79,33 +79,33 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if data == "ec:today":
                 events, tz_name = await get_calendar_for_user(user_id, "today", "all")
                 await _safe_answer(query)
-                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), reply_markup=get_calendar_keyboard(user_id, events=events))
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events))
                 return
             if data == "ec:tomorrow":
                 events, tz_name = await get_calendar_for_user(user_id, "tomorrow", "all")
                 await _safe_answer(query)
-                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی فردا", tz_name=tz_name), reply_markup=get_calendar_keyboard(user_id, events=events))
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی فردا", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events))
                 return
             if data == "ec:week":
                 events, tz_name = await get_calendar_for_user(user_id, "week", "all")
                 await _safe_answer(query)
-                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی هفته", tz_name=tz_name), reply_markup=get_calendar_keyboard(user_id, events=events))
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی هفته", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events))
                 return
             if data == "ec:impact:high":
                 events, tz_name = await get_calendar_for_user(user_id, "today", "high")
                 await _safe_answer(query, "فقط خبرهای مهم")
-                await query.edit_message_text(calendar_text(events, title="خبرهای مهم اقتصادی امروز", tz_name=tz_name), reply_markup=get_calendar_keyboard(user_id, events=events))
+                await query.edit_message_text(calendar_text(events, title="خبرهای مهم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events))
                 return
             if data == "ec:impact:all":
                 events, tz_name = await get_calendar_for_user(user_id, "today", "all")
                 await _safe_answer(query)
-                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), reply_markup=get_calendar_keyboard(user_id, events=events))
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events))
                 return
             if data.startswith("ec:cur:"):
                 cur = data.split(":", 2)[2].upper()
                 events, tz_name = await get_calendar_for_user(user_id, "today", "all", cur)
                 await _safe_answer(query, f"فیلتر {cur}")
-                await query.edit_message_text(calendar_text(events, title=f"خبرهای {cur} امروز", tz_name=tz_name), reply_markup=get_calendar_keyboard(user_id, events=events))
+                await query.edit_message_text(calendar_text(events, title=f"خبرهای {cur} امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events))
                 return
             if data == "ec:settings":
                 await _safe_answer(query)
@@ -158,13 +158,30 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context_text = ai_context(events, tz_name, 35)
                 from bot.services.ai_service import ask_ai
                 prompt = (
-                    "تو تحلیل‌گر حرفه‌ای تقویم اقتصادی هستی. پاسخ را کاملاً فارسی، روشن و کاربردی بنویس. "
-                    "از داده‌های زیر خارج نشو و عدد/خبر جدید اختراع نکن. برای هر خبر مهم، اهمیت، زمان، ارز، "
-                    "پیش‌بینی و قبلی را توضیح بده و بگو چرا ممکن است روی بازار اثر بگذارد. در پایان یک جمع‌بندی "
-                    "از مهم‌ترین ریسک‌های امروز بده. توصیه قطعی خرید/فروش نده.\n\nداده تقویم:\n" + context_text[:6500]
+                    "تو یک تحلیل‌گر حرفه‌ای اقتصاد کلان و بازارهای مالی هستی. پاسخ را کاملاً فارسی، منظم و کاربردی بده. "
+                    "فقط از داده‌های تقویم استفاده کن و هیچ عدد، خبر یا نتیجه قطعی اختراع نکن. برای هر رویداد مهم، ابتدا "
+                    "معنای خبر و تفاوت Actual با Forecast و Previous را توضیح بده. سپس اثر احتمالی آن را جداگانه روی "
+                    "1) بیت‌کوین و اتریوم، 2) آلت‌کوین‌ها، 3) دلار آمریکا و DXY، 4) طلا، 5) سهام، 6) اوراق و بازدهی خزانه‌داری "
+                    "بررسی کن. اگر Actual بالاتر از Forecast، پایین‌تر از Forecast، نزدیک Forecast یا هنوز منتشر نشده است، "
+                    "سناریوهای مربوط به هر حالت را توضیح بده و جهت احتمالی بازار را با عبارت‌هایی مثل «معمولاً»، «می‌تواند» "
+                    "و «در صورت تداوم» بیان کن؛ هرگز آن را تضمین یا سیگنال قطعی معامله معرفی نکن. Previous را هم برای تشخیص "
+                    "بهبود/بدترشدن روند در نظر بگیر. در پایان، «سناریوی پایه»، «سناریوی صعودی برای ریسک‌پذیری»، "
+                    "«سناریوی نزولی برای ریسک‌پذیری» و «مهم‌ترین ریسک/ابهام» را کوتاه جمع‌بندی کن. اگر داده‌ای برای مقایسه وجود ندارد، "
+                    "صریحاً بگو «داده کافی برای مقایسه وجود ندارد». پاسخ را بدون Markdown و بدون جدول بده تا قالب‌بندی تلگرام را ربات انجام دهد.\n\n"
+                    "داده تقویم:\n" + context_text[:6500]
                 )
                 answer, _ = await ask_ai(user_id, prompt)
-                await query.message.reply_text("🤖 تحلیل هوشمند تقویم اقتصادی\n────────────────────\n" + (answer or "تحلیل در دسترس نیست." )[:3800], reply_markup=get_calendar_keyboard(user_id, events=events))
+                from html import escape
+                body = escape((answer or "تحلیل در دسترس نیست.").strip(), quote=False)
+                if len(body) > 3700:
+                    body = body[:3690] + "…"
+                text = (
+                    "🤖 <b>تحلیل هوشمند تقویم اقتصادی</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    "<i>اثر احتمالی بر کریپتو، دلار، طلا، سهام و اوراق</i>\n\n"
+                    f"<blockquote>{body}</blockquote>"
+                )
+                await query.message.reply_text(text, parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events))
                 return
             if data.startswith("ec:event:"):
                 event_id = data.split(":", 2)[2]
@@ -176,7 +193,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست.", show_alert=True)
                     return
                 await _safe_answer(query)
-                await query.edit_message_text(event_detail(e, tz_name), reply_markup=get_event_keyboard(event_id))
+                await query.edit_message_text(event_detail(e, tz_name), parse_mode="HTML", reply_markup=get_event_keyboard(event_id))
                 return
             if data.startswith("ec:analyze:"):
                 event_id = data.split(":", 2)[2]
@@ -190,17 +207,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _safe_answer(query, "در حال تحلیل…")
                 from bot.services.ai_service import ask_ai
                 prompt = (
-                    "این رویداد اقتصادی را فقط بر اساس داده‌های داده‌شده تحلیل کن. کاملاً فارسی. "
-                    "توضیح بده اگر واقعی بالاتر/پایین‌تر از پیش‌بینی باشد معمولاً چه برداشتی برای ارز مربوطه دارد، "
-                    "اما سناریوی قطعی یا توصیه سرمایه‌گذاری نده.\n\n" + ai_context([e], tz_name)
+                    "این رویداد اقتصادی را فقط بر اساس داده‌های داده‌شده تحلیل کن و کاملاً فارسی پاسخ بده. "
+                    "ابتدا معنی خبر را توضیح بده. سپس Actual را با Forecast و Previous مقایسه کن. اگر Actual بالاتر از Forecast، "
+                    "پایین‌تر، نزدیک، یا ناموجود است، سناریوی مربوط را توضیح بده. اثر احتمالی را جداگانه روی بیت‌کوین، اتریوم، "
+                    "آلت‌کوین‌ها، USD/DXY، طلا، سهام و اوراق/بازدهی بررسی کن و بگو در صورت تداوم اثر، احتمالاً چه چیزی در بازار "
+                    "دیده می‌شود. بین واقعیت داده و سناریوی احتمالی تفاوت بگذار؛ هیچ عدد یا خبر جدیدی نساز و توصیه قطعی خرید/فروش نده. "
+                    "پاسخ را بدون Markdown و بدون جدول بنویس و این بخش‌ها را با تیترهای کوتاه جدا کن: «معنی خبر»، «کریپتو»، "
+                    "«دلار/DXY»، «طلا»، «سهام»، «اوراق و بازدهی»، «سناریوی Actual در برابر Forecast»، «جمع‌بندی».\n\n"
+                    + ai_context([e], tz_name)
                 )
                 answer, _ = await ask_ai(user_id, prompt)
-                await query.message.reply_text(event_detail(e, tz_name) + "\n\n🤖 تحلیل AI:\n" + (answer or "تحلیل در دسترس نیست.")[:2500], reply_markup=get_event_keyboard(event_id))
+                from html import escape
+                body = escape((answer or "تحلیل در دسترس نیست.").strip(), quote=False)
+                if len(body) > 2700:
+                    body = body[:2690] + "…"
+                text = event_detail(e, tz_name) + (
+                    "\n\n🤖 <b>تحلیل هوشمند بازار</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    f"<blockquote>{body}</blockquote>"
+                )
+                await query.message.reply_text(text, parse_mode="HTML", reply_markup=get_event_keyboard(event_id))
                 return
             if data == "ec:back":
                 events, tz_name = await get_calendar_for_user(user_id, "today", "all")
                 await _safe_answer(query)
-                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), reply_markup=get_calendar_keyboard(user_id, events=events))
+                await query.edit_message_text(calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name), parse_mode="HTML", reply_markup=get_calendar_keyboard(user_id, events=events))
                 return
         except Exception as e:
             logger.error("economic calendar callback failed: %s", e, exc_info=True)
