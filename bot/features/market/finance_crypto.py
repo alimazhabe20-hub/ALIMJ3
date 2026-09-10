@@ -413,18 +413,23 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
     if len(ai_guide) > 220:
         ai_guide = ai_guide[:220].rsplit(" ", 1)[0] + "…"
 
+    # Telegram HTML: ساختار کوتاه و بخش‌بندی‌شده تا متن تحلیل روی موبایل شلوغ نشود.
     lines = [
-        f"▎1. 📰 خلاصه کلی — {tf_label}",
-        f"🧭 روند: {trend_arrow}",
-        f"🛡 حمایت کلیدی: {fmt_p(support)}",
-        f"🧱 مقاومت کلیدی: {fmt_p(resistance)}",
-        f"🎯 نوع سیگنال: {signal_fa}",
-        f"⭐️ امتیاز کیفیت ستاپ: {setup_score}.0",
-        f"⚖️ کیفیت ریوارد (R:R وزنی): {rr_quality}",
-        f"⚠️ سطح ریسک (حد ضرر): {risk_level}",
-        f"🔖 وضعیت اجرا: {exec_status}",
-        f"📝 جمع‌بندی: {ai_summary}",
-        f"ℹ️ راهنما: {ai_guide}",
+        f"<b>📰 خلاصه کلی — {tf_label}</b>",
+        "",
+        f"🧭 <b>روند:</b> {trend_arrow}",
+        f"🎯 <b>سیگنال:</b> {signal_fa}",
+        f"⭐️ <b>کیفیت ستاپ:</b> {setup_score}.0/10",
+        f"🔖 <b>وضعیت اجرا:</b> {exec_status}",
+        "",
+        "<b>📍 سطوح مهم</b>",
+        f"🛡 حمایت: <code>{fmt_p(support)}</code>",
+        f"🧱 مقاومت: <code>{fmt_p(resistance)}</code>",
+        f"⚖️ ریوارد (R:R): {rr_quality}",
+        f"⚠️ ریسک: {risk_level}",
+        "",
+        f"📝 <b>جمع‌بندی</b>\n{ai_summary}",
+        f"ℹ️ <b>راهنما</b>\n{ai_guide}",
     ]
     if pa.get("valid"):
         classic_patterns = []
@@ -438,26 +443,32 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
                 item += f" | هدف: {fmt_p(x.get('target'))}"
             classic_patterns.append(item)
 
-        classic_patterns_text = (
-            ", ".join(classic_patterns)
-            or "الگوی قابل اتکا شناسایی نشد"
-        )
+        classic_patterns_text = "\n".join(
+            f"• {item}" for item in classic_patterns
+        ) or "• الگوی قابل اتکا شناسایی نشد"
 
-        lines += ["", "▎🧠 تحلیل پرایس اکشن",
-                  f"🏗 ساختار: {pa.get('structure','—')}",
-                  f"🔀 BOS/CHOCH: {pa.get('bos_choch') or 'ندارد'}",
-                  f"🕯 الگوی کندلی: {', '.join(pa.get('patterns') or []) or 'سیگنال قوی ندارد'}",
-                  f"📐 الگوی کلاسیک: {classic_patterns_text}",
-                  f"💧 نقدینگی: {pa.get('liquidity_sweep') or 'Sweep مشخصی دیده نشد'}",
-                  f"⚖️ Equal High/Low: {fmt_p(pa.get('equal_highs')) if pa.get('equal_highs') else '—'} / {fmt_p(pa.get('equal_lows')) if pa.get('equal_lows') else '—'}",
-                  f"📍 موقعیت قیمت: {pa.get('location','—')}",
-                  f"💥 شکست: {pa.get('breakout') or 'تأیید نشده'}",
-                  f"📦 حالت حرکت: {pa.get('impulse_state') or 'نرمال'}",
-                  f"📊 نسبت حجم: {pa.get('volume_ratio'):.2f}x" if pa.get('volume_ratio') is not None else "📊 نسبت حجم: —"]
+        lines += [
+            "",
+            "<b>🧠 تحلیل پرایس اکشن</b>",
+            "",
+            f"🏗 <b>ساختار:</b> {pa.get('structure','—')}",
+            f"🔀 <b>BOS/CHOCH:</b> {pa.get('bos_choch') or 'ندارد'}",
+            f"🕯 <b>کندل:</b> {', '.join(pa.get('patterns') or []) or 'سیگنال قوی ندارد'}",
+            "",
+            "<b>📐 الگوهای کلاسیک</b>",
+            classic_patterns_text,
+            "",
+            f"💧 <b>نقدینگی:</b> {pa.get('liquidity_sweep') or 'Sweep مشخصی دیده نشد'}",
+            f"⚖️ <b>Equal High/Low:</b> {fmt_p(pa.get('equal_highs')) if pa.get('equal_highs') else '—'} / {fmt_p(pa.get('equal_lows')) if pa.get('equal_lows') else '—'}",
+            f"📍 <b>موقعیت قیمت:</b> {pa.get('location','—')}",
+            f"💥 <b>شکست:</b> {pa.get('breakout') or 'تأیید نشده'}",
+            f"📦 <b>حالت حرکت:</b> {pa.get('impulse_state') or 'نرمال'}",
+            f"📊 <b>نسبت حجم:</b> {pa.get('volume_ratio'):.2f}x" if pa.get('volume_ratio') is not None else "📊 <b>نسبت حجم:</b> —",
+        ]
 
     # چندتایم‌فریم + همگرایی
     lines.append("")
-    lines.append("▎2. ⏱ امتیاز و همگرایی تایم‌فریم")
+    lines.append("<b>⏱ امتیاز و همگرایی تایم‌فریم</b>")
     sc = mtf.get("scores") or {}
     di = mtf.get("dirs") or {}
     for k in ("15M", "1H", "4H", "1D", "1W"):
