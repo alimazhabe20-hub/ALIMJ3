@@ -892,6 +892,10 @@ async def analyze_gold(*args, **kwargs):
     from bot.features.market.finance_crypto import analyze_gold as _fn
     return await _fn(*args, **kwargs)
 
+async def get_gold_chart(*args, **kwargs):
+    from bot.features.market.finance_crypto import get_gold_chart as _fn
+    return await _fn(*args, **kwargs)
+
 def _default_guide(*args, **kwargs):
     from bot.features.market.finance_crypto import _default_guide as _fn
     return _fn(*args, **kwargs)
