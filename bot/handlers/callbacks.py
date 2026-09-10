@@ -203,31 +203,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 event_id = data.split(":", 2)[2]
                 p = get_economic_calendar_preferences(user_id)
                 tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
-                # جزئیات باید از همان mergeِ live + historical استفاده کند؛
-                # refresh مستقیم فقط cache زنده را می‌داد و Actual تاریخی ممکن بود گم شود.
+                # جزئیات از merge زنده + تاریخچه می‌خواند تا Actual منتشرشده از بین نرود.
                 from bot.database import get_economic_calendar_event
                 row = get_economic_calendar_event(event_id)
                 e = None
                 if row:
-                    parsed_utc = __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt"])._parse_dt(row[1])
+                    mod = __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt", "_tz"])
+                    parsed_utc = mod._parse_dt(row[1])
                     if parsed_utc:
-                        local_date = parsed_utc.astimezone(__import__("bot.features.market.economic_calendar", fromlist=["_tz"])._tz(tz_name)).strftime("%Y-%m-%d")
+                        local_date = parsed_utc.astimezone(mod._tz(tz_name)).strftime("%Y-%m-%d")
                         events, _ = await get_calendar_for_user(user_id, "date", "all", date_str=local_date)
                         e = get_event(events, event_id)
                 if not e:
                     events = await refresh_calendar()
                     e = get_event(events, event_id)
                 if not e and row:
-                    e = {
-                        "id": row[0], "utc": __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt"])._parse_dt(row[1]),
-                        "country": row[2] or "", "currency_name": row[3] or row[2] or "نامشخص",
-                        "impact": row[4] or "", "title": row[5] or "رویداد اقتصادی",
-                        "title_fa": row[6] or row[5] or "رویداد اقتصادی",
-                        "actual": row[7] if row[7] is not None else "",
-                        "forecast": row[8] if row[8] is not None else "",
-                        "previous": row[9] if row[9] is not None else "",
-                        "source": row[10] or "Forex Factory",
-                    }
+                    mod = __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt"])
+                    e = {"id": row[0], "utc": mod._parse_dt(row[1]), "country": row[2] or "", "currency_name": row[3] or row[2] or "نامشخص", "impact": row[4] or "", "title": row[5] or "رویداد اقتصادی", "title_fa": row[6] or row[5] or "رویداد اقتصادی", "actual": row[7] if row[7] is not None else "", "forecast": row[8] if row[8] is not None else "", "previous": row[9] if row[9] is not None else "", "source": row[10] or "Forex Factory"}
                 if not e:
                     await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست.", show_alert=True)
                     return
@@ -242,25 +234,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 row = get_economic_calendar_event(event_id)
                 e = None
                 if row:
-                    parsed_utc = __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt"])._parse_dt(row[1])
+                    mod = __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt", "_tz"])
+                    parsed_utc = mod._parse_dt(row[1])
                     if parsed_utc:
-                        local_date = parsed_utc.astimezone(__import__("bot.features.market.economic_calendar", fromlist=["_tz"])._tz(tz_name)).strftime("%Y-%m-%d")
+                        local_date = parsed_utc.astimezone(mod._tz(tz_name)).strftime("%Y-%m-%d")
                         events, _ = await get_calendar_for_user(user_id, "date", "all", date_str=local_date)
                         e = get_event(events, event_id)
                 if not e:
                     events = await refresh_calendar()
                     e = get_event(events, event_id)
                 if not e and row:
-                    e = {
-                        "id": row[0], "utc": __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt"])._parse_dt(row[1]),
-                        "country": row[2] or "", "currency_name": row[3] or row[2] or "نامشخص",
-                        "impact": row[4] or "", "title": row[5] or "رویداد اقتصادی",
-                        "title_fa": row[6] or row[5] or "رویداد اقتصادی",
-                        "actual": row[7] if row[7] is not None else "",
-                        "forecast": row[8] if row[8] is not None else "",
-                        "previous": row[9] if row[9] is not None else "",
-                        "source": row[10] or "Forex Factory",
-                    }
+                    mod = __import__("bot.features.market.economic_calendar", fromlist=["_parse_dt"])
+                    e = {"id": row[0], "utc": mod._parse_dt(row[1]), "country": row[2] or "", "currency_name": row[3] or row[2] or "نامشخص", "impact": row[4] or "", "title": row[5] or "رویداد اقتصادی", "title_fa": row[6] or row[5] or "رویداد اقتصادی", "actual": row[7] if row[7] is not None else "", "forecast": row[8] if row[8] is not None else "", "previous": row[9] if row[9] is not None else "", "source": row[10] or "Forex Factory"}
                 if not e:
                     await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست.", show_alert=True)
                     return
@@ -818,54 +803,49 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         kwargs["reply_markup"] = reply_markup
                     await target.reply_text(**kwargs)
 
-            async def _edit_photo_caption(_png: bytes | None, caption: str):
-                """Edit the EXISTING visual message; never replace/re-send its photo.
+            async def _edit_photo_caption(png: bytes | None, caption: str):
+                """Update the visual message, then deliver the FULL text separately.
 
-                Telegram limits photo captions to 1024 characters. Therefore the
-                original photo is always kept in place and its caption is edited.
-                Only the overflow, when it genuinely does not fit, is sent as a
-                follow-up text message.
+                This avoids Telegram's 1024-char photo-caption limit, which previously
+                caused long AI/analysis reports to end abruptly mid-section.
                 """
                 msg = query.message
                 full = (caption or "").strip()
                 caption_chunks = _split_telegram_text(full, limit=1000)
                 cap = caption_chunks[0] if caption_chunks else "داده کافی نیست."
+                if len(caption_chunks) > 1:
+                    cap += "\n\n📄 ادامه تحلیل در پیام‌های بعدی…"
                 try:
+                    if png:
+                        bio = BytesIO(png)
+                        bio.name = f"{symbol}.png"
+                        media = InputMediaPhoto(media=bio, caption=cap, parse_mode="HTML")
+                        await msg.edit_media(media=media, reply_markup=menu)
+                        for chunk in _split_telegram_text("\n".join(caption_chunks[1:]), limit=3900):
+                            await msg.reply_text(chunk, parse_mode="HTML")
+                        return
                     if msg.photo:
-                        await msg.edit_caption(
-                            caption=cap,
-                            parse_mode="HTML",
-                            reply_markup=menu,
-                        )
+                        await msg.edit_caption(caption=cap, parse_mode="HTML", reply_markup=menu)
                         if len(caption_chunks) > 1:
                             remainder = "\n".join(caption_chunks[1:])
                             await _send_full_text(remainder, reply_to=msg, reply_markup=menu)
-                        return
-
-                    # If the current message is text-only, edit it normally.
-                    chunks = _split_telegram_text(full)
-                    first = chunks[0] if chunks else "داده کافی نیست."
-                    await msg.edit_text(first, parse_mode="HTML", reply_markup=menu)
-                    for chunk in chunks[1:]:
-                        await msg.reply_text(chunk, parse_mode="HTML")
-                except Exception as e:
-                    logger.warning("analysis message edit failed: %s", e)
+                    else:
+                        chunks = _split_telegram_text(full)
+                        first = chunks[0] if chunks else "داده کافی نیست."
+                        await msg.edit_text(first, parse_mode="HTML", reply_markup=menu)
+                        for chunk in chunks[1:]:
+                            await msg.reply_text(chunk, parse_mode="HTML")
+                except Exception:
                     try:
-                        # Last resort: edit the existing message as text. Do NOT
-                        # create a new photo, because the user's original image
-                        # must remain the visual anchor of the analysis.
-                        if msg.photo:
-                            await msg.edit_caption(
-                                caption=cap[:1024],
-                                parse_mode="HTML",
-                                reply_markup=menu,
-                            )
+                        if png:
+                            bio = BytesIO(png)
+                            bio.name = f"{symbol}.png"
+                            await msg.reply_photo(photo=bio, caption=cap, parse_mode="HTML", reply_markup=menu)
+                            if len(caption_chunks) > 1:
+                                remainder = "\n".join(caption_chunks[1:])
+                                await _send_full_text(remainder, reply_to=msg, reply_markup=menu)
                         else:
-                            await msg.edit_text(
-                                first[:4000],
-                                parse_mode="HTML",
-                                reply_markup=menu,
-                            )
+                            await _send_full_text(full, reply_to=msg, reply_markup=menu)
                     except Exception as e2:
                         await _safe_answer(query, f"خطا: {e2}", show_alert=True)
 
@@ -920,8 +900,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 answer, _ = await ask_ai(query.from_user.id, prompt)
                 safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند طلا وجود ندارد.").strip())
                 out = "🧠 <b>تحلیل هوشمند XAU/USD</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
-                # همان عکس اولیه را نگه می‌داریم؛ فقط کپشن همان پیام ویرایش می‌شود.
-                await _edit_photo_caption(None, out)
+                png, _cap = await get_gold_chart("1h")
+                await _edit_photo_caption(png, out)
                 return
 
             if action == "ai":
@@ -940,8 +920,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 answer, _ = await ask_ai(query.from_user.id, prompt)
                 safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip())
                 out = "🧠 <b>تحلیل هوشمند حرفه‌ای</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
-                # عکس جدید نساز/نفرست؛ همان عکس اولیه تحلیل را نگه دار.
-                await _edit_photo_caption(None, out)
+                png, _cap = await get_crypto_chart(symbol, 7)
+                await _edit_photo_caption(png, out)
                 return
 
             if action == "pa":
