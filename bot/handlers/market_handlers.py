@@ -31,6 +31,29 @@ async def _h_currency(u, c, t, uid):
     except Exception as e:
         await u.message.reply_text(f"⚠️ خطا در تبدیل: {e}", reply_markup=get_market_keyboard())
 
+async def _send_long_analysis(message, text, reply_markup):
+    """ارسال کامل تحلیل بدون بریدن متن و با parse_mode تلگرام."""
+    text = (text or "❌ داده‌ای برای تحلیل دریافت نشد.").strip()
+    limit = 3800
+    chunks = []
+    while len(text) > limit:
+        cut = text.rfind("\n", 0, limit)
+        if cut < 500:
+            cut = text.rfind(" ", 0, limit)
+        if cut < 500:
+            cut = limit
+        chunks.append(text[:cut].rstrip())
+        text = text[cut:].lstrip()
+    chunks.append(text)
+
+    for i, chunk in enumerate(chunks):
+        await message.reply_text(
+            chunk,
+            parse_mode="HTML",
+            reply_markup=reply_markup if i == len(chunks) - 1 else None,
+            disable_web_page_preview=True,
+        )
+
 async def _h_crypto_full(u, c, t, uid):
     """تحلیل کامل + منوی دکمه‌ای زیرش (مثل Algo Analyzer)"""
     c.user_data.pop("waiting_for", None)
@@ -87,15 +110,16 @@ async def _h_crypto_full(u, c, t, uid):
             from io import BytesIO
             bio = BytesIO(png)
             bio.name = f"{symbol}_analysis.png"
+            # کپشن عکس محدود است؛ تحلیل کامل را جداگانه و بدون قطع شدن می‌فرستیم.
             await u.message.reply_photo(
                 photo=bio,
-                caption=body[:1024],
-                reply_markup=menu,
+                caption=f"📈 نمودار تحلیل {symbol.upper()}",
             )
+            await _send_long_analysis(u.message, body, menu)
         except Exception as e:
-            await u.message.reply_text(body[:4000] + f"\n⚠️ نمودار: {e}", reply_markup=menu)
+            await _send_long_analysis(u.message, body + f"\n\n⚠️ نمودار: {e}", menu)
     else:
-        await u.message.reply_text(body[:4000], reply_markup=menu)
+        await _send_long_analysis(u.message, body, menu)
 
 async def _h_crypto_pos(u, c, t, uid):
     """پاسخ به ورودی سایز پوزیشن یا قیمت هشدار"""

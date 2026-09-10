@@ -22,7 +22,7 @@ from bot.handlers.feature_handlers import (
     _h_date_convert, _h_age_calc, _h_birthday, _h_zodiac, _h_lunar,
     _h_date_diff, _h_age_diff, _h_event_search, _h_countdown, _h_calc,
     _h_profit, _h_currency, _h_crypto_full, _h_crypto_pos, _h_crypto_chart,
-    _h_crypto_analyze, _h_distance, _h_birth_save, _h_count_text,
+    _h_crypto_analyze, _h_economic_calendar, _h_distance, _h_birth_save, _h_count_text,
     _h_font_text, _h_font_all,
 )
 from bot.utils.motivation import get_motivation
@@ -87,8 +87,6 @@ async def _keep_typing(bot, chat_id, stop_event):
             await asyncio.wait_for(stop_event.wait(), timeout=4)
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
-
-
 def _apply_voice_chat_flags(context, text: str) -> str | None:
     """
     فعال/غیرفعال کردن حالت مکالمه ویسی.
@@ -105,9 +103,6 @@ def _apply_voice_chat_flags(context, text: str) -> str | None:
             "برای خاموش کردن بگو: «قطع ویس» یا «فقط متن»."
         )
     return None
-
-
-
 
 async def _handle_special_ai_intents(update, context, user_id, text: str) -> bool:
     """نمودار، جستجو، یادآوری، موسیقی — True اگر کامل هندل شد."""
@@ -569,6 +564,9 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard()); return
     if text == "💰 بازار":
         await update.message.reply_text("💰 بازار:", reply_markup=get_market_keyboard()); return
+    if text in ("🗓 تقویم اقتصادی", "تقویم اقتصادی"):
+        await _h_economic_calendar(update, context, text, user_id)
+        return
     if text == "🌤 هوا و مکان":
         await update.message.reply_text("🌤 هوا و مکان:", reply_markup=get_weather_geo_keyboard()); return
     if text == "🛠 ابزارها":
