@@ -403,6 +403,25 @@ def init_extra_tables():
         "updated_at TEXT DEFAULT (datetime('now')))"
     )
     c.execute(
+        "CREATE TABLE IF NOT EXISTS economic_calendar_preferences ("
+        "user_id INTEGER PRIMARY KEY,"
+        "alerts INTEGER DEFAULT 0,"
+        "lead_minutes INTEGER DEFAULT 15,"
+        "timezone TEXT DEFAULT '',"
+        "currencies TEXT DEFAULT '',"
+        "impact TEXT DEFAULT 'high',"
+        "updated_at TEXT DEFAULT (datetime('now'))"
+        ")"
+    )
+    c.execute(
+        "CREATE TABLE IF NOT EXISTS economic_calendar_sent ("
+        "user_id INTEGER NOT NULL,"
+        "event_id TEXT NOT NULL,"
+        "sent_at TEXT DEFAULT (datetime('now')),"
+        "PRIMARY KEY (user_id, event_id)"
+        ")"
+    )
+    c.execute(
         "CREATE TABLE IF NOT EXISTS agent_learning ("
         "user_id INTEGER NOT NULL,"
         "agent TEXT NOT NULL,"
@@ -429,6 +448,7 @@ def init_extra_tables():
         "CREATE INDEX IF NOT EXISTS idx_sent_jokes_user_time ON sent_jokes(user_id, sent_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_usage_feature ON usage_stats(feature, count DESC)",
         "CREATE INDEX IF NOT EXISTS idx_agent_learning_user ON agent_learning(user_id, agent, tool)",
+        "CREATE INDEX IF NOT EXISTS idx_economic_calendar_sent_user ON economic_calendar_sent(user_id, sent_at DESC)",
     ):
         c.execute(sql)
     conn.commit()
@@ -970,6 +990,91 @@ def clear_ai_preference(user_id):
     c = conn.cursor()
     try:
         c.execute("DELETE FROM ai_preferences WHERE user_id = ?", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ── تقویم اقتصادی ───────────────────────────────────────────────────────────
+
+def get_economic_calendar_preferences(user_id):
+    conn = get_db_connection()
+    try:
+        row = conn.execute(
+            "SELECT alerts, lead_minutes, timezone, currencies, impact FROM economic_calendar_preferences WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if not row:
+            return {"alerts": False, "lead_minutes": 15, "timezone": "", "currencies": [], "impact": "high"}
+        return {
+            "alerts": bool(row[0]),
+            "lead_minutes": max(1, min(120, int(row[1] or 15))),
+            "timezone": row[2] or "",
+            "currencies": [x for x in (row[3] or "").split(",") if x],
+            "impact": row[4] or "all",
+        }
+    finally:
+        conn.close()
+
+
+def set_economic_calendar_preferences(user_id, *, alerts=None, lead_minutes=None, timezone=None, currencies=None, impact=None):
+    current = get_economic_calendar_preferences(user_id)
+    if alerts is not None:
+        current["alerts"] = bool(alerts)
+    if lead_minutes is not None:
+        current["lead_minutes"] = max(1, min(120, int(lead_minutes)))
+    if timezone is not None:
+        current["timezone"] = str(timezone).strip()[:64]
+    if currencies is not None:
+        current["currencies"] = [str(x).upper().strip() for x in currencies if str(x).strip()]
+    if impact is not None:
+        current["impact"] = str(impact).strip().lower()[:16] or "all"
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "INSERT INTO economic_calendar_preferences(user_id,alerts,lead_minutes,timezone,currencies,impact,updated_at) "
+            "VALUES(?,?,?,?,?,?,datetime('now')) "
+            "ON CONFLICT(user_id) DO UPDATE SET alerts=excluded.alerts, lead_minutes=excluded.lead_minutes, "
+            "timezone=excluded.timezone, currencies=excluded.currencies, impact=excluded.impact, updated_at=datetime('now')",
+            (user_id, 1 if current["alerts"] else 0, current["lead_minutes"], current["timezone"],
+             ",".join(current["currencies"]), current["impact"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return current
+
+
+def get_economic_calendar_alert_users():
+    conn = get_db_connection()
+    try:
+        return conn.execute(
+            "SELECT p.user_id, p.lead_minutes, p.timezone, p.currencies, p.impact "
+            "FROM economic_calendar_preferences p JOIN users u ON u.user_id=p.user_id "
+            "WHERE p.alerts=1 AND u.subscribed=1"
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def economic_calendar_alert_was_sent(user_id, event_id):
+    conn = get_db_connection()
+    try:
+        return conn.execute(
+            "SELECT 1 FROM economic_calendar_sent WHERE user_id=? AND event_id=?",
+            (user_id, event_id),
+        ).fetchone() is not None
+    finally:
+        conn.close()
+
+
+def mark_economic_calendar_alert_sent(user_id, event_id):
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO economic_calendar_sent(user_id,event_id,sent_at) VALUES(?,?,datetime('now'))",
+            (user_id, event_id),
+        )
         conn.commit()
     finally:
         conn.close()
