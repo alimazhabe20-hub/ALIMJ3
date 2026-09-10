@@ -28,7 +28,7 @@ FF_FALLBACK_URLS = (
     "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
     "https://cdn-nfs.faireconomy.media/ff_calendar_nextweek.json",
 )
-CACHE_TTL = 30 * 60
+CACHE_TTL = 10 * 60
 _MAX_EVENTS = 600
 
 _cache: list[dict[str, Any]] = []
@@ -319,8 +319,8 @@ def _merge_biquote_values(events: list[dict[str, Any]], rows: list[dict[str, Any
     """Fill blank actual/forecast/previous from biquote when FF JSON is empty."""
     if not events or not rows:
         return
-    # Index by UTC minute + currency for robust matching.
-    by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
+
+    parsed_rows: list[tuple[datetime, str, str, dict[str, Any]]] = []
     for r in rows:
         t = str(r.get("time") or "").replace("Z", "+00:00")
         try:
@@ -328,45 +328,61 @@ def _merge_biquote_values(events: list[dict[str, Any]], rows: list[dict[str, Any
         except Exception:
             continue
         cur = str(r.get("currency") or r.get("countryCode") or "").upper().strip()
+        # Map common country codes to FF currency codes
+        cur = {"US": "USD", "EU": "EUR", "GB": "GBP", "JP": "JPY", "AU": "AUD",
+               "NZ": "NZD", "CA": "CAD", "CH": "CHF", "CN": "CNY"}.get(cur, cur)
         if not cur:
             continue
-        key = (dt.strftime("%Y-%m-%d %H:%M"), cur)
-        by_key.setdefault(key, []).append(r)
+        name = str(r.get("name") or "")
+        parsed_rows.append((dt, cur, _title_key(name), r))
 
     for e in events:
-        local_key = (e["utc"].astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M"), e["country"])
-        candidates = by_key.get(local_key, [])
-        if not candidates:
-            # ±2 hour window same currency + fuzzy title
-            ek = _title_key(e["title"])
-            for (stamp, cur), vals in by_key.items():
-                if cur != e["country"]:
+        if str(e.get("actual") or "").strip() and str(e.get("forecast") or "").strip():
+            # already complete enough
+            pass
+        ek = _title_key(e["title"])
+        e_cur = e["country"]
+        e_utc = e["utc"].astimezone(timezone.utc)
+        candidates: list[tuple[int, dict[str, Any]]] = []
+        for dt, cur, tk, r in parsed_rows:
+            if cur != e_cur:
+                continue
+            # same calendar day UTC preferred; allow ±3h across midnight edges
+            same_day = dt.date() == e_utc.date()
+            delta = abs((dt - e_utc).total_seconds())
+            if not same_day and delta > 3 * 3600:
+                continue
+            if not tk or not ek:
+                continue
+            # title similarity score
+            if ek == tk:
+                score = 0
+            elif ek in tk or tk in ek:
+                score = 1
+            else:
+                # token overlap
+                et, tt = set(ek.split()), set(tk.split())
+                if not et or not tt or len(et & tt) < max(1, min(len(et), len(tt)) // 2):
                     continue
-                try:
-                    stamp_dt = datetime.strptime(stamp, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
-                except Exception:
-                    continue
-                if abs((stamp_dt - e["utc"]).total_seconds()) > 2 * 3600:
-                    continue
-                for r in vals:
-                    tk = _title_key(str(r.get("name") or ""))
-                    if ek and tk and (ek == tk or ek in tk or tk in ek):
-                        candidates.append(r)
+                score = 2
+            if delta > 6 * 3600:
+                score += 3
+            elif delta > 2 * 3600:
+                score += 1
+            # prefer rows that have actual
+            if r.get("actual") is None:
+                score += 1
+            candidates.append((score, r))
         if not candidates:
             continue
-        # Prefer the candidate that already has actual/forecast filled.
-        candidates = sorted(
-            candidates,
-            key=lambda r: (
-                0 if r.get("actual") is not None else 1,
-                0 if r.get("forecast") is not None else 1,
-            ),
-        )
-        r = candidates[0]
+        candidates.sort(key=lambda x: x[0])
+        r = candidates[0][1]
         mapping = {
             "actual": _to_str_num(r.get("actual")),
             "forecast": _to_str_num(r.get("forecast")),
-            "previous": _to_str_num(r.get("previous") if r.get("previous") is not None else r.get("revisedPrevious")),
+            "previous": _to_str_num(
+                r.get("previous") if r.get("previous") is not None else r.get("revisedPrevious")
+            ),
         }
         for field, value in mapping.items():
             if value and not str(e.get(field) or "").strip():
