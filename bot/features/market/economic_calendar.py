@@ -315,6 +315,53 @@ def _fetch_biquote(day_from: str, day_to: str) -> list[dict[str, Any]]:
     return data
 
 
+
+def _normalize_biquote_row(raw: dict[str, Any]) -> dict[str, Any] | None:
+    """Convert a biquote calendar row into the internal event schema."""
+    t = str(raw.get("time") or "").replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(t).astimezone(timezone.utc)
+    except Exception:
+        return None
+    cur = str(raw.get("currency") or raw.get("countryCode") or "").upper().strip()
+    cur = {
+        "US": "USD", "EU": "EUR", "GB": "GBP", "JP": "JPY", "AU": "AUD",
+        "NZ": "NZD", "CA": "CAD", "CH": "CHF", "CN": "CNY",
+    }.get(cur, cur)
+    title = str(raw.get("name") or "رویداد اقتصادی").strip()
+    impact = _biquote_importance(str(raw.get("importance") or ""))
+    actual = _to_str_num(raw.get("actual"))
+    forecast = _to_str_num(raw.get("forecast"))
+    previous = _to_str_num(
+        raw.get("previous") if raw.get("previous") is not None else raw.get("revisedPrevious")
+    )
+    # synthesize an id compatible with the rest of the bot
+    rid = str(raw.get("eventId") or raw.get("id") or f"{dt.isoformat()}|{cur}|{title}")
+    eid = hashlib.sha1(rid.encode("utf-8")).hexdigest()[:16]
+    return {
+        "id": eid,
+        "utc": dt,
+        "country": cur,
+        "currency_name": CURRENCY_NAMES.get(cur, cur or "نامشخص"),
+        "impact": impact if impact in IMPACT_FA else (impact.title() if impact else ""),
+        "title": title,
+        "title_fa": _fa_title(title),
+        "actual": actual,
+        "forecast": forecast,
+        "previous": previous,
+        "source": "biquote",
+    }
+
+
+def _load_biquote_events(days_back: int = 1, days_forward: int = 8) -> list[dict[str, Any]]:
+    today = datetime.now(timezone.utc).date()
+    day_from = (today - timedelta(days=max(0, days_back))).isoformat()
+    day_to = (today + timedelta(days=max(1, days_forward))).isoformat()
+    rows = _fetch_biquote(day_from, day_to)
+    out = [e for e in (_normalize_biquote_row(r) for r in rows) if e]
+    dedup = {e["id"]: e for e in out}
+    return sorted(dedup.values(), key=lambda e: e["utc"])[:_MAX_EVENTS]
+
 def _merge_biquote_values(events: list[dict[str, Any]], rows: list[dict[str, Any]]) -> None:
     """Fill blank actual/forecast/previous from biquote when FF JSON is empty."""
     if not events or not rows:
@@ -427,44 +474,66 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
         now = time.monotonic()
         if _cache and now < _cache_expires and not force:
             return list(_cache)
+
         all_rows: list[dict[str, Any]] = []
-        errors = []
+        errors: list[str] = []
+
+        # 1) Forex Factory JSON (primary when available)
         for i, url in enumerate(FF_URLS):
             try:
                 rows = await asyncio.to_thread(_fetch_json, url)
                 all_rows.extend(rows)
             except Exception as exc:
-                errors.append(f"{url}: {exc}")
-                # fallback فقط در صورت خطا، نه به‌صورت درخواست موازی.
+                errors.append(f"ff:{exc}")
                 try:
                     rows = await asyncio.to_thread(_fetch_json, FF_FALLBACK_URLS[i])
                     all_rows.extend(rows)
                 except Exception as exc2:
-                    errors.append(f"fallback: {exc2}")
+                    errors.append(f"ff-fallback:{exc2}")
+
         normalized = [e for e in (_normalize(x) for x in all_rows) if e]
         dedup = {e["id"]: e for e in normalized}
         normalized = sorted(dedup.values(), key=lambda e: e["utc"])[:_MAX_EVENTS]
-        # The public FF JSON feed frequently leaves Actual blank. Enrich from the
-        # human calendar HTML, which exposes published Actual/Forecast/Previous.
-        try:
-            await asyncio.to_thread(_refresh_ff_html_values, normalized)
-        except Exception as exc:
-            logger.debug("economic calendar HTML enrichment failed: %s", exc)
-        try:
-            await asyncio.to_thread(_refresh_biquote_values, normalized)
-        except Exception as exc:
-            logger.debug("economic calendar biquote enrichment failed: %s", exc)
+
+        # 2) Enrich actual/forecast/previous
+        if normalized:
+            try:
+                await asyncio.to_thread(_refresh_ff_html_values, normalized)
+            except Exception as exc:
+                logger.debug("economic calendar HTML enrichment failed: %s", exc)
+            try:
+                await asyncio.to_thread(_refresh_biquote_values, normalized)
+            except Exception as exc:
+                logger.debug("economic calendar biquote enrichment failed: %s", exc)
+
+        # 3) If FF is empty/blocked, load full week from biquote as primary source
+        if not normalized:
+            try:
+                normalized = await asyncio.to_thread(_load_biquote_events, 1, 8)
+                if normalized:
+                    logger.warning("economic calendar using biquote primary source (%s events)", len(normalized))
+            except Exception as exc:
+                errors.append(f"biquote-primary:{exc}")
+                logger.warning("economic calendar biquote primary failed: %s", exc)
+
         if normalized:
             _cache = normalized
             _cache_fetched_at = time.time()
             _cache_expires = time.monotonic() + CACHE_TTL
             if errors:
-                logger.warning("economic calendar partial refresh: %s", " | ".join(errors[:3]))
-        elif _cache:
-            logger.warning("economic calendar refresh failed; using stale cache: %s", " | ".join(errors[:3]))
-        else:
-            raise RuntimeError("تقویم اقتصادی فعلاً از منبع زنده دریافت نشد.")
-        return list(_cache)
+                logger.warning("economic calendar partial refresh: %s", " | ".join(errors[:4]))
+            return list(_cache)
+
+        # 4) Last resort: stale cache
+        if _cache:
+            logger.warning("economic calendar refresh failed; using stale cache: %s", " | ".join(errors[:4]))
+            return list(_cache)
+
+        raise RuntimeError(
+            "تقویم اقتصادی فعلاً از منبع زنده دریافت نشد."
+            + ((" جزئیات: " + " | ".join(errors[:2])) if errors else "")
+        )
+
 
 
 def _tz(name: str = ""):
@@ -610,7 +679,7 @@ def ai_context(events, tz_name: str = "", limit: int = 40) -> str:
     return "\n".join(rows)
 
 
-def get_calendar_keyboard(user_id: int, *, mode: str = "today", impact: str = "all", events=None, currency: str = "", selected_date=None, **_kwargs):
+def get_calendar_keyboard(user_id: int, *, mode: str = "today", impact: str = "all", events=None, currency: str = "", selected_date=None, page: int = 0, **_kwargs):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     rows = [
         [InlineKeyboardButton("📅 امروز", callback_data="ec:today"), InlineKeyboardButton("📆 فردا", callback_data="ec:tomorrow"), InlineKeyboardButton("🗓 هفته", callback_data="ec:week")],
@@ -619,13 +688,23 @@ def get_calendar_keyboard(user_id: int, *, mode: str = "today", impact: str = "a
         [InlineKeyboardButton("💵 USD", callback_data="ec:cur:USD"), InlineKeyboardButton("💶 EUR", callback_data="ec:cur:EUR"), InlineKeyboardButton("💷 GBP", callback_data="ec:cur:GBP")],
         [InlineKeyboardButton("🔄 بروزرسانی", callback_data="ec:refresh")],
     ]
-    # دکمه جدا برای هر خبر (حداکثر ۲۰ تا تا کیبورد شلوغ نشود)
+    # دکمه جدا برای هر خبر — صفحه‌بندی ۸تایی
     if events:
         tz_name = getattr(config, "TIMEZONE", "Asia/Tehran")
-        for e in list(events)[:20]:
+        page = max(0, int(page or 0))
+        page_size = 8
+        chunk = list(events)[page * page_size:(page + 1) * page_size]
+        for e in chunk:
             local = e["utc"].astimezone(_tz(tz_name))
             label = f"{IMPACT_ICON.get(e['impact'], '⚪')} {local.strftime('%H:%M')} {e['country']} {e['title_fa'][:28]}"
             rows.append([InlineKeyboardButton(label, callback_data=f"ec:event:{e['id']}")])
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"ec:page:{page-1}"))
+        if (page + 1) * page_size < len(list(events)):
+            nav.append(InlineKeyboardButton("بعدی ➡️", callback_data=f"ec:page:{page+1}"))
+        if nav:
+            rows.append(nav)
     rows.append([InlineKeyboardButton("🕐 تنظیم ساعت و فیلتر", callback_data="ec:settings")])
     return InlineKeyboardMarkup(rows)
 
@@ -673,28 +752,49 @@ def get_event_keyboard(event_id: str):
     ])
 
 
-async def get_calendar_for_user(user_id: int, mode: str = "today", impact: str = "all", currency: str = ""):
+async def get_calendar_for_user(
+    user_id: int,
+    mode: str = "today",
+    impact: str = "all",
+    currency: str = "",
+    date_str: str = "",
+):
     from bot.database import get_economic_calendar_preferences
     p = get_economic_calendar_preferences(user_id)
     tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
+    # prefer explicit impact preference only when caller asks for "all" and user locked a filter
+    if not impact or impact == "all":
+        pref_impact = (p.get("impact") or "all").lower()
+        if pref_impact in {"high", "medium", "low"}:
+            impact = pref_impact
     days = 7 if mode == "week" else 2 if mode == "tomorrow" else 1
     events = await refresh_calendar()
     # تقویم «امروز» باید کل روز را نشان بدهد (از ۰۰:۰۰)، نه فقط رویدادهای باقی‌مانده.
-    # در غیر این صورت بعد از ظهر فقط آخرین رویدادها (مثل Bond Auction) دیده می‌شود.
     tz = _tz(tz_name)
     now = datetime.now(tz)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    if mode == "tomorrow":
+    if date_str:
+        # explicit day selection: YYYY-MM-DD
+        try:
+            y, m, d = [int(x) for x in str(date_str).strip()[:10].split("-")]
+            start = tz.localize(datetime(y, m, d)) if hasattr(tz, "localize") else datetime(y, m, d, tzinfo=tz)
+            end = start + timedelta(days=1)
+        except Exception:
+            end = start + timedelta(days=1)
+    elif mode == "tomorrow":
         start += timedelta(days=1)
+        end = start + timedelta(days=1)
+    elif mode == "date":
         end = start + timedelta(days=1)
     else:
         end = start + timedelta(days=days)
     out = []
+    cur = (currency or "").upper().strip()
     for e in events:
         local = e["utc"].astimezone(tz)
         if not (start <= local < end):
             continue
-        if currency and e["country"] != currency.upper():
+        if cur and e["country"] != cur:
             continue
         if impact and impact != "all" and e["impact"].lower() != impact.lower():
             continue
