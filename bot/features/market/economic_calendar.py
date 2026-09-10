@@ -382,6 +382,72 @@ def _fetch_biquote_calendar(start_utc: datetime, end_utc: datetime) -> list[dict
     return out
 
 
+def _fetch_json(url: str) -> list[dict[str, Any]]:
+    r = requests.get(
+        url,
+        timeout=18,
+        headers={
+            "User-Agent": "Mozilla/5.0 ALIMJ Economic Calendar",
+            "Accept": "application/json,text/plain,*/*",
+        },
+    )
+    r.raise_for_status()
+    data = r.json()
+    if not isinstance(data, list):
+        raise ValueError("فرمت داده تقویم نامعتبر است")
+    return data
+
+
+def _normalize_title(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = re.sub(r"[^a-z0-9%/+.-]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _reconcile_ff_times(events: list[dict[str, Any]], rows: list[dict[str, Any]]) -> int:
+    """Use Forex Factory HTML timestamps as canonical when JSON and HTML differ.
+
+    FF's HTML explicitly declares Europe/London, while its JSON feed exposes
+    ISO timestamps. We normalize both to UTC and only replace an event time when
+    currency + title match strongly and the timestamps are reasonably close.
+    This prevents accidental timezone shifts while correcting stale/variant JSON
+    timestamps.
+    """
+    changed = 0
+    for row in rows:
+        r_title = _normalize_title(row.get("title"))
+        r_currency = str(row.get("country") or "").strip().upper()
+        r_utc = row.get("utc")
+        if not r_title or not r_currency or not isinstance(r_utc, datetime):
+            continue
+        candidates = []
+        for event in events:
+            if str(event.get("country") or "").strip().upper() != r_currency:
+                continue
+            e_utc = event.get("utc")
+            if not isinstance(e_utc, datetime):
+                continue
+            diff = abs((e_utc - r_utc).total_seconds())
+            if diff > 6 * 3600:
+                continue
+            e_title = _normalize_title(event.get("title"))
+            if not e_title:
+                continue
+            ratio = difflib.SequenceMatcher(None, e_title, r_title).ratio()
+            if e_title != r_title and ratio < 0.94:
+                continue
+            score = (1.0 if e_title == r_title else ratio) - min(diff / 21600, 1) * 0.04
+            candidates.append((score, diff, event))
+        if not candidates:
+            continue
+        _, _, event = max(candidates, key=lambda x: x[0])
+        if event.get("utc") != r_utc:
+            event["utc"] = r_utc
+            changed += 1
+    return changed
+
+
 def _normalize_biquote_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Build calendar events from Biquote when Forex Factory is unavailable."""
     out: list[dict[str, Any]] = []
@@ -666,6 +732,12 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
 
             if html_rows:
                 if normalized:
+                    # Forex Factory HTML is the authoritative presentation
+                    # timezone (Europe/London). Reconcile its event timestamps
+                    # to UTC before enriching values from Biquote.
+                    changed_times = _reconcile_ff_times(normalized, html_rows)
+                    if changed_times:
+                        logger.info("economic calendar: reconciled %d event time(s) from FF HTML", changed_times)
                     _merge_historical_values(normalized, html_rows)
                 else:
                     normalized = _html_rows_to_events(html_rows)
@@ -673,6 +745,10 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
             logger.debug("economic calendar HTML source failed: %s", exc)
 
         if normalized:
+            # زمان‌ها در UTC نگهداری می‌شوند و فقط هنگام نمایش به timezone کاربر
+            # تبدیل می‌شوند. این کار جلوی دوبار اعمال شدن offset را می‌گیرد.
+            dedup = {e["id"]: e for e in normalized}
+            normalized = sorted(dedup.values(), key=lambda e: e["utc"])[:_MAX_EVENTS]
             # قبل از جایگزینی cache، داده‌ها را دائمی نگه می‌داریم تا Actual و
             # رویدادهای روزهای گذشته حتی بعد از خروج از feed زنده باقی بمانند.
             try:
