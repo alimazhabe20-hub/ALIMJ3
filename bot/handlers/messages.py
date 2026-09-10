@@ -11,7 +11,7 @@ from bot.utils.helpers import (
     build_message, get_main_keyboard, get_refresh_button,
     get_country_keyboard, get_smart_settings_keyboard, get_iran_cities_keyboard, get_iraq_cities_keyboard,
     get_language_keyboard, get_more_keyboard, get_date_tools_keyboard,
-    get_religious_keyboard, get_market_keyboard, get_weather_geo_keyboard,
+    get_religious_keyboard, get_market_keyboard, get_gold_analysis_keyboard, get_weather_geo_keyboard,
     get_tools_keyboard, get_fun_keyboard, get_profile_keyboard, get_joke_keyboard,
     get_calendar_text, get_calendar_buttons, ALL_CITIES, CITY_COUNTRY,
     get_azan_keyboard, get_ai_keyboard, get_ai_model_keyboard,
@@ -705,6 +705,42 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _show_azan_settings(update, user_id, city, note="همه اذان‌ها خاموش شدند.")
         return
 
+    # کلید اختصاصی تحلیل طلا در منوی بازار؛ تحلیل طلا دیگر زیر تحلیل کریپتو نمایش داده نمی‌شود.
+    if text in ("🥇 تحلیل طلا", "🟡 🥇 تحلیل طلا", "تحلیل طلا"):
+        try:
+            track_usage(user_id, "gold_analysis")
+            notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…")
+            report = await analyze_gold("1h")
+            try:
+                png, _ = await get_gold_chart("1h")
+            except Exception:
+                png = None
+            try:
+                await notice.delete()
+            except Exception:
+                pass
+            if png:
+                from io import BytesIO
+                bio = BytesIO(png)
+                bio.name = "gold_xauusd_1h.png"
+                await update.message.reply_photo(
+                    photo=bio,
+                    caption="🥇 <b>تحلیل طلا / XAUUSD — 1H</b>",
+                    parse_mode="HTML",
+                    reply_markup=get_gold_analysis_keyboard(),
+                )
+            chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
+            for chunk in chunks:
+                await update.message.reply_text(chunk, reply_markup=get_gold_analysis_keyboard() if chunk == chunks[-1] else None)
+            return
+        except Exception as exc:
+            logger.error("gold market button failed: %s", exc, exc_info=True)
+            await update.message.reply_text("⚠️ دریافت تحلیل طلا موقتاً ناموفق بود؛ دوباره تلاش کنید.", reply_markup=get_gold_analysis_keyboard())
+            return
+
+    if text in ("🟢 🔄 بروزرسانی تحلیل طلا", "بروزرسانی تحلیل طلا"):
+        text = "🥇 تحلیل طلا"
+
     # تحلیل مستقیم طلا: کاربر می‌تواند فقط «gold»، «طلا»، «اونس»، «XAUUSD» یا عبارت تحلیلی مشابه را بفرستد.
     # این مسیر قبل از fallback عمومی اجرا می‌شود تا Gold هرگز به‌عنوان «نماد نامعتبر» پاسخ داده نشود.
     _gold_text = re.sub(r"[\s\u200c_/\-]+", "", text.lower())
@@ -730,7 +766,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.message.reply_photo(
                     photo=bio,
                     caption="🥇 Gold / XAUUSD — 1H",
-                    reply_markup=get_market_keyboard(),
+                    reply_markup=get_gold_analysis_keyboard(),
                 )
             # گزارش کامل را به‌صورت پیام متنی می‌فرستیم تا محدودیت 1024 کاراکتری کپشن باعث ناقص شدن تحلیل نشود.
             chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
