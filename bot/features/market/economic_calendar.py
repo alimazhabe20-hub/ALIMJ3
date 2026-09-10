@@ -613,13 +613,93 @@ def filter_events(events, *, days: int = 1, currency: str = "", impact: str = ""
     return out
 
 
-def format_value(value: Any, *, empty: str = "در انتظار انتشار") -> str:
+def _parse_num(value: Any) -> float | None:
+    if value is None:
+        return None
+    s = str(value).strip().replace(",", "").replace("%", "").replace("K", "").replace("M", "").replace("B", "")
+    if not s or s in {"—", "-", "None", "null", "منتشر نشده", "در انتظار انتشار"}:
+        return None
+    # e.g. 5.22|2.4
+    if "|" in s:
+        s = s.split("|", 1)[0].strip()
+    try:
+        return float(s)
+    except Exception:
+        m = re.search(r"[-+]?\d*\.?\d+", s)
+        if not m:
+            return None
+        try:
+            return float(m.group(0))
+        except Exception:
+            return None
+
+
+def _unit_for_event(e: dict[str, Any] | None) -> str:
+    if not e:
+        return ""
+    title = f"{e.get('title', '')} {e.get('title_fa', '')}".lower()
+    unit = str(e.get("unit") or "").lower()
+    mult = str(e.get("multiplier") or "").lower()
+    if any(x in title for x in ("m/m", "y/y", "q/q", "cpi", "ppi", "inflation", "rate", "unemployment", "%", "percent")):
+        return "%"
+    if "percent" in unit or unit in {"%", "pct"}:
+        return "%"
+    if any(x in title for x in ("claims", "jobless")) or mult in {"thousands", "thousand"}:
+        return "K"
+    if any(x in title for x in ("inventory", "inventories", "sales", "home sales")) or mult in {"millions", "million"}:
+        if "home sales" in title or "existing home" in title:
+            return "M"
+        return "M"
+    if mult in {"billions", "billion"} or any(x in title for x in ("storage", "crude")):
+        return "B"
+    return str(e.get("display_unit") or "")
+
+
+def format_value(value: Any, *, empty: str = "در انتظار انتشار", unit: str = "") -> str:
     if value is None:
         return empty
     s = str(value).strip()
     if not s or s in {"None", "null", "—", "-"}:
         return empty
-    return s
+    # already has unit
+    if any(ch in s for ch in ("%","K","M","B")) and re.search(r"\d", s):
+        return s
+    num = _parse_num(s)
+    if num is None:
+        return s
+    # pretty number
+    if abs(num) >= 100 and float(num) == int(num):
+        body = str(int(num))
+    else:
+        body = f"{num:.4f}".rstrip("0").rstrip(".")
+    u = (unit or "").strip()
+    if u == "%":
+        return f"{body}%"
+    if u in {"K", "M", "B"}:
+        return f"{body}{u}"
+    return body
+
+
+def surprise_text(e: dict[str, Any]) -> str:
+    """مقایسه Actual با Forecast برای نمایش سورپرایز."""
+    a = _parse_num(e.get("actual"))
+    f = _parse_num(e.get("forecast"))
+    if a is None or f is None:
+        return ""
+    title = f"{e.get('title', '')}".lower()
+    # برای claims بالاتر = بدتر برای بازار ریسک‌پذیر
+    inverse = any(x in title for x in ("claims", "jobless", "unemployment"))
+    if abs(a - f) < 1e-12:
+        return "➖ مطابق انتظار"
+    higher = a > f
+    if inverse:
+        if higher:
+            return "⚠️ بالاتر از پیش‌بینی (منفی برای ریسک)"
+        return "✅ پایین‌تر از پیش‌بینی (مثبت برای ریسک)"
+    if higher:
+        return "⬆️ بالاتر از پیش‌بینی"
+    return "⬇️ پایین‌تر از پیش‌بینی"
+
 
 
 def _esc(value: Any) -> str:
@@ -641,13 +721,20 @@ def format_event(e: dict[str, Any], tz_name: str = "", *, show_date: bool = Fals
     actual_empty = "منتشر نشده" if past else "در انتظار انتشار"
     other_empty = "—"
     when = local.strftime("%m/%d %H:%M") if show_date else local.strftime("%H:%M")
+    unit = _unit_for_event(e)
+    actual_s = format_value(e.get("actual"), empty=actual_empty, unit=unit)
+    forecast_s = format_value(e.get("forecast"), empty=other_empty, unit=unit)
+    previous_s = format_value(e.get("previous"), empty=other_empty, unit=unit)
+    surprise = surprise_text(e)
+    sur_line = f"\n   📊 <b>نتیجه:</b> {_esc(surprise)}" if surprise else ""
     return (
         f"{icon} <b>{when} | {_esc(e['country'])} | {title_fa}</b>{past_mark}\n"
         f"   <i>{title_en}</i>\n"
         f"   🚦 <b>اهمیت:</b> {_esc(_impact_label(e))}"
-        f"  •  📢 <b>واقعی:</b> {_esc(format_value(e.get('actual'), empty=actual_empty))}"
-        f"  •  🔮 <b>پیش‌بینی:</b> {_esc(format_value(e.get('forecast'), empty=other_empty))}"
-        f"  •  ◀️ <b>قبلی:</b> {_esc(format_value(e.get('previous'), empty=other_empty))}"
+        f"  •  📢 <b>واقعی:</b> {_esc(actual_s)}"
+        f"  •  🔮 <b>پیش‌بینی:</b> {_esc(forecast_s)}"
+        f"  •  ◀️ <b>قبلی:</b> {_esc(previous_s)}"
+        f"{sur_line}"
     )
 
 
@@ -663,13 +750,10 @@ def calendar_text(events, *, title: str, tz_name: str = "", limit: int = 25, sho
         lines.append("📭 <i>رویداد اقتصادی‌ای با این فیلتر پیدا نشد.</i>")
         return "\n".join(lines)
 
-    rank = {"High": 0, "Medium": 1, "Low": 2, "Holiday": 3}
+    # نمایش روزانه: ترتیب زمانی (نه فقط مهم‌ها اول)
     ordered = sorted(
         events,
-        key=lambda e: (
-            rank.get(str(e.get("impact") or ""), 9),
-            e.get("utc") or datetime.min.replace(tzinfo=timezone.utc),
-        ),
+        key=lambda e: e.get("utc") or datetime.min.replace(tzinfo=timezone.utc),
     )
 
     base = "\n".join(lines)
@@ -743,6 +827,9 @@ def event_detail(e: dict[str, Any], tz_name: str = "") -> str:
     else:
         countdown = "زمان رویداد گذشته است"
         actual_empty = "منتشر نشده"
+    unit = _unit_for_event(e)
+    surprise = surprise_text(e)
+    sur = f"\n📊 <b>نتیجه:</b> {_esc(surprise)}" if surprise else ""
     return (
         f"{IMPACT_ICON.get(e['impact'], '⚪')} <b>{_esc(e['title_fa'])}</b>\n"
         f"<i>{_esc(e['title'])}</i>\n"
@@ -752,9 +839,10 @@ def event_detail(e: dict[str, Any], tz_name: str = "") -> str:
         f"⏰ <b>ساعت:</b> <code>{local.strftime('%H:%M')}</code>\n"
         f"🚦 <b>اهمیت:</b> {_esc(_impact_label(e))}\n"
         f"⏳ <b>وضعیت:</b> {_esc(countdown)}\n\n"
-        f"📢 <b>واقعی:</b> {_esc(format_value(e.get('actual'), empty=actual_empty))}\n"
-        f"🔮 <b>پیش‌بینی:</b> {_esc(format_value(e.get('forecast'), empty='—'))}\n"
-        f"◀️ <b>قبلی:</b> {_esc(format_value(e.get('previous'), empty='—'))}\n\n"
+        f"📢 <b>واقعی:</b> {_esc(format_value(e.get('actual'), empty=actual_empty, unit=unit))}\n"
+        f"🔮 <b>پیش‌بینی:</b> {_esc(format_value(e.get('forecast'), empty='—', unit=unit))}\n"
+        f"◀️ <b>قبلی:</b> {_esc(format_value(e.get('previous'), empty='—', unit=unit))}"
+        f"{sur}\n\n"
         "⚠️ <i>این داده برای تصمیم‌گیری مالی قطعی نیست.</i>"
     )
 
@@ -847,6 +935,51 @@ def get_tz_keyboard():
     ])
 
 
+
+def fetch_speech_context(title: str, country: str = "") -> str:
+    """تلاش برای دریافت خلاصه/متن مرتبط سخنرانی از منابع عمومی."""
+    title = (title or "").strip()
+    if not title:
+        return ""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/json",
+    }
+    snippets: list[str] = []
+    # ECB press conference landing
+    urls = []
+    low = title.lower()
+    if "ecb" in low or "lagarde" in low or country.upper() == "EUR":
+        urls.append("https://www.ecb.europa.eu/press/pressconf/html/index.en.html")
+    if "fed" in low or "powell" in low or country.upper() == "USD":
+        urls.append("https://www.federalreserve.gov/json/ne-press.json")
+    for url in urls[:2]:
+        try:
+            r = requests.get(url, timeout=12, headers=headers)
+            if r.status_code != 200:
+                continue
+            text = r.text
+            if url.endswith(".json"):
+                try:
+                    data = r.json()
+                    # Fed news JSON structure varies; take titles
+                    items = data if isinstance(data, list) else data.get("item") or data.get("items") or []
+                    for it in (items or [])[:5]:
+                        if isinstance(it, dict):
+                            snippets.append(str(it.get("title") or it.get("description") or "")[:300])
+                except Exception:
+                    snippets.append(text[:500])
+            else:
+                # strip tags lightly
+                clean = re.sub(r"<script[\s\S]*?</script>", " ", text, flags=re.I)
+                clean = re.sub(r"<style[\s\S]*?</style>", " ", clean, flags=re.I)
+                clean = re.sub(r"<[^>]+>", " ", clean)
+                clean = re.sub(r"\s+", " ", clean).strip()
+                snippets.append(clean[:1200])
+        except Exception:
+            continue
+    return "\n".join(s for s in snippets if s)[:2000]
+
 def is_speech_event(e: dict[str, Any] | None) -> bool:
     if not e:
         return False
@@ -863,6 +996,45 @@ def get_event_keyboard(event_id: str, e: dict[str, Any] | None = None):
     rows.append([InlineKeyboardButton("↩️ بازگشت به تقویم", callback_data="ec:back")])
     return InlineKeyboardMarkup(rows)
 
+
+
+def dedupe_day_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """حذف رویدادهای خیلی شبیه در یک روز (عنوان+ارز+نزدیکی زمانی)."""
+    if not events:
+        return []
+    ranked = sorted(
+        events,
+        key=lambda e: (
+            {"High": 0, "Medium": 1, "Low": 2}.get(str(e.get("impact") or ""), 9),
+            0 if str(e.get("actual") or "").strip() else 1,
+            e.get("utc") or datetime.min.replace(tzinfo=timezone.utc),
+        ),
+    )
+    kept: list[dict[str, Any]] = []
+    for e in ranked:
+        tk = _title_key(e.get("title", ""))
+        cur = (e.get("country") or "").upper()
+        utc = e.get("utc")
+        dup = False
+        for k in kept:
+            if (k.get("country") or "").upper() != cur:
+                continue
+            if _title_key(k.get("title", "")) != tk:
+                # شباهت نرم: یکی زیرمجموعه دیگری
+                kt = _title_key(k.get("title", ""))
+                if not (tk and kt and (tk in kt or kt in tk)):
+                    continue
+            try:
+                if utc and k.get("utc") and abs((utc - k["utc"]).total_seconds()) > 3 * 3600:
+                    continue
+            except Exception:
+                pass
+            dup = True
+            break
+        if not dup:
+            kept.append(e)
+    kept.sort(key=lambda e: e.get("utc") or datetime.min.replace(tzinfo=timezone.utc))
+    return kept
 
 async def get_calendar_for_user(
     user_id: int,
@@ -915,7 +1087,7 @@ async def get_calendar_for_user(
         if impact and impact != "all" and imp != impact.lower():
             continue
         out.append(e)
-    # مرتب‌سازی: اول اهمیت، بعد زمان
-    rank = {"high": 0, "medium": 1, "low": 2, "holiday": 3}
-    out.sort(key=lambda e: (rank.get((e.get("impact") or "").lower(), 9), e.get("utc") or datetime.min.replace(tzinfo=timezone.utc)))
+    # ترتیب زمانی همان روز + حذف تکراری‌های خیلی شبیه
+    out = dedupe_day_events(out)
+    out.sort(key=lambda e: e.get("utc") or datetime.min.replace(tzinfo=timezone.utc))
     return out, tz_name
