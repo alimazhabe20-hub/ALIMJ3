@@ -537,7 +537,9 @@ async def get_calendar_for_user(user_id: int, mode: str = "today", impact: str =
     tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
     days = 7 if mode == "week" else 2 if mode == "tomorrow" else 1
     events = await refresh_calendar()
-    # برای فردا فقط روز دوم؛ برای امروز فقط امروز.
+    # تقویم «امروز» باید کل روز را نشان بدهد، نه فقط رویدادهای باقی‌مانده.
+    # قبلاً start برای today روی now تنظیم می‌شد و بعد از گذشت بیشتر رویدادها،
+    # کاربر فقط آخرین رویدادهای آینده را می‌دید (مثلاً فقط 30-y Bond Auction).
     tz = _tz(tz_name)
     now = datetime.now(tz)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -546,8 +548,6 @@ async def get_calendar_for_user(user_id: int, mode: str = "today", impact: str =
         end = start + timedelta(days=1)
     else:
         end = start + timedelta(days=days)
-        if mode == "today":
-            start = now
     out = []
     for e in events:
         local = e["utc"].astimezone(tz)
