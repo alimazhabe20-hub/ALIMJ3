@@ -116,7 +116,8 @@ def get_market_keyboard():
             [KeyboardButton("💵 قیمت کامل بازار"), KeyboardButton("💎 ۲۰ ارز برتر کریپتو")],
             [KeyboardButton("🔄 تبدیل ارز / کریپتو"), KeyboardButton("📈 سود و ضرر")],
             [KeyboardButton("🗓 تقویم اقتصادی")],
-            [KeyboardButton("🔵 📊 نمودار و تحلیل ارز دیجیتال"), KeyboardButton("🟡 🥇 تحلیل طلا")],
+            [KeyboardButton("📊 نمودار و تحلیل ارز دیجیتال")],
+            [KeyboardButton("🥇 تحلیل طلا")],
             [KeyboardButton("🔙 بازگشت به بیشتر")],
         ],
         resize_keyboard=True,
@@ -128,7 +129,7 @@ def get_gold_analysis_keyboard():
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("🟢 🔄 بروزرسانی تحلیل طلا")],
-            [KeyboardButton("🔵 📊 نمودار و تحلیل ارز دیجیتال")],
+            [KeyboardButton("📊 نمودار و تحلیل ارز دیجیتال")],
         ],
         resize_keyboard=True,
     )
