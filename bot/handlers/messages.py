@@ -190,11 +190,49 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
                 logger.debug("%s: %s", __name__, _exc)
         return True
     return False
+
+def _split_telegram_text(text: str, limit: int = 3900) -> list[str]:
+    """تقسیم متن بلند به چند پیام بدون قطع وسط کلمه در صورت امکان."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= limit:
+        return [text]
+    parts: list[str] = []
+    rest = text
+    while rest:
+        if len(rest) <= limit:
+            parts.append(rest)
+            break
+        cut = rest.rfind("\n", 0, limit)
+        if cut < limit // 3:
+            cut = rest.rfind(" ", 0, limit)
+        if cut < limit // 3:
+            cut = limit
+        parts.append(rest[:cut].strip())
+        rest = rest[cut:].strip()
+    return [p for p in parts if p]
+
+
+async def _reply_long_text(msg, text: str, *, prefix: str = "🤖 "):
+    """ارسال پاسخ کامل؛ اگر بلند بود ادامه در پیام‌های بعدی."""
+    body = (text or "").strip()
+    chunks = _split_telegram_text(prefix + body, 3900)
+    if not chunks:
+        chunks = [prefix + "پاسخی دریافت نشد."]
+    first = None
+    for i, chunk in enumerate(chunks):
+        if i == 0:
+            first = await msg.reply_text(chunk)
+        else:
+            await msg.reply_text(f"🤖 ادامه ({i+1}/{len(chunks)})\n" + chunk.lstrip("🤖 ").lstrip())
+    return first
+
 async def _send_ai_answer(update, user_id, answer: str, *, stream: bool = True):
-    """ارسال جواب AI — بدون دکمه زیر پیام."""
+    """ارسال جواب AI کامل — در صورت نیاز چند پیام ادامه."""
     msg = update.message
     store_answer(user_id, answer)
-    return await msg.reply_text(f"🤖 {answer}")
+    return await _reply_long_text(msg, answer, prefix="🤖 ")
 async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
     """استریم AI و ویرایش تدریجی پیام؛ در شکست، پیام نیمه‌کاره حذف می‌شود."""
     import asyncio
@@ -235,26 +273,36 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
         if not answer:
             raise RuntimeError("جواب خالی")
         store_answer(user_id, answer)
-        final = "🤖 " + answer
-        if len(final) > 4000:
-            final = final[:3990] + "…"
-        # اگر آخرین ویرایش دقیقاً همان متن نهایی بوده، دوباره پیام نفرست.
-        # این جلوی Duplicate Reply را در خطای «Message is not modified» می‌گیرد.
-        if final != last_rendered:
+        chunks = _split_telegram_text("🤖 " + answer, 3900)
+        if not chunks:
+            chunks = ["🤖 پاسخی دریافت نشد."]
+        # پیام اول: ویرایش همان «در حال نوشتن»
+        first = chunks[0]
+        if first != last_rendered:
             try:
-                await sent.edit_text(final)
-                last_rendered = final
+                await sent.edit_text(first)
+                last_rendered = first
             except Exception as edit_error:
-                # یک retry روی همان پیام؛ هرگز fallback به reply_text نکن،
-                # چون ممکن است درخواست edit سمت تلگرام موفق شده باشد و فقط
-                # پاسخ شبکه از دست رفته باشد؛ reply مجدد در این حالت دو جواب می‌سازد.
                 logger.warning("AI final edit failed; retrying same message: %s", edit_error)
                 try:
                     await asyncio.sleep(0.15)
-                    await sent.edit_text(final)
-                    last_rendered = final
+                    await sent.edit_text(first)
+                    last_rendered = first
                 except Exception as retry_error:
                     logger.warning("AI final edit retry failed: %s", retry_error)
+                    try:
+                        await msg.reply_text(first)
+                    except Exception:
+                        pass
+        # ادامه‌ها در پیام‌های بعدی تا هیچ بخشی حذف نشود
+        for i, chunk in enumerate(chunks[1:], start=2):
+            try:
+                body = chunk
+                if body.startswith("🤖 "):
+                    body = body[2:].lstrip()
+                await msg.reply_text(f"🤖 ادامه ({i}/{len(chunks)})\n{body}")
+            except Exception as cont_err:
+                logger.warning("AI continuation send failed: %s", cont_err)
         return answer, provider_label or "ai"
     except Exception:
         try:
