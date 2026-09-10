@@ -323,41 +323,52 @@ def _html_rows_to_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def _merge_historical_values(events: list[dict[str, Any]], rows: list[dict[str, Any]]) -> None:
-    """Merge only non-empty historical values; never erase live values."""
+def _merge_historical_values(events: list[dict[str, Any]], rows: list[dict[str, Any]]) -> int:
+    """Merge published values from the same Forex Factory calendar HTML.
+
+    Matching is deliberately conservative: same currency, same local event
+    date, close event time, and strong title similarity.  A false Actual is
+    materially worse than leaving Actual blank.
+    """
+    merged = 0
     for row in rows:
+        r_title = _normalize_title(row.get("title"))
+        r_currency = str(row.get("country") or "").strip().upper()
+        r_utc = row.get("utc")
+        if not r_title or not r_currency or not isinstance(r_utc, datetime):
+            continue
         candidates = []
-        row_date = row["utc"].date()
-        for e in events:
-            if e.get("country") != row.get("country"):
+        for event in events:
+            if str(event.get("country") or "").strip().upper() != r_currency:
                 continue
-            if e.get("title", "").strip().lower() != row.get("title", "").strip().lower():
+            e_utc = event.get("utc")
+            if not isinstance(e_utc, datetime) or e_utc.date() != r_utc.date():
                 continue
-            if e["utc"].date() != row_date:
+            diff = abs((e_utc - r_utc).total_seconds())
+            if diff > 45 * 60:
                 continue
-            candidates.append((abs((e["utc"] - row["utc"]).total_seconds()), e))
+            e_title = _normalize_title(event.get("title"))
+            if not e_title:
+                continue
+            ratio = difflib.SequenceMatcher(None, e_title, r_title).ratio()
+            rt, et = set(r_title.split()), set(e_title.split())
+            overlap = len(rt & et) / max(1, len(rt | et))
+            # Exact/near-exact title wins. For paraphrased titles, require
+            # substantial token overlap as well as a high sequence score.
+            if not (ratio >= 0.88 or (ratio >= 0.78 and overlap >= 0.65)):
+                continue
+            score = ratio * 0.85 + overlap * 0.15 - min(diff / 3600, 0.75) * 0.03
+            candidates.append((score, event))
         if not candidates:
             continue
-        _, event = min(candidates, key=lambda x: x[0])
+        _, event = max(candidates, key=lambda x: x[0])
         for field in ("actual", "forecast", "previous"):
             value = str(row.get(field) or "").strip()
-            if value:
+            if value and not str(event.get(field) or "").strip():
                 event[field] = value
-
-
-def _fetch_json(url: str) -> list[dict[str, Any]]:
-    r = requests.get(url, timeout=18, headers={"User-Agent": "Mozilla/5.0 ALIMJ Economic Calendar"})
-    r.raise_for_status()
-    data = r.json()
-    if not isinstance(data, list):
-        raise ValueError("فرمت داده تقویم نامعتبر است")
-    return data
-
-
-def _tv_title_key(value: Any) -> str:
-    text = str(value or "").lower()
-    text = re.sub(r"[^a-z0-9]+", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
+                if field == "actual":
+                    merged += 1
+    return merged
 
 
 def _fetch_tradingview_actuals(start_utc: datetime, end_utc: datetime) -> list[dict[str, Any]]:
@@ -444,15 +455,12 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
                     errors.append(f"fallback: {exc2}")
         normalized = [e for e in (_normalize(x) for x in all_rows) if e]
 
-        if normalized:
-            try:
-                now_utc = datetime.now(timezone.utc)
-                tv_rows = await asyncio.to_thread(_fetch_tradingview_actuals, now_utc - timedelta(days=2), now_utc + timedelta(days=8))
-                merged_count = _merge_tradingview_actuals(normalized, tv_rows)
-                if merged_count:
-                    logger.info("economic calendar TradingView actuals merged: %s", merged_count)
-            except Exception as exc:
-                logger.debug("economic calendar TradingView actual enrichment failed: %s", exc)
+        # Do not merge TradingView values into Forex Factory events here.
+        # TradingView titles are not a stable one-to-one identifier (especially
+        # for generic PPI, housing, inventory and rate indicators), so fuzzy
+        # matching can silently attach an unrelated Actual value to an event.
+        # Actual enrichment is intentionally sourced from the Forex Factory
+        # calendar HTML below, where event/title/time context is consistent.
 
         # The JSON export is convenient but can be unavailable/blocked. The public
         # Forex Factory calendar page is a reliable fallback and also contains the
