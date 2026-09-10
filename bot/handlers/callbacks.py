@@ -670,7 +670,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["crypto_symbol"] = symbol
         try:
             from bot.features.market.finance import (
-                analyze_crypto, get_crypto_chart, get_crypto_analysis_keyboard,
+                analyze_crypto, analyze_gold, get_crypto_chart, get_crypto_analysis_keyboard,
                 trading_recommendation, derivatives_radar, risk_scenarios,
                 position_size_guide, entry_alert_text, market_scanner,
             )
@@ -754,19 +754,40 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as _exc:
                         logger.debug("%s: %s", __name__, _exc)
 
+            if action == "gold":
+                txt = await analyze_gold("4h")
+                await _edit_text(txt)
+                return
+
+            if action == "ai":
+                # AI فقط در حالت صریح اجرا می‌شود تا تحلیل عادی سریع بماند.
+                base = await analyze_crypto(symbol, timeframe="4h")
+                from bot.services.ai_service import ask_ai
+                prompt = (
+                    "تو یک تحلیل‌گر ارشد بازارهای مالی و کریپتو هستی. داده‌های زیر از منابع زنده سیستم آمده‌اند. "
+                    "هیچ داده، قیمت یا سطحی را حدس نزن و اگر داده‌ای موجود نیست صریح بگو. تحلیل باید حرفه‌ای و ساختاریافته باشد. "
+                    "حتماً این موارد را بررسی کن: ساختار بازار و BOS/CHOCH، روند 1H/4H/1D، حمایت و مقاومت اصلی و نواحی عرضه/تقاضا، "
+                    "RSI/ADX/ATR، حجم، واگرایی، Funding/OI و Long/Short در صورت وجود، Fear & Greed، سناریوی شکست/رد و نقطه بی‌اعتباری. "
+                    "اثر احتمالی بر BTC/ETH/آلت‌کوین‌ها و ارتباط با دلار/DXY و طلا را هم فقط در حد داده‌های موجود توضیح بده. "
+                    "برای هر سناریو شرط فعال‌شدن، هدف احتمالی و invalidation را مشخص کن. از سیگنال قطعی، درصد احتمال ساختگی و وعده سود خودداری کن. "
+                    "اگر کیفیت داده یا همگرایی تایم‌فریم‌ها ضعیف است، صریحاً «عدم‌تأیید / صبر» اعلام کن.\n\n"
+                    + base[:6000]
+                )
+                answer, _ = await ask_ai(query.from_user.id, prompt)
+                await _edit_text("🧠 تحلیل هوشمند حرفه‌ای\n────────────────────\n" + ((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip()))
+                return
+
             if action == "day":
                 # تحلیل روزانه + نمودار روزانه روی همان پیام
                 base = await analyze_crypto(symbol, timeframe="1d")
-                s, g = await _smart_ai(base, "روزانه 1D")
-                report = await analyze_crypto(symbol, ai_summary=s, ai_guide=g, timeframe="1d") if (s or g) else base
+                report = base
                 png, _cap = await get_crypto_chart(symbol, 90)
                 caption = (report or "")[:1024]
                 await _edit_photo_caption(png, caption)
 
             elif action == "hr":
                 base = await analyze_crypto(symbol, timeframe="1h")
-                s, g = await _smart_ai(base, "ساعتی 1H")
-                report = await analyze_crypto(symbol, ai_summary=s, ai_guide=g, timeframe="1h") if (s or g) else base
+                report = base
                 png, _cap = await get_crypto_chart(symbol, 7)
                 caption = (report or "")[:1024]
                 await _edit_photo_caption(png, caption)
@@ -798,8 +819,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             elif action == "ref":
                 base = await analyze_crypto(symbol, timeframe="4h")
-                s, g = await _smart_ai(base, "4H بروزرسانی")
-                report = await analyze_crypto(symbol, ai_summary=s, ai_guide=g, timeframe="4h") if (s or g) else base
+                report = base
                 png, _ = await get_crypto_chart(symbol, 30)
                 await _edit_photo_caption(png, (report or "")[:1024])
 

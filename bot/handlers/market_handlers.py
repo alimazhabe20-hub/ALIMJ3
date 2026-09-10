@@ -65,50 +65,14 @@ async def _h_crypto_full(u, c, t, uid):
     png = None
     try:
         import asyncio as _aio
-        from bot.utils.task_manager import spawn
-        chart_task = spawn(get_crypto_chart(symbol, days), name=f"crypto-chart-{symbol}")
-        try:
-            base = await analyze_crypto(symbol, ai_summary="", ai_guide="")
-            ai_summary = ""
-            ai_guide = ""
-            try:
-                from bot.services.ai_service import ask_ai
-                prompt = (
-                    "تو تحلیل‌گر حرفه‌ای بازار کریپتو هستی. همه داده‌های زیر را بخوان و دقیقاً با این قالب جواب بده:\n"
-                    "جمع‌بندی: (۲ تا ۴ جمله فارسی؛ روند تایم‌فریم، پولبک/شکست، مومنتوم، سیگنال)\n"
-                    "راهنما: (۱ تا ۲ جمله؛ آیا ورود الان به‌صرفه است یا فرصت گذشته یا صبر)\n\n"
-                    "قوانین: بدون بولت اضافه، بدون عنوان انگلیسی، توصیه تضمینی نده.\n\n"
-                    + base[:3200]
-                )
-                answer, _ = await ask_ai(uid, prompt)
-                raw = (answer or "").strip()
-                if "راهنما:" in raw:
-                    a, b = raw.split("راهنما:", 1)
-                    ai_summary = a.replace("جمع‌بندی:", "").strip().replace("\n", " ")
-                    ai_guide = b.strip().replace("\n", " ")
-                elif "جمع‌بندی:" in raw:
-                    ai_summary = raw.split("جمع‌بندی:", 1)[-1].strip().replace("\n", " ")
-                else:
-                    ai_summary = raw.replace("\n", " ")
-                if len(ai_summary) > 340:
-                    ai_summary = ai_summary[:340].rsplit(" ", 1)[0] + "…"
-                if len(ai_guide) > 240:
-                    ai_guide = ai_guide[:240].rsplit(" ", 1)[0] + "…"
-            except Exception:
-                pass
-            report = (
-                await analyze_crypto(symbol, ai_summary=ai_summary, ai_guide=ai_guide)
-                if (ai_summary or ai_guide)
-                else base
-            )
-        except Exception as e:
-            report = f"⚠️ خطا در تحلیل: {e}"
+        chart_task = _aio.create_task(get_crypto_chart(symbol, days))
+        report = await analyze_crypto(symbol, ai_summary="", ai_guide="")
         try:
             png, _ = await chart_task
         except Exception:
             png = None
     except Exception as e:
-        report = f"⚠️ خطا: {e}"
+        report = f"⚠️ خطا در تحلیل: {e}"
 
     try:
         await wait.delete()
