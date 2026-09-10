@@ -271,15 +271,17 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
         # این جلوی Duplicate Reply را در خطای «Message is not modified» می‌گیرد.
         # اگر آخرین ویرایش دقیقاً همان متن نهایی بوده، دوباره پیام نفرست.
         final = chunks[0]
+        is_long = len(answer) >= 2500
+        final_markup = get_ai_answer_keyboard(user_id) if is_long else None
         if final != last_rendered:
             try:
-                await sent.edit_text(final, reply_markup=get_ai_answer_keyboard(user_id))
+                await sent.edit_text(final, reply_markup=final_markup)
                 last_rendered = final
             except Exception as edit_error:
                 logger.warning("AI final edit failed; retrying same message: %s", edit_error)
                 try:
                     await asyncio.sleep(0.15)
-                    await sent.edit_text(final, reply_markup=get_ai_answer_keyboard(user_id))
+                    await sent.edit_text(final, reply_markup=final_markup)
                     last_rendered = final
                 except Exception as retry_error:
                     logger.warning("AI final edit retry failed: %s", retry_error)
@@ -288,7 +290,7 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
             sent_cont = False
             for attempt in range(3):
                 try:
-                    await msg.reply_text(f"🤖 ادامه ({i}/{len(chunks)})\n{body}", reply_markup=get_ai_answer_keyboard(user_id))
+                    await msg.reply_text(f"🤖 ادامه ({i}/{len(chunks)})\n{body}")
                     sent_cont = True
                     break
                 except Exception as cont_err:
