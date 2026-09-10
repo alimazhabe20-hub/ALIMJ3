@@ -99,6 +99,11 @@ async def _h_crypto_full(u, c, t, uid):
         if not raw_line:
             return ""
         esc = html.escape(raw_line)
+        # گزارش تحلیل خودش شامل تگ‌های Telegram HTML مثل <b>/<code> است.
+        # بعد از escape کردن متن، فقط همین تگ‌های مجاز را برمی‌گردانیم تا
+        # تگ‌ها به‌صورت خام (مثل <b>) به کاربر نمایش داده نشوند.
+        for _tag in ("b", "/b", "code", "/code", "i", "/i", "u", "/u", "s", "/s"):
+            esc = esc.replace(f"&lt;{_tag}&gt;", f"<{_tag}>")
         if raw_line.startswith("▎") or raw_line[:2].rstrip().isdigit():
             return f"<b>{esc}</b>"
         if raw_line.startswith(("🧠", "📊", "⏱", "🎯", "🧪", "🔬", "🌐")) and ":" not in raw_line:
