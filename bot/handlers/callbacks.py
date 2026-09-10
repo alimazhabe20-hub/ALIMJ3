@@ -384,6 +384,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             if data.startswith("ec:analyze:"):
                 event_id = data.split(":", 2)[2]
+                await _safe_answer(query, "در حال تحلیل…")
                 events = await refresh_calendar()
                 p = get_economic_calendar_preferences(user_id)
                 tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
@@ -391,7 +392,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if not e:
                     await _safe_answer(query, "این خبر دیگر در فهرست فعلی نیست.", show_alert=True)
                     return
-                await _safe_answer(query, "در حال تحلیل…")
                 from bot.services.ai_service import ask_ai
                 prompt = (
                     "تو تحلیل‌گر ارشد اقتصاد کلان و بازارهای مالی هستی. این رویداد را عمیق، کاربردی و کاملاً فارسی تحلیل کن. "
@@ -407,7 +407,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "پاسخ را بدون Markdown و بدون جدول بنویس و حتماً با تیترهای کوتاه دقیقاً در همین ترتیب جدا کن: "
                     "«معنی خبر»، «کریپتو»، «دلار/DXY»، «طلا»، «سهام»، «اوراق و بازدهی»، «سناریوی Actual در برابر Forecast»، «جمع‌بندی». "
                     "در «جمع‌بندی» یک جهت‌گیری احتمالی کلی برای ریسک‌پذیری بازار بده (مثلاً ریسک‌پذیرتر، ریسک‌گریزتر یا خنثی) و دلیلش را کوتاه بگو. "
-                    "اگر Actual منتشر نشده است، تحلیل را بر اساس سناریوهای بالاتر/پایین‌تر/مطابق انتظار انجام بده و آن را به‌عنوان نتیجه واقعی معرفی نکن.\n\n"
+                    "اگر Actual منتشر نشده است، تحلیل را بر اساس سناریوهای بالاتر/پایین‌تر/مطابق انتظار انجام بده و آن را به‌عنوان نتیجه واقعی معرفی نکن. "
+                    "پاسخ باید کامل و خودبسنده باشد و هیچ جمله یا تیتر ناتمام نماند. برای هر تیتر 2 تا 4 جمله کافی است؛ کل پاسخ را حدود 2200 تا 3200 کاراکتر نگه دار.\n\n"
                     "داده رویداد هدف:\n" + ai_context([e], tz_name) +
                     "\n\nکانتکست تقویم اقتصادی مرتبط:\n" + ai_context(events, tz_name, limit=60)
                 )
