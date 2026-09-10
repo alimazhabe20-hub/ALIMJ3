@@ -745,12 +745,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     if msg.photo:
                         # روی پیام عکسی: کپشن را عوض کن (حد ۱۰۲۴)
-                        await msg.edit_caption(caption=text[:1024], reply_markup=menu)
+                        await msg.edit_caption(caption=text[:1024], parse_mode="HTML", reply_markup=menu)
                     else:
-                        await msg.edit_text(text, reply_markup=menu)
+                        await msg.edit_text(text, parse_mode="HTML", reply_markup=menu)
                 except Exception:
                     try:
-                        await msg.reply_text(text, reply_markup=menu)
+                        await msg.reply_text(text, parse_mode="HTML", reply_markup=menu)
                     except Exception as _exc:
                         logger.debug("%s: %s", __name__, _exc)
 
@@ -766,7 +766,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     from bot.features.market.finance import analyze_crypto
                     base_pa = await analyze_crypto(symbol, timeframe="4h")
-                    txt = "🧠 تحلیل پرایس اکشن\n────────────────────\n" + base_pa
+                    txt = "<b>🧠 تحلیل پرایس اکشن</b>\n<i>━━━━━━━━━━━━━━━━━━━━</i>\n" + base_pa
                 await _edit_text(txt)
                 return
 
@@ -784,7 +784,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "اگر کیفیت داده یا همگرایی ضعیف است، «عدم‌تأیید / صبر» اعلام کن.\n\n" + base[:6000]
                 )
                 answer, _ = await ask_ai(query.from_user.id, prompt)
-                await _edit_text("🧠 تحلیل هوشمند حرفه‌ای\n────────────────────\n" + ((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip()))
+                await _edit_text("<b>🧠 تحلیل هوشمند حرفه‌ای</b>\n<i>━━━━━━━━━━━━━━━━━━━━</i>\n" + ((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip()))
                 return
 
             if action == "day":
