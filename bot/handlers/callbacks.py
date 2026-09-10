@@ -791,7 +791,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _edit_text("🧠 <b>تحلیل پرایس اکشن</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
                 return
 
+            if action == "15m":
+                if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
+                    txt = await analyze_gold("15m")
+                    await _edit_text(txt)
+                else:
+                    await _edit_text("⚠️ تایم‌فریم 15M در این بخش فقط برای XAU/USD فعال است.")
+                return
+
             if action == "day":
+                # برای طلا: روزانه از XAU/USD همان تایم‌فریم؛ برای کریپتو همان مسیر قبلی
+                if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
+                    base = await analyze_gold("1d")
+                    await _edit_text(base)
+                    return
                 # تحلیل روزانه + نمودار روزانه روی همان پیام
                 base = await analyze_crypto(symbol, timeframe="1d")
                 report = base
@@ -800,6 +813,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _edit_photo_caption(png, caption)
 
             elif action == "hr":
+                if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
+                    base = await analyze_gold("1h")
+                    await _edit_text(base)
+                    return
                 base = await analyze_crypto(symbol, timeframe="1h")
                 report = base
                 png, _cap = await get_crypto_chart(symbol, 7)
