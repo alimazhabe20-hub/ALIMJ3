@@ -34,6 +34,7 @@ _mtf_convergence = _f._mtf_convergence
 _advanced_levels = _f._advanced_levels
 _market_regime = _f._market_regime
 _professional_score = _f._professional_score
+_price_action_analysis = _f._price_action_analysis
 from bot.features.market.trading_intelligence import (backtest_directional, walk_forward, calibration, alert_flags, risk_plan, dedupe_alerts)
 from bot.features.market.trading_adaptation import settle_signals, record_signal, adaptive_profile, performance_summary
 _fetch_fundamentals = _f._fetch_fundamentals
@@ -133,19 +134,19 @@ async def analyze_gold(timeframe: str = "4h") -> str:
     mtf=await _mtf_bundle(pair)
     def f(v):
         return "—" if v is None else f"{float(v):,.2f}"
-    lines=["🥇 تحلیل حرفه‌ای طلا","────────────────────",
-           f"منبع جهانی: {source_label} | XAU/USD: ${f(cur)} | تایم‌فریم: {tf.upper()}",
-           f"🇮🇷 طلای ۱۸ عیار: {f(local18)} تومان/گرم" if local18 else "🇮🇷 طلای ۱۸ عیار: —",
-           f"🧭 روند: {ta.get('trend','خنثی')}",f"🛡 حمایت اصلی: ${f(support)}",f"🧱 مقاومت اصلی: ${f(resistance)}",
-           f"📐 ATR(14): ${f(ta.get('atr'))}",f"📊 RSI: {float(ta.get('rsi')):.1f}" if ta.get('rsi') is not None else "📊 RSI: —",
-           f"📈 ADX: {float(ta.get('adx')):.1f}" if ta.get('adx') is not None else "📈 ADX: —"]
+    lines=["<b>🥇 تحلیل حرفه‌ای طلا</b>","<i>━━━━━━━━━━━━━━━━━━━━</i>",
+           f"<b>منبع:</b> {source_label} | <b>XAU/USD:</b> <code>${f(cur)}</code> | <b>TF:</b> <code>{tf.upper()}</code>",
+           f"🇮🇷 <b>طلای ۱۸ عیار:</b> <code>{f(local18)} تومان/گرم</code>" if local18 else "🇮🇷 <b>طلای ۱۸ عیار:</b> —",
+           f"🧭 <b>روند:</b> {ta.get('trend','خنثی')}",f"🛡 <b>حمایت اصلی:</b> <code>${f(support)}</code>",f"🧱 <b>مقاومت اصلی:</b> <code>${f(resistance)}</code>",
+           f"📐 <b>ATR(14):</b> <code>${f(ta.get('atr'))}</code>",f"📊 <b>RSI:</b> {float(ta.get('rsi')):.1f}" if ta.get('rsi') is not None else "📊 RSI: —",
+           f"📈 <b>ADX:</b> {float(ta.get('adx')):.1f}" if ta.get('adx') is not None else "📈 ADX: —"]
     if state: lines.append(f"🕒 وضعیت منبع: {state.get('status','نامشخص')} | {state.get('age_seconds','—')}s")
     if struct:
         lines.append(f"🏗 ساختار: {struct.get('structure','—')}")
         if struct.get('bos'): lines.append(f"🔀 BOS/CHOCH: {struct['bos']}")
     if demand: lines.append(f"🟢 ناحیه تقاضا: ${f(demand[0])} – ${f(demand[1])}")
     if supply: lines.append(f"🔴 ناحیه عرضه: ${f(supply[0])} – ${f(supply[1])}")
-    lines += ["", "🧠 تحلیل پرایس اکشن"]
+    lines += ["", "<b>🧠 تحلیل پرایس اکشن</b>", "<i>━━━━━━━━━━━━━━━━━━━━</i>"]
     lines.append(f"• ساختار: {pa.get('structure','—')}")
     lines.append(f"• BOS/CHOCH: {pa.get('bos_choch','—')}")
     if pa.get("patterns"): lines.append("• الگوهای کندلی: " + "، ".join(pa["patterns"]))
@@ -153,7 +154,7 @@ async def analyze_gold(timeframe: str = "4h") -> str:
     if pa.get("liquidity_sweep") != "—": lines.append(f"• نقدینگی: {pa['liquidity_sweep']}")
     if pa.get("volume_ratio") is not None: lines.append(f"• حجم/میانگین۲۰: {pa['volume_ratio']}x")
     sc,di=mtf.get('scores') or {},mtf.get('dirs') or {}
-    lines += ["","⏱ همگرایی تایم‌فریم‌ها:"]
+    lines += ["","<b>⏱ همگرایی تایم‌فریم‌ها</b>", "<i>━━━━━━━━━━━━━━━━━━━━</i>"]
     for k in ("15M","1H","4H","1D","1W"):
         lines.append(f"• {k}: {sc.get(k,'—')}/10 | {di.get(k,'—')}")
     if resistance and cur > resistance: lines.append("🟢 سناریو صعودی: تثبیت بالای مقاومت و تبدیل آن به حمایت، اعتبار حرکت را بیشتر می‌کند.")
