@@ -40,11 +40,80 @@ _signal_track_stub = _f._signal_track_stub
 _pair_from_symbol = _f._pair_from_symbol
 _format_long_short = _f._format_long_short
 _fetch_fear_greed = _f._fetch_fear_greed
+_tgju_price = getattr(_f, "_tgju_price", None)
 logger = _f.logger
 
 if _format_fear_greed is None:
     def _format_fear_greed(data):
         return str(data or "")
+
+async def analyze_gold(timeframe: str = "4h") -> str:
+    """تحلیل طلا با PAXG/USDT به‌عنوان پروکسی بازار جهانی + طلای ۱۸ عیار TGJU."""
+    pair = "PAXGUSDT"
+    tf = (timeframe or "4h").lower().strip()
+    if tf not in ("1h", "4h", "1d"):
+        tf = "4h"
+    limit = 168 if tf == "1h" else 180 if tf == "4h" else 120
+    local_task = _tgju_price("geram18") if _tgju_price else _empty_async()
+    klines_task = _fetch_klines_interval(pair, tf, limit)
+    klines, local18 = await asyncio.gather(klines_task, local_task, return_exceptions=True)
+    if isinstance(klines, Exception):
+        klines = []
+    if isinstance(local18, Exception):
+        local18 = None
+    opens, highs, lows, closes, vols = [], [], [], [], []
+    for k in klines or []:
+        try:
+            opens.append(float(k[1])); highs.append(float(k[2])); lows.append(float(k[3]))
+            closes.append(float(k[4])); vols.append(float(k[5]))
+        except Exception:
+            continue
+    if len(closes) < 30:
+        return "❌ داده کافی برای تحلیل حرفه‌ای طلا در دسترس نیست."
+    cur = closes[-1]
+    ta = _compute_ta(closes, highs, lows, vols)
+    ta["atr"] = _atr(highs, lows, closes, 14)
+    support, resistance = _support_resistance(closes, highs, lows, cur)
+    struct = _market_structure(highs, lows, closes)
+    demand, supply = _demand_supply_zone(highs, lows, closes)
+    atr = ta.get("atr")
+    mtf = await _mtf_bundle(pair)
+    def f(v):
+        if v is None: return "—"
+        return f"{float(v):,.2f}"
+    lines = [
+        "🥇 تحلیل حرفه‌ای طلا",
+        "────────────────────",
+        f"پروکسی بازار جهانی: PAXG/USDT | تایم‌فریم: {tf.upper()}",
+        f"💰 قیمت لحظه‌ای پروکسی: ${f(cur)}",
+        f"🇮🇷 طلای ۱۸ عیار: {f(local18)} تومان/گرم" if local18 else "🇮🇷 طلای ۱۸ عیار: —",
+        f"🧭 روند: {ta.get('trend','خنثی')}",
+        f"🛡 حمایت اصلی: ${f(support)}",
+        f"🧱 مقاومت اصلی: ${f(resistance)}",
+        f"📐 ATR(14): ${f(atr)}",
+        f"📊 RSI: {float(ta.get('rsi')):.1f}" if ta.get('rsi') is not None else "📊 RSI: —",
+        f"📈 ADX: {float(ta.get('adx')):.1f}" if ta.get('adx') is not None else "📈 ADX: —",
+    ]
+    if struct:
+        lines.append(f"🏗 ساختار: {struct.get('structure','—')}")
+        if struct.get('bos'): lines.append(f"🔀 BOS/CHOCH: {struct['bos']}")
+    if demand: lines.append(f"🟢 ناحیه تقاضا: ${f(demand[0])} – ${f(demand[1])}")
+    if supply: lines.append(f"🔴 ناحیه عرضه: ${f(supply[0])} – ${f(supply[1])}")
+    sc, di = mtf.get('scores') or {}, mtf.get('dirs') or {}
+    lines += ["", "⏱ همگرایی تایم‌فریم‌ها:"]
+    for k in ("1H", "4H", "1D"):
+        lines.append(f"• {k}: {sc.get(k,'—')}/10 | {di.get(k,'—')}")
+    if resistance and cur > resistance:
+        lines.append("🟢 سناریو صعودی: تثبیت بالای مقاومت و تبدیل آن به حمایت، ادامه حرکت را معتبرتر می‌کند.")
+    elif support and cur < support:
+        lines.append("🔴 سناریو نزولی: بازپس‌گیری حمایت شرط مهم کاهش فشار فروش است.")
+    else:
+        lines.append("🟡 سناریوی فعلی: واکنش قیمت به حمایت/مقاومت تعیین‌کننده است؛ وسط محدوده، ورود کم‌کیفیت‌تر است.")
+    lines.append("⚠️ PAXG پروکسی نزدیک به طلاست و جایگزین مستقیم XAUUSD نیست؛ سطوح بر اساس داده موجود محاسبه شده‌اند.")
+    return "\n".join(lines)
+
+async def _empty_async():
+    return None
 
 async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", timeframe: str = "4h") -> str:
     """
@@ -57,6 +126,19 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
             symbol_clean = symbol_clean[len(junk):].strip()
     symbol_clean = symbol_clean.replace("usdt", "").strip() or "btc"
 
+    # برای جلوگیری از تحلیل نمادهای تصادفی، تحلیل حرفه‌ای فقط روی دارایی شناخته‌شده اجرا می‌شود.
+    supported = symbol_clean in SYMBOL_TO_ID or symbol_clean in {
+        "bitcoin", "ethereum", "binancecoin", "solana", "ripple", "the-open-network",
+        "dogecoin", "cardano", "tron", "chainlink", "litecoin", "polkadot", "avalanche-2",
+        "shiba-inu", "matic-network", "near", "pepe", "sui", "aptos", "arbitrum", "optimism",
+        "filecoin", "internet-computer", "vechain", "algorand", "stellar", "eos", "tezos",
+        "aave", "maker", "curve-dao-token", "sushi", "1inch", "floki", "bonk", "dogwifcoin",
+        "sei-network", "injective-protocol", "celestia", "render-token", "fetch-ai", "immutable-x",
+        "gala", "the-sandbox", "decentraland", "axie-infinity", "theta-token", "fantom",
+        "hedera-hashgraph", "elrond-erd-2", "kaspa", "thorchain", "blockstack", "ordinals", "sats-ordinals"
+    }
+    if not supported:
+        return f"❌ نماد «{symbol_clean.upper()}» در فهرست تحلیل حرفه‌ای نیست. یک نماد معتبر مثل BTC، ETH، SOL یا XRP بفرستید."
     coin_id = await resolve_coin_id(symbol_clean)
     _sym_map = {
         "bitcoin": "BTC", "ethereum": "ETH", "binancecoin": "BNB", "solana": "SOL",

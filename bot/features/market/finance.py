@@ -632,6 +632,10 @@ async def analyze_crypto(*args, **kwargs):
     from bot.features.market.finance_crypto import analyze_crypto as _fn
     return await _fn(*args, **kwargs)
 
+async def analyze_gold(*args, **kwargs):
+    from bot.features.market.finance_crypto import analyze_gold as _fn
+    return await _fn(*args, **kwargs)
+
 def _default_guide(*args, **kwargs):
     from bot.features.market.finance_crypto import _default_guide as _fn
     return _fn(*args, **kwargs)
@@ -943,6 +947,8 @@ def get_crypto_analysis_keyboard(symbol: str) -> "InlineKeyboardMarkup":
                 InlineKeyboardButton("📐 سایز پوزیشن", callback_data=f"cx:pos:{s}"),
                 InlineKeyboardButton("🔔 هشدار ورود", callback_data=f"cx:al:{s}"),
             ],
+            [InlineKeyboardButton("🧠 تحلیل هوشمند حرفه‌ای", callback_data=f"cx:ai:{s}")],
+            [InlineKeyboardButton("🥇 تحلیل طلا", callback_data="cx:gold:gold")],
             [InlineKeyboardButton("🔄 بروزرسانی تحلیل", callback_data=f"cx:ref:{s}")],
         ]
     )
