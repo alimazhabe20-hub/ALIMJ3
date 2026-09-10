@@ -996,20 +996,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await target.reply_text(**kwargs)
 
             async def _update_market_analysis_text(full_text: str):
-                """متن تحلیل جدا از عکس: پیام اول ویرایش، پیام‌های اضافی حذف/بازسازی می‌شوند."""
+                """متن تحلیل جدا از عکس؛ کیبورد همیشه زیر آخرین پیام تحلیل قرار می‌گیرد."""
                 ids = list(context.user_data.get("market_analysis_text_ids") or [])
                 chat_id = context.user_data.get("market_analysis_chat_id") or query.message.chat_id
                 chunks = _split_telegram_text(full_text, limit=3900) or ["داده کافی نیست."]
                 bot = context.bot
-                # پیام اول موجود را ویرایش کن؛ این کار باعث می‌شود تحلیل قبلی ناقص نماند.
                 if ids:
                     try:
                         await bot.edit_message_text(
-                            chat_id=chat_id, message_id=ids[0], text=chunks[0], parse_mode="HTML"
+                            chat_id=chat_id, message_id=ids[0], text=chunks[0],
+                            parse_mode="HTML", reply_markup=None
                         )
                     except Exception:
                         pass
-                    # پیام‌های قبلی اضافه را حذف کن تا تکه‌های قدیمی باقی نمانند.
                     for old_id in ids[1:]:
                         try:
                             await bot.delete_message(chat_id=chat_id, message_id=old_id)
@@ -1018,18 +1017,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     m = await bot.send_message(chat_id=chat_id, text=chunks[0], parse_mode="HTML")
                     ids = [m.message_id]
-                # ادامه تحلیل در پیام‌های متنی جداگانه
                 for chunk in chunks[1:]:
                     m = await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="HTML")
                     ids.append(m.message_id)
+                # فقط آخرین/آخرین تکه دکمه‌ها را داشته باشد؛ نه عکس و نه متن اول.
+                for old_id in ids[:-1]:
+                    try:
+                        await bot.edit_message_reply_markup(chat_id=chat_id, message_id=old_id, reply_markup=None)
+                    except Exception:
+                        pass
+                try:
+                    await bot.edit_message_reply_markup(chat_id=chat_id, message_id=ids[-1], reply_markup=menu)
+                except Exception:
+                    pass
                 context.user_data["market_analysis_text_ids"] = ids
                 context.user_data["market_analysis_chat_id"] = chat_id
 
             async def _edit_photo_caption(png: bytes | None, caption: str):
-                """فقط خود تصویر/کپشن کوتاه را روی همان پیام به‌روزرسانی کن؛ متن تحلیل جداست."""
+                """نمودار را روی همان پیام به‌روزرسانی کن؛ کیبورد فقط زیر متن تحلیل باشد."""
                 msg = query.message
                 full_input = (caption or "📈 نمودار تحلیل").strip()
-                # هر تحلیل کامل که از branchها می‌آید، جداگانه در پیام متن قرار می‌گیرد.
                 if len(full_input) > 1000 or "━━━━━━━━━━━━━━━━━━━━" in full_input or "تحلیل هوشمند" in full_input:
                     try:
                         await _update_market_analysis_text(full_input)
@@ -1037,17 +1044,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         logger.debug("market analysis text update: %s", _txt_exc)
                 cap = full_input.split("\n━━━━━━━━━━━━━━━━━━━━", 1)[0].strip()[:1000]
                 try:
+                    # دکمه‌ها زیر متن هستند؛ بنابراین callback معمولاً از پیام متن می‌آید.
+                    # شناسه عکس قبلاً ذخیره شده و همان عکس را ویرایش می‌کنیم.
+                    photo_msg_id = context.user_data.get("market_chart_message_id")
+                    chat_id = context.user_data.get("market_chart_chat_id") or msg.chat_id
                     if msg.photo:
+                        photo_msg_id = msg.message_id
+                        chat_id = msg.chat_id
+                    if photo_msg_id:
                         if png:
                             bio = BytesIO(png)
                             bio.name = f"{symbol}_chart.png"
                             media = InputMediaPhoto(media=bio, caption=cap, parse_mode="HTML")
-                            await msg.edit_media(media=media, reply_markup=menu)
+                            await context.bot.edit_message_media(
+                                chat_id=chat_id, message_id=photo_msg_id, media=media, reply_markup=None
+                            )
                         else:
-                            await msg.edit_caption(caption=cap, parse_mode="HTML", reply_markup=menu)
+                            await context.bot.edit_message_caption(
+                                chat_id=chat_id, message_id=photo_msg_id,
+                                caption=cap, parse_mode="HTML", reply_markup=None
+                            )
                         return
-                    # پیام قدیمی متنی: عکس جدید نفرست؛ فقط همان متن را نگه دار.
-                    await msg.edit_text(cap, parse_mode="HTML", reply_markup=menu)
+                    # اگر عکس شناسه نداشت، متن callback را دست‌کاری نکن؛ تحلیل متن قبلاً آپدیت شده است.
                 except Exception as exc:
                     logger.warning("market chart same-message edit failed: %s", exc)
 
@@ -1060,20 +1078,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chunks = ["داده کافی نیست."]
                 try:
                     if msg.photo:
-                        # Captions are limited to 1024; keep a compact header here and
-                        # send the complete analysis as normal Telegram messages.
-                        caption_chunks = _split_telegram_text(text, limit=1000)
-                        cap = caption_chunks[0] if caption_chunks else "داده کافی نیست."
-                        if len(caption_chunks) > 1:
-                            cap += "\n\n📄 ادامه تحلیل در پیام‌های بعدی…"
-                        await msg.edit_caption(caption=cap, parse_mode="HTML", reply_markup=menu)
-                        if len(caption_chunks) > 1:
-                            remainder = "\n".join(caption_chunks[1:])
-                            await _send_full_text(remainder, reply_to=msg, reply_markup=menu)
+                        # عکس فقط نمودار است؛ دکمه‌ها زیر متن تحلیل قرار می‌گیرند.
+                        await msg.edit_caption(caption=msg.caption or "📈 نمودار تحلیل", parse_mode="HTML", reply_markup=None)
+                        await _update_market_analysis_text(text)
                     else:
-                        await msg.edit_text(chunks[0], parse_mode="HTML", reply_markup=menu)
-                        for chunk in chunks[1:]:
-                            await msg.reply_text(chunk, parse_mode="HTML")
+                        await _update_market_analysis_text(text)
                 except Exception:
                     try:
                         await _send_full_text(text, reply_to=msg, reply_markup=menu)

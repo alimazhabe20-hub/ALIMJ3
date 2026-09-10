@@ -683,16 +683,20 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 from io import BytesIO
                 bio = BytesIO(png)
                 bio.name = "gold_xauusd_1h.png"
-                await update.message.reply_photo(
+                chart_msg = await update.message.reply_photo(
                     photo=bio,
                     caption="🥇 <b>تحلیل طلا / XAUUSD — 1H</b>",
                     parse_mode="HTML",
-                    reply_markup=menu,
                 )
+                context.user_data["market_chart_message_id"] = chart_msg.message_id
+                context.user_data["market_chart_chat_id"] = update.effective_chat.id
             chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
             text_ids = []
-            for chunk in chunks:
-                mtxt = await update.message.reply_text(chunk, parse_mode="HTML")
+            for i, chunk in enumerate(chunks):
+                mtxt = await update.message.reply_text(
+                    chunk, parse_mode="HTML",
+                    reply_markup=menu if i == len(chunks) - 1 else None,
+                )
                 text_ids.append(mtxt.message_id)
             context.user_data["market_analysis_text_ids"] = text_ids
             context.user_data["market_analysis_chat_id"] = update.effective_chat.id
@@ -726,11 +730,12 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 from io import BytesIO
                 bio = BytesIO(png)
                 bio.name = "gold_xauusd_1h.png"
-                await update.message.reply_photo(
+                chart_msg = await update.message.reply_photo(
                     photo=bio,
                     caption="🥇 Gold / XAUUSD — 1H",
-                    reply_markup=get_market_keyboard(),
                 )
+                context.user_data["market_chart_message_id"] = chart_msg.message_id
+                context.user_data["market_chart_chat_id"] = update.effective_chat.id
             # گزارش کامل را به‌صورت پیام متنی می‌فرستیم تا محدودیت 1024 کاراکتری کپشن باعث ناقص شدن تحلیل نشود.
             chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
             text_ids = []

@@ -85,7 +85,11 @@ async def _h_crypto_full(u, c, t, uid):
         try:
             bio = BytesIO(png)
             bio.name = f"{symbol}_analysis.png"
-            await u.message.reply_photo(photo=bio, caption=f"📈 <b>نمودار تحلیل {html.escape(symbol.upper())}</b>", parse_mode="HTML")
+            chart_msg = await u.message.reply_photo(
+                photo=bio, caption=f"📈 <b>نمودار تحلیل {html.escape(symbol.upper())}</b>", parse_mode="HTML"
+            )
+            c.user_data["market_chart_message_id"] = chart_msg.message_id
+            c.user_data["market_chart_chat_id"] = u.effective_chat.id
         except Exception as e:
             chart_note = f"⚠️ ارسال نمودار ناموفق بود: {e}"
     if chart_note and not png:
@@ -110,14 +114,20 @@ async def _h_crypto_full(u, c, t, uid):
             return f"<b>{esc}</b>"
         return esc
 
-    # متن تحلیل کاملاً جدا از تصویر ارسال می‌شود؛ کیبورد فقط روی تصویر می‌ماند.
+    # متن تحلیل کاملاً جدا از تصویر ارسال می‌شود؛ کیبورد فقط زیر آخرین پیام متن است.
+    chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل در دسترس نیست."]
     text_ids = []
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks):
         try:
-            mtxt = await u.message.reply_text(chunk, parse_mode="HTML")
+            mtxt = await u.message.reply_text(
+                chunk, parse_mode="HTML",
+                reply_markup=menu if i == len(chunks) - 1 else None,
+            )
         except Exception:
             plain = re.sub(r"<[^>]+>", "", chunk)
-            mtxt = await u.message.reply_text(plain[:3500])
+            mtxt = await u.message.reply_text(
+                plain[:3500], reply_markup=menu if i == len(chunks) - 1 else None
+            )
         text_ids.append(mtxt.message_id)
     c.user_data["market_analysis_text_ids"] = text_ids
     c.user_data["market_analysis_chat_id"] = u.effective_chat.id
