@@ -468,6 +468,63 @@ async def _fetch_onchain_context(base: str = "BTC") -> dict:
         return {"available": False, "reason": "request_failed"}
 
 
+async def _fetch_orderflow_context(pair: str) -> dict:
+    """Lightweight order-flow/large-trade intelligence from Binance public endpoints.
+    Large-trade direction is a heuristic, explicitly labelled as such; it is not whale identity data.
+    """
+    pair=(pair or "BTCUSDT").upper()
+    key=f"orderflow:{pair}"
+    now=asyncio.get_running_loop().time()
+    cached=_HTTP_DATA_CACHE.get(key)
+    if cached is not None and now-_HTTP_DATA_CACHE_T.get(key,0)<MARKET_CACHE_TTLS["price"]:
+        return dict(cached)
+    out={"available":False,"source":"Binance public","large_trade_bias":"نامشخص"}
+    retries=max(0,int(__import__('os').getenv("MARKET_HTTP_RETRIES","0")))
+    try:
+        async def get(url, params):
+            try:
+                r=await request_with_retry("GET",url,retries=retries,params=params,headers=HEADERS)
+                return safe_json(r) if getattr(r,"status_code",0)==200 else None
+            except Exception:
+                return None
+        depth, trades = await asyncio.gather(
+            get("https://api.binance.com/api/v3/depth", {"symbol":pair,"limit":100}),
+            get("https://api.binance.com/api/v3/aggTrades", {"symbol":pair,"limit":100}),
+        )
+        if depth:
+            bids=sum(float(x[0])*float(x[1]) for x in (depth.get("bids") or []) if len(x)>=2)
+            asks=sum(float(x[0])*float(x[1]) for x in (depth.get("asks") or []) if len(x)>=2)
+            total=bids+asks
+            if total:
+                imb=(bids-asks)/total
+                out.update(order_book_bid_notional=bids,order_book_ask_notional=asks,order_book_imbalance=imb,
+                           imbalance_label="خرید غالب" if imb>=.15 else "فروش غالب" if imb<=-.15 else "متعادل")
+        if trades:
+            buy=sell=0.0; large_buy=large_sell=0.0; threshold=100000.0
+            for t in trades:
+                try:
+                    notional=float(t.get("p",0))*float(t.get("q",0))
+                    # isBuyerMaker=True means aggressive seller hit the bid.
+                    if bool(t.get("m")):
+                        sell+=notional
+                        if notional>=threshold: large_sell+=notional
+                    else:
+                        buy+=notional
+                        if notional>=threshold: large_buy+=notional
+                except Exception: continue
+            flow=buy-sell
+            large=large_buy-large_sell
+            out.update(trade_buy_notional=buy,trade_sell_notional=sell,trade_flow=flow,
+                       large_trade_buy_notional=large_buy,large_trade_sell_notional=large_sell,
+                       large_trade_flow=large,
+                       large_trade_bias="خریدهای بزرگ غالب" if large>threshold else "فروش‌های بزرگ غالب" if large<-threshold else "متعادل")
+        out["available"]=bool(depth or trades)
+        _HTTP_DATA_CACHE[key]=dict(out);_HTTP_DATA_CACHE_T[key]=now;_trim_http_data_cache()
+    except Exception as e:
+        logger.warning(f"orderflow context: {e}")
+    return out
+
+
 async def _fetch_market_context(base: str = "BTC") -> dict:
     """Market-wide context: dominance, total caps, macro proxies and lightweight news sentiment."""
     key = "market_context:v2"

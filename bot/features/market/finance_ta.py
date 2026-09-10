@@ -9,6 +9,7 @@ import asyncio
 from bot.features.market import finance as _f
 from bot.logger import logger
 from bot.utils.http_client import pooled_async_client, request_with_retry, safe_json
+from bot.features.market.trading_intelligence import detect_regime, dynamic_weights, quality_gate
 
 # Compatibility aliases preserved from the original finance.py implementation.
 # finance_ta is loaded through the finance facade after it is initialized.
@@ -362,6 +363,13 @@ def _professional_score(ta, mtf=None, structure=None, binance=None, fg=None, cur
     ns=float((market.get("news") or {}).get("score") or 0);f["sentiment"]=max(15,min(85,f["sentiment"]+ns*4))
     dxy=((market.get("macro") or {}).get("DXY") or {}).get("change_pct");f["macro"]=max(20,min(80,50-float(dxy)*12)) if dxy is not None else 50
     dom=market.get("btc_dominance");f["market"]=max(25,min(75,50+(float(dom)-50)*1.2)) if dom is not None else 50
+    obi=binance.get("order_book_imbalance")
+    if obi is not None:
+        f["market"]=max(10,min(90,f["market"]+float(obi)*20))
+    liq_long=float(binance.get("liquidations_long") or 0); liq_short=float(binance.get("liquidations_short") or 0)
+    if liq_long or liq_short:
+        # liquidation imbalance is a contrarian stress signal, not a directional guarantee
+        f["derivatives"]=max(10,min(90,f["derivatives"]+(10 if liq_short>liq_long*1.5 else -10 if liq_long>liq_short*1.5 else 0)))
     f["trend"]=max(10,min(90,f["trend"]+float(mtf.get("bias") or 0)*20))
     onchain = market.get("onchain") or {}
     if onchain.get("available"):
@@ -370,10 +378,16 @@ def _professional_score(ta, mtf=None, structure=None, binance=None, fg=None, cur
         activity = float(onchain.get("transactions_24h") or 0)
         f["onchain"] = 55.0 if activity > 0 else 50.0
         market["onchain_score"] = f["onchain"]
-    weights={"trend":.18,"momentum":.12,"volume":.10,"structure":.14,"derivatives":.12,"sentiment":.08,"macro":.08,"market":.10,"onchain":.08}
+    regime=detect_regime(ta, mtf, ta.get("vol_ratio"))
+    weights=dynamic_weights(regime)
     score=round(sum(f[k]*weights[k] for k in weights))
     vals=[trend,rsi,vr,fr,fg,mtf.get("scores"),market.get("btc_dominance"),market.get("macro"),market.get("news"),market.get("onchain_score")]
     avail=sum(x is not None and x!={} for x in vals)
     confidence=min(96,max(35,45+avail*5-(12 if mtf.get("conflict") else 0)))
-    return {"score":max(0,min(100,score)),"confidence":confidence,"direction":"صعودی" if score>=60 else "نزولی" if score<=40 else "خنثی","factors":f}
+    gate=quality_gate(score, confidence, mtf, float(market.get("data_quality") or 100), regime)
+    if not gate["allowed"]:
+        confidence=min(confidence, 54)
+    return {"score":max(0,min(100,score)),"confidence":confidence,
+            "direction":"صعودی" if score>=60 else "نزولی" if score<=40 else "خنثی",
+            "factors":f,"weights":weights,"regime":regime,"quality_gate":gate}
 

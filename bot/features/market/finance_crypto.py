@@ -34,6 +34,7 @@ _mtf_convergence = _f._mtf_convergence
 _advanced_levels = _f._advanced_levels
 _market_regime = _f._market_regime
 _professional_score = _f._professional_score
+from bot.features.market.trading_intelligence import (backtest_directional, walk_forward, calibration, alert_flags, risk_plan)
 _fetch_fundamentals = _f._fetch_fundamentals
 _build_smart_summary = _f._build_smart_summary
 _default_guide = _f._default_guide
@@ -43,6 +44,7 @@ _signal_track_stub = _f._signal_track_stub
 _pair_from_symbol = _f._pair_from_symbol
 _format_long_short = _f._format_long_short
 _fetch_fear_greed = _f._fetch_fear_greed
+_fetch_orderflow_context = getattr(_f, "_fetch_orderflow_context", None)
 _tgju_price = getattr(_f, "_tgju_price", None)
 _request_with_retry = _f.request_with_retry
 safe_json = _f.safe_json
@@ -213,6 +215,7 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
     detail, binance, fg, klines, fund, market = await __import__("asyncio").gather(
         detail_t, binance_t, fg_t, klines_t, fund_t, market_t
     )
+    orderflow = await _fetch_orderflow_context(pair) if _fetch_orderflow_context else {}
 
     md = (detail.get("market_data") or {}) if isinstance(detail, dict) else {}
     current = md.get("current_price", {}).get("usd")
@@ -360,19 +363,52 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
 
     # ساختار بازار
     struct = _market_structure(highs, lows, closes) if len(closes) >= 20 else {}
-    pro = _professional_score(ta, mtf, struct, binance or {}, fg, current, support, resistance, market)
-    regime = _market_regime(ta, mtf, ta.get("vol_ratio"))
+    pro = _professional_score(ta, mtf, struct, {**(binance or {}), **(orderflow or {})}, fg, current, support, resistance, market)
+    regime = (pro.get("regime") or {}).get("label") or _market_regime(ta, mtf, ta.get("vol_ratio"))
+    gate = pro.get("quality_gate") or {}
+    alerts = alert_flags(current, support, resistance, ta, {**(binance or {}), **(orderflow or {})}, market)
+    # Non-lookahead historical proxy scores for robustness metrics.
+    hist_scores=[]
+    if len(closes) >= 40:
+        for i in range(len(closes)):
+            if i < 30:
+                hist_scores.append(50.0)
+                continue
+            fast=sum(closes[i-19:i])/20
+            slow=sum(closes[i-49:i])/30 if i >= 49 else fast
+            mom=(closes[i]/closes[i-12]-1)*100 if closes[i-12] else 0
+            hist_scores.append(max(0,min(100,50+(20 if closes[i]>fast else -20)+(10 if fast>=slow else -10)+max(-10,min(10,mom*2)))))
+    bt=backtest_directional(closes,hist_scores,horizon=6) if hist_scores else {"trades":0}
+    wf=walk_forward(closes,hist_scores) if hist_scores else {"windows":0}
+    calibrated_conf=calibration(pro["confidence"],bt.get("win_rate") if bt.get("trades",0)>=20 else None,bt.get("trades",0))
+    entry=current
+    stop=(current-(ta.get("atr") or 0)*1.5) if current is not None and "لانگ" in signal else (current+(ta.get("atr") or 0)*1.5) if current is not None and "شورت" in signal else None
+    target=resistance if "لانگ" in signal else support if "شورت" in signal else None
+    risk=risk_plan(entry,stop,target) if stop is not None and target is not None else {"valid":False}
     lines.append("")
     lines.append("▎3. 🧠 امتیاز حرفه‌ای و وضعیت بازار")
     score_em = "🟢" if pro["score"] >= 60 else ("🔴" if pro["score"] <= 40 else "🟡")
     conf_em = "🟢" if pro["confidence"] >= 75 else ("🟡" if pro["confidence"] >= 55 else "🔴")
-    lines.append(f"🎯 امتیاز جهت‌گیری: {pro['score']}/100 {score_em} | اطمینان داده: {pro['confidence']}% {conf_em}")
+    lines.append(f"🎯 امتیاز جهت‌گیری: {pro['score']}/100 {score_em} | اطمینان داده: {calibrated_conf}% {conf_em}")
     lines.append(f"🌐 رژیم بازار: {regime}")
+    lines.append(f"🛡 گیت کیفیت: {gate.get('label','—')}" + (f" | {', '.join(gate.get('reasons',[]))}" if gate.get('reasons') else ""))
+    if risk.get("valid"):
+        lines.append(f"📐 مدیریت ریسک: R:R تقریبی {risk['rr']:.2f} | ریسک واحد {risk['risk_per_unit']:.4f}")
+    if bt.get("trades",0):
+        lines.append(f"🧪 بک‌تست بدون look-ahead: {bt['trades']} معامله | Win Rate {bt['win_rate']}% | PF {bt['profit_factor']} | بازده {bt['return_pct']}%")
+    if wf.get("windows",0):
+        lines.append(f"🔬 Walk-Forward OOS: {wf['windows']} پنجره | Win Rate {wf['out_of_sample']['win_rate']}%")
+    if alerts:
+        fa={"breakout_above_resistance":"شکست مقاومت","breakdown_below_support":"شکست حمایت","volume_spike":"جهش حجم","funding_extreme":"Funding افراطی","liquidation_activity":"فعالیت لیکوئیدیشن","news_sentiment_shift":"تغییر سنتیمنت اخبار"}
+        lines.append("🚨 هشدارها: " + " | ".join(fa.get(x,x) for x in alerts))
+    if orderflow:
+        lines.append(f"🌊 Order Flow: {orderflow.get('imbalance_label','نامشخص')} | Large Trades: {orderflow.get('large_trade_bias','نامشخص')}")
     if levels.get("supports"):
         lines.append("🛡 حمایت‌ها: " + " | ".join(f"{x['price']:,.2f} ({x['strength']}/100)" for x in levels['supports'][:3]))
     if levels.get("resistances"):
         lines.append("🧱 مقاومت‌ها: " + " | ".join(f"{x['price']:,.2f} ({x['strength']}/100)" for x in levels['resistances'][:3]))
     lines.append(f"🧩 عوامل امتیاز: روند {pro['factors']['trend']:.0f} | مومنتوم {pro['factors']['momentum']:.0f} | حجم {pro['factors']['volume']:.0f} | ساختار {pro['factors']['structure']:.0f}")
+    lines.append("⚙️ وزن پویا: " + " | ".join(f"{k} {v*100:.0f}%" for k,v in pro.get("weights",{}).items()))
     lines.append(f"📈 مشتقات: {'Funding ' + format(float(binance.get('funding_rate')), '+.3f') + '%' if binance.get('funding_rate') is not None else '—'} | Basis {float(binance.get('basis_pct') or 0):+.3f}%")
     if binance.get("liquidations_total") is not None:
         lines.append(f"💥 لیکوئیدیشن اخیر: کل {float(binance['liquidations_total']):,.0f} | لانگ {float(binance.get('liquidations_long') or 0):,.0f} | شورت {float(binance.get('liquidations_short') or 0):,.0f}")
