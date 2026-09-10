@@ -218,7 +218,6 @@ async def _reply_long_text(msg, text: str, *, prefix: str = "🤖 "):
             raise RuntimeError(f"AI reply chunk {i+1}/{len(chunks)} could not be delivered")
     return first
 AI_CONTINUE_THRESHOLD = 2500
-
 async def _send_ai_answer(update, user_id, answer: str, *, stream: bool = True):
     """ارسال پاسخ AI؛ فقط پاسخ‌های طولانی دکمه ادامه دارند."""
     msg = update.message
@@ -230,13 +229,11 @@ async def _send_ai_answer(update, user_id, answer: str, *, stream: bool = True):
     for i, chunk in enumerate(chunks):
         body = chunk[2:].lstrip() if chunk.startswith("🤖 ") else chunk
         payload = chunk if i == 0 else f"🤖 ادامه ({i+1}/{len(chunks)})\n{body}"
-        # فقط آخرین تکه دکمه را می‌گیرد؛ پاسخ کوتاه هیچ دکمه‌ای ندارد.
         markup = get_ai_answer_keyboard(user_id) if is_long and i == len(chunks) - 1 else None
         sent = await msg.reply_text(payload, reply_markup=markup)
         if first is None:
             first = sent
     return first
-
 async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
     """استریم AI و ویرایش تدریجی پیام؛ در شکست، پیام نیمه‌کاره حذف می‌شود."""
     from bot.services.ai_service import ask_ai_stream
@@ -276,12 +273,16 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
         chunks = _split_telegram_text("🤖 " + answer, 3900)
         if not chunks:
             chunks = ["🤖 پاسخی دریافت نشد."]
-        # این جلوی Duplicate Reply را در خطای «Message is not modified» می‌گیرد.
-        # اگر آخرین ویرایش دقیقاً همان متن نهایی بوده، دوباره پیام نفرست.
         final = chunks[0]
+        # اگر آخرین ویرایش دقیقاً همان متن نهایی بوده، دوباره پیام نفرست.
         is_long = len(answer) >= AI_CONTINUE_THRESHOLD
         final_markup = get_ai_answer_keyboard(user_id) if is_long and len(chunks) == 1 else None
-        if final != last_rendered or final_markup is not None:
+        needs_final_edit = False
+        if final != last_rendered:
+            needs_final_edit = True
+        if final_markup is not None:
+            needs_final_edit = True
+        if needs_final_edit:
             try:
                 await sent.edit_text(final, reply_markup=final_markup)
                 last_rendered = final
@@ -741,12 +742,9 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 reply_markup=get_market_keyboard(),
             )
             return
-    # تحلیل مستقیم طلا: کاربر می‌تواند فقط «gold»، «طلا»، «اونس»، «XAUUSD» یا عبارت تحلیلی مشابه را بفرستد.
-    # این مسیر قبل از fallback عمومی اجرا می‌شود تا Gold هرگز به‌عنوان «نماد نامعتبر» پاسخ داده نشود.
     _gold_text = re.sub(r"[\s\u200c_/\-]+", "", text.lower())
     _gold_aliases = ("gold", "xau", "xauusd", "طلا", "طلایجهانی", "اونس", "اونسجهانی")
     if any(alias in _gold_text for alias in _gold_aliases):
-        # فقط وقتی پیام واقعاً درباره طلاست؛ اعداد/متن‌های نامرتبطی که کلمه gold را داخل جمله دارند هم به تحلیل طلا می‌روند.
         try:
             track_usage(user_id, "gold_analysis")
             notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…")
@@ -769,7 +767,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
                 context.user_data["market_chart_message_id"] = chart_msg.message_id
                 context.user_data["market_chart_chat_id"] = update.effective_chat.id
-            # گزارش کامل را به‌صورت پیام متنی می‌فرستیم تا محدودیت 1024 کاراکتری کپشن باعث ناقص شدن تحلیل نشود.
             chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
             text_ids = []
             for chunk in chunks:
@@ -785,7 +782,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.error("direct gold analysis failed: %s", exc, exc_info=True)
             await update.message.reply_text("⚠️ دریافت تحلیل طلا موقتاً ناموفق بود؛ دوباره تلاش کنید.")
             return
-    # دکمه‌های تکی اذان (با ✅ یا ❌)
     _azan_btn_map = {
         "اذان صبح": "fajr",
         "اذان ظهر": "dhuhr",
@@ -802,7 +798,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("🔙 بازگشت به مذهبی",):
         await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard())
         return
-    # «دستیار خرید» قدیمی حذف شده؛ خرید اکنون بخشی از همان دستیار هوشمند است.
     if text in ("🛒 دستیار خرید", "دستیار خرید", "🛍 دستیار خرید"):
         context.user_data["ai_mode"] = True
         context.user_data.pop("ai_shopping_mode", None)
@@ -878,7 +873,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=get_market_keyboard(),
         )
         return
-    # هوا
     if text in ("🌤 پیش‌بینی هوا", "پیش‌بینی هوا"):
         track_usage(user_id, "forecast")
         await update.message.reply_text(await weather_forecast(city), reply_markup=get_weather_geo_keyboard()); return
@@ -901,7 +895,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("📍 لوکیشن من", "لوکیشن من"):
         track_usage(user_id, "location")
         await update.message.reply_text(f"📍 لوکیشن را از 📎 بفرستید.\nشهر فعلی: {city}", reply_markup=get_weather_geo_keyboard()); return
-    # ابزار
     if text in ("🔢 ماشین‌حساب", "ماشین‌حساب"):
         context.user_data["waiting_for"] = "calc"; track_usage(user_id, "calc")
         await update.message.reply_text("🔢 `2+3*4`", reply_markup=get_tools_keyboard()); return
@@ -916,7 +909,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("📝 شمارش متن", "شمارش متن"):
         context.user_data["waiting_for"] = "count_text"; track_usage(user_id, "count")
         await update.message.reply_text("📝 متن را بفرستید:", reply_markup=get_tools_keyboard()); return
-    # سرگرمی
     if text in ("📖 فال حافظ", "فال حافظ"):
         track_usage(user_id, "hafez"); await update.message.reply_text(await hafez_fal(user_id), reply_markup=get_fun_keyboard()); return
     if text in ("😂 جوک روز", "جوک روز"):
@@ -925,7 +917,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             "😂 دسته جوک را انتخاب کن:\n(بیش از ۸۷۰۰ جوک از farsijokes)",
             reply_markup=get_joke_keyboard(),
         ); return
-    # دسته‌های جوک
     _joke_map = {
         "🎲 جوک تصادفی": None,
         "😄 عمومی": "general",
@@ -952,7 +943,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         track_usage(user_id, "challenge"); await update.message.reply_text(await daily_challenge(), reply_markup=get_fun_keyboard()); return
     if text in ("💖 جمله انگیزشی", "جمله انگیزشی"):
         track_usage(user_id, "motivation"); await update.message.reply_text(f"💖 {get_motivation()}", reply_markup=get_fun_keyboard()); return
-    # پروفایل
     if text in ("⚙️ تنظیمات هوشمند", "تنظیمات هوشمند"):
         from bot.database import get_user_preferences
         prefs = get_user_preferences(user_id)
