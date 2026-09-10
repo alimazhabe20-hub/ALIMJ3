@@ -31,36 +31,16 @@ async def _h_currency(u, c, t, uid):
     except Exception as e:
         await u.message.reply_text(f"⚠️ خطا در تبدیل: {e}", reply_markup=get_market_keyboard())
 
-async def _send_long_analysis(message, text, reply_markup):
-    """ارسال کامل تحلیل بدون بریدن متن و با parse_mode تلگرام."""
-    text = (text or "❌ داده‌ای برای تحلیل دریافت نشد.").strip()
-    limit = 3800
-    chunks = []
-    while len(text) > limit:
-        cut = text.rfind("\n", 0, limit)
-        if cut < 500:
-            cut = text.rfind(" ", 0, limit)
-        if cut < 500:
-            cut = limit
-        chunks.append(text[:cut].rstrip())
-        text = text[cut:].lstrip()
-    chunks.append(text)
-
-    for i, chunk in enumerate(chunks):
-        await message.reply_text(
-            chunk,
-            parse_mode="HTML",
-            reply_markup=reply_markup if i == len(chunks) - 1 else None,
-            disable_web_page_preview=True,
-        )
-
 async def _h_crypto_full(u, c, t, uid):
-    """تحلیل کامل + منوی دکمه‌ای زیرش (مثل Algo Analyzer)"""
+    """تحلیل کامل کریپتو با ارسال امن نمودار و متن کامل در چند پیام."""
+    import asyncio as _aio
+    import html
+    from io import BytesIO
+
     c.user_data.pop("waiting_for", None)
     raw = (t or "").strip().translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
     parts = [p for p in raw.replace(",", " ").split() if p]
-    symbol = ""
-    days = 30
+    symbol, days = "", 30
     for p in parts:
         pl = p.lower()
         if pl.replace(".", "", 1).isdigit():
@@ -68,34 +48,30 @@ async def _h_crypto_full(u, c, t, uid):
                 days = max(1, min(365, int(float(p))))
             except Exception:
                 pass
-        elif pl not in ("روز", "day", "days", "نمودار", "chart", "تحلیل", "analyze", "ارز"):
-            if not symbol:
-                symbol = p
+        elif pl not in ("روز", "day", "days", "نمودار", "chart", "تحلیل", "analyze", "ارز") and not symbol:
+            symbol = p
     if not symbol and parts:
         symbol = parts[0]
     if not symbol:
-        await u.message.reply_text(
-            "❌ نماد را بفرستید. مثال: `btc` یا `eth 30`",
-            reply_markup=get_market_keyboard(),
-        )
+        await u.message.reply_text("❌ نماد را بفرستید. مثال: btc یا eth 30", reply_markup=get_market_keyboard())
         return
 
     symbol = symbol.lower().replace("usdt", "").strip()
     c.user_data["crypto_symbol"] = symbol
-    wait = await u.message.reply_text(f"⏳ تحلیل {symbol.upper()}...")
+    wait = await u.message.reply_text(f"⏳ در حال دریافت تحلیل {symbol.upper()}...")
+    chart_task = _aio.create_task(get_crypto_chart(symbol, days))
+    try:
+        report = await analyze_crypto(symbol, ai_summary="", ai_guide="")
+    except Exception as e:
+        from bot.logger import logger
+        logger.exception("crypto analysis failed for %s", symbol)
+        report = f"❌ تحلیل {symbol.upper()} با خطا مواجه شد: {e}"
 
-    report = ""
     png = None
     try:
-        import asyncio as _aio
-        chart_task = _aio.create_task(get_crypto_chart(symbol, days))
-        report = await analyze_crypto(symbol, ai_summary="", ai_guide="")
-        try:
-            png, _ = await chart_task
-        except Exception:
-            png = None
+        png, chart_note = await chart_task
     except Exception as e:
-        report = f"⚠️ خطا در تحلیل: {e}"
+        chart_note = f"⚠️ نمودار در دسترس نیست: {e}"
 
     try:
         await wait.delete()
@@ -103,23 +79,57 @@ async def _h_crypto_full(u, c, t, uid):
         pass
 
     menu = get_crypto_analysis_keyboard(symbol)
-    # یک پیام واحد (عکس+تحلیل+منو) تا دکمه‌ها همان را ویرایش کنند
-    body = (report or "❌ داده نبود.")
+
+    # نمودار هرگز با caption بلند ارسال نمی‌شود؛ متن تحلیل جدا و کامل می‌ماند.
     if png:
         try:
-            from io import BytesIO
             bio = BytesIO(png)
             bio.name = f"{symbol}_analysis.png"
-            # کپشن عکس محدود است؛ تحلیل کامل را جداگانه و بدون قطع شدن می‌فرستیم.
-            await u.message.reply_photo(
-                photo=bio,
-                caption=f"📈 نمودار تحلیل {symbol.upper()}",
-            )
-            await _send_long_analysis(u.message, body, menu)
+            await u.message.reply_photo(photo=bio, caption=f"📈 <b>نمودار تحلیل {html.escape(symbol.upper())}</b>", parse_mode="HTML")
         except Exception as e:
-            await _send_long_analysis(u.message, body + f"\n\n⚠️ نمودار: {e}", menu)
-    else:
-        await _send_long_analysis(u.message, body, menu)
+            chart_note = f"⚠️ ارسال نمودار ناموفق بود: {e}"
+    if chart_note and not png:
+        try:
+            await u.message.reply_text(chart_note[:3500])
+        except Exception:
+            pass
+
+    def render(line: str) -> str:
+        raw_line = line.strip()
+        if not raw_line:
+            return ""
+        esc = html.escape(raw_line)
+        if raw_line.startswith("▎") or raw_line[:2].rstrip().isdigit():
+            return f"<b>{esc}</b>"
+        if raw_line.startswith(("🧠", "📊", "⏱", "🎯", "🧪", "🔬", "🌐")) and ":" not in raw_line:
+            return f"<b>{esc}</b>"
+        return esc
+
+    # بخش‌ها را در پیام‌های حداکثر ~3500 کاراکتری HTML می‌شکنیم.
+    lines = [render(x) for x in (report or "❌ داده‌ای برای تحلیل دریافت نشد.").splitlines()]
+    chunks, current = [], ""
+    for line in lines:
+        candidate = (current + "\n" + line).strip() if current else line
+        if len(candidate) > 3400 and current:
+            chunks.append(current)
+            current = line
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+
+    if not chunks:
+        chunks = ["❌ داده‌ای برای تحلیل دریافت نشد."]
+    for i, chunk in enumerate(chunks):
+        kwargs = {"parse_mode": "HTML"}
+        if i == len(chunks) - 1:
+            kwargs["reply_markup"] = menu
+        try:
+            await u.message.reply_text(chunk, **kwargs)
+        except Exception:
+            # اگر HTML به هر دلیل نامعتبر بود، متن ساده را کامل و امن بفرست.
+            plain = re.sub(r"<[^>]+>", "", chunk)
+            await u.message.reply_text(plain[:3500], reply_markup=menu if i == len(chunks)-1 else None)
 
 async def _h_crypto_pos(u, c, t, uid):
     """پاسخ به ورودی سایز پوزیشن یا قیمت هشدار"""

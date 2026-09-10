@@ -103,7 +103,6 @@ def _apply_voice_chat_flags(context, text: str) -> str | None:
             "برای خاموش کردن بگو: «قطع ویس» یا «فقط متن»."
         )
     return None
-
 async def _handle_special_ai_intents(update, context, user_id, text: str) -> bool:
     """نمودار، جستجو، یادآوری، موسیقی — True اگر کامل هندل شد."""
     import re
@@ -520,6 +519,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 "birth_save": _h_birth_save,
                 "count_text": _h_count_text,
                 "font_text": _h_font_text, "font_all": _h_font_all,
+                "economic_calendar": _h_economic_calendar,
             }
             fn = handlers.get(waiting)
             if fn:
@@ -564,9 +564,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard()); return
     if text == "💰 بازار":
         await update.message.reply_text("💰 بازار:", reply_markup=get_market_keyboard()); return
-    if text in ("🗓 تقویم اقتصادی", "تقویم اقتصادی"):
-        await _h_economic_calendar(update, context, text, user_id)
-        return
     if text == "🌤 هوا و مکان":
         await update.message.reply_text("🌤 هوا و مکان:", reply_markup=get_weather_geo_keyboard()); return
     if text == "🛠 ابزارها":
@@ -803,6 +800,11 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             "• ۲ بیتکوین",
             reply_markup=get_market_keyboard()
         ); return
+    if text in ("🗓 تقویم اقتصادی", "تقویم اقتصادی", "📅 تقویم اقتصادی"):
+        track_usage(user_id, "economic_calendar")
+        await _h_economic_calendar(update, context, text, user_id)
+        return
+
     if text in ("📈 سود و ضرر", "سود و ضرر"):
         context.user_data["waiting_for"] = "profit"; track_usage(user_id, "profit")
         await update.message.reply_text("📈 `1000 1200` یا `1000 1200 5`", reply_markup=get_market_keyboard()); return
