@@ -630,7 +630,7 @@ def _impact_label(e: dict[str, Any]) -> str:
     return IMPACT_FA.get(e.get("impact", ""), e.get("impact") or "نامشخص")
 
 
-def format_event(e: dict[str, Any], tz_name: str = "") -> str:
+def format_event(e: dict[str, Any], tz_name: str = "", *, show_date: bool = False) -> str:
     local = _event_local(e, tz_name)
     icon = IMPACT_ICON.get(e["impact"], "⚪")
     title_fa = _esc(e["title_fa"])
@@ -640,8 +640,9 @@ def format_event(e: dict[str, Any], tz_name: str = "") -> str:
     past_mark = " ✅" if past else ""
     actual_empty = "منتشر نشده" if past else "در انتظار انتشار"
     other_empty = "—"
+    when = local.strftime("%m/%d %H:%M") if show_date else local.strftime("%H:%M")
     return (
-        f"{icon} <b>{local.strftime('%H:%M')} | {_esc(e['country'])} | {title_fa}</b>{past_mark}\n"
+        f"{icon} <b>{when} | {_esc(e['country'])} | {title_fa}</b>{past_mark}\n"
         f"   <i>{title_en}</i>\n"
         f"   🚦 <b>اهمیت:</b> {_esc(_impact_label(e))}"
         f"  •  📢 <b>واقعی:</b> {_esc(format_value(e.get('actual'), empty=actual_empty))}"
@@ -650,8 +651,7 @@ def format_event(e: dict[str, Any], tz_name: str = "") -> str:
     )
 
 
-
-def calendar_text(events, *, title: str, tz_name: str = "", limit: int = 25) -> str:
+def calendar_text(events, *, title: str, tz_name: str = "", limit: int = 25, show_date: bool = False) -> str:
     tz = _tz(tz_name)
     lines = [
         f"🗓 <b>{_esc(title)}</b>",
@@ -662,12 +662,21 @@ def calendar_text(events, *, title: str, tz_name: str = "", limit: int = 25) -> 
     if not events:
         lines.append("📭 <i>رویداد اقتصادی‌ای با این فیلتر پیدا نشد.</i>")
         return "\n".join(lines)
+
+    rank = {"High": 0, "Medium": 1, "Low": 2, "Holiday": 3}
+    ordered = sorted(
+        events,
+        key=lambda e: (
+            rank.get(str(e.get("impact") or ""), 9),
+            e.get("utc") or datetime.min.replace(tzinfo=timezone.utc),
+        ),
+    )
+
     base = "\n".join(lines)
     added = 0
-    for e in events[:limit]:
-        block = format_event(e, tz_name)
+    for e in ordered[: max(limit, 1)]:
+        block = format_event(e, tz_name, show_date=show_date)
         candidate = base + "\n" + block + "\n"
-        # هرگز HTML را وسط یک تگ قطع نکنیم.
         if len(candidate) > 3850:
             break
         lines.extend([block, ""])
@@ -675,7 +684,9 @@ def calendar_text(events, *, title: str, tz_name: str = "", limit: int = 25) -> 
         added += 1
     remaining = len(events) - added
     if remaining > 0:
-        lines += [f"… <i>{remaining} رویداد دیگر هم وجود دارد.</i>", ""]
+        high_left = sum(1 for e in ordered[added:] if str(e.get("impact")) == "High")
+        extra = f" (از جمله {high_left} خبر مهم)" if high_left else ""
+        lines += [f"… <i>{remaining} رویداد دیگر هم وجود دارد{extra}. دکمه «فقط مهم» را بزنید.</i>", ""]
     lines += [
         "<b>راهنمای اهمیت:</b> 🔴 زیاد  🟠 متوسط  🟡 کم",
         "ℹ️ <i>مقادیر واقعی از منبع داده‌محور خوانده می‌شوند. اگر «در انتظار انتشار» دیدید یعنی هنوز عدد رسمی ثبت نشده.</i>",
@@ -770,16 +781,29 @@ def ai_context(events, tz_name: str = "", limit: int = 40) -> str:
 def get_calendar_keyboard(user_id: int, *, mode: str = "today", impact: str = "all", events=None, currency: str = "", selected_date=None, page: int = 0, **_kwargs):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     rows = [
-        [InlineKeyboardButton("📅 امروز", callback_data="ec:today"), InlineKeyboardButton("📆 فردا", callback_data="ec:tomorrow"), InlineKeyboardButton("🗓 هفته", callback_data="ec:week")],
-        [InlineKeyboardButton("🔴 فقط مهم", callback_data="ec:impact:high"), InlineKeyboardButton("📋 همه خبرها", callback_data="ec:impact:all")],
-        [InlineKeyboardButton("🤖 تحلیل هوشمند", callback_data="ec:ai"), InlineKeyboardButton("🔔 اعلان‌ها", callback_data="ec:settings")],
-        [InlineKeyboardButton("💵 USD", callback_data="ec:cur:USD"), InlineKeyboardButton("💶 EUR", callback_data="ec:cur:EUR"), InlineKeyboardButton("💷 GBP", callback_data="ec:cur:GBP")],
+        [
+            InlineKeyboardButton("⬅️ دیروز", callback_data="ec:day:-1"),
+            InlineKeyboardButton("📅 امروز", callback_data="ec:today"),
+            InlineKeyboardButton("فردا ➡️", callback_data="ec:day:+1"),
+        ],
+        [
+            InlineKeyboardButton("🔴 فقط مهم", callback_data="ec:impact:high"),
+            InlineKeyboardButton("📋 همه خبرهای روز", callback_data="ec:impact:all"),
+        ],
+        [
+            InlineKeyboardButton("🤖 تحلیل هوشمند روز", callback_data="ec:ai"),
+            InlineKeyboardButton("🔔 اعلان‌ها", callback_data="ec:settings"),
+        ],
+        [
+            InlineKeyboardButton("💵 USD", callback_data="ec:cur:USD"),
+            InlineKeyboardButton("💶 EUR", callback_data="ec:cur:EUR"),
+            InlineKeyboardButton("💷 GBP", callback_data="ec:cur:GBP"),
+        ],
         [InlineKeyboardButton("🔄 بروزرسانی", callback_data="ec:refresh")],
     ]
-    # دکمه جدا برای هر خبر — همه در یک کیبورد (بدون صفحه بعد)
+    # دکمه هر خبر همان روز
     if events:
         tz_name = getattr(config, "TIMEZONE", "Asia/Tehran")
-        # سقف تلگرام حدود ۱۰۰ دکمه است؛ برای تقویم روزانه کافی است
         for e in list(events)[:40]:
             local = e["utc"].astimezone(_tz(tz_name))
             label = f"{IMPACT_ICON.get(e['impact'], '⚪')} {local.strftime('%H:%M')} {e['country']} {e['title_fa'][:28]}"
@@ -823,12 +847,21 @@ def get_tz_keyboard():
     ])
 
 
-def get_event_keyboard(event_id: str):
+def is_speech_event(e: dict[str, Any] | None) -> bool:
+    if not e:
+        return False
+    t = f"{e.get('title', '')} {e.get('title_fa', '')}".lower()
+    keys = ("speech", "speaks", "press conference", "سخنرانی", "کنفرانس خبری", "remarks", "testimony")
+    return any(k in t for k in keys)
+
+
+def get_event_keyboard(event_id: str, e: dict[str, Any] | None = None):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🤖 تحلیل این خبر با AI", callback_data=f"ec:analyze:{event_id}")],
-        [InlineKeyboardButton("↩️ بازگشت به تقویم", callback_data="ec:back")],
-    ])
+    rows = [[InlineKeyboardButton("🤖 تحلیل این خبر با AI", callback_data=f"ec:analyze:{event_id}")]]
+    if is_speech_event(e):
+        rows.append([InlineKeyboardButton("🗣 خلاصه سخنرانی", callback_data=f"ec:speech:{event_id}")])
+    rows.append([InlineKeyboardButton("↩️ بازگشت به تقویم", callback_data="ec:back")])
+    return InlineKeyboardMarkup(rows)
 
 
 async def get_calendar_for_user(
@@ -842,27 +875,29 @@ async def get_calendar_for_user(
     p = get_economic_calendar_preferences(user_id)
     tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
     # فیلتر اهمیت فقط از پارامتر UI می‌آید (دکمه «فقط مهم»)، نه از pref پیش‌فرض
-    days = 7 if mode == "week" else 2 if mode == "tomorrow" else 1
+    # همیشه فقط یک روز مشخص (نه کل هفته در یک پیام)
     events = await refresh_calendar()
-    # تقویم «امروز» باید کل روز را نشان بدهد (از ۰۰:۰۰)، نه فقط رویدادهای باقی‌مانده.
     tz = _tz(tz_name)
     now = datetime.now(tz)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     if date_str:
-        # explicit day selection: YYYY-MM-DD
         try:
             y, m, d = [int(x) for x in str(date_str).strip()[:10].split("-")]
             start = tz.localize(datetime(y, m, d)) if hasattr(tz, "localize") else datetime(y, m, d, tzinfo=tz)
-            end = start + timedelta(days=1)
         except Exception:
-            end = start + timedelta(days=1)
-    elif mode == "tomorrow":
-        start += timedelta(days=1)
+            pass
         end = start + timedelta(days=1)
-    elif mode == "date":
+    elif mode in {"tomorrow", "day+1"}:
+        start = start + timedelta(days=1)
+        end = start + timedelta(days=1)
+    elif mode in {"yesterday", "day-1"}:
+        start = start - timedelta(days=1)
+        end = start + timedelta(days=1)
+    elif mode == "week":
+        # سازگاری با دکمه قدیمی: همان امروز
         end = start + timedelta(days=1)
     else:
-        end = start + timedelta(days=days)
+        end = start + timedelta(days=1)
     out = []
     cur = (currency or "").upper().strip()
     # فقط ارزهای اصلی بازار؛ لیست شلوغ کشورها نمایش داده نمی‌شود.
@@ -876,7 +911,11 @@ async def get_calendar_for_user(
             continue
         if majors_only and country not in MAJOR_CURRENCIES:
             continue
-        if impact and impact != "all" and e["impact"].lower() != impact.lower():
+        imp = (e.get("impact") or "").lower()
+        if impact and impact != "all" and imp != impact.lower():
             continue
         out.append(e)
+    # مرتب‌سازی: اول اهمیت، بعد زمان
+    rank = {"high": 0, "medium": 1, "low": 2, "holiday": 3}
+    out.sort(key=lambda e: (rank.get((e.get("impact") or "").lower(), 9), e.get("utc") or datetime.min.replace(tzinfo=timezone.utc)))
     return out, tz_name
