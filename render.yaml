@@ -33,6 +33,12 @@ services:
         value: 12
       - key: HTTP_GET_CACHE_MAX
         value: 512
+      - key: HTTP_CIRCUIT_FAILURE_THRESHOLD
+        value: "3"
+      - key: HTTP_CIRCUIT_COOLDOWN
+        value: "30"
+      - key: ALERT_DEDUP_TTL
+        value: "900"
       - key: HTTP_429_MAX_DELAY
         value: 10
       - key: MARKET_HTTP_RETRIES
