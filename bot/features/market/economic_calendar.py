@@ -762,11 +762,7 @@ async def get_calendar_for_user(
     from bot.database import get_economic_calendar_preferences
     p = get_economic_calendar_preferences(user_id)
     tz_name = p["timezone"] or getattr(config, "TIMEZONE", "Asia/Tehran")
-    # prefer explicit impact preference only when caller asks for "all" and user locked a filter
-    if not impact or impact == "all":
-        pref_impact = (p.get("impact") or "all").lower()
-        if pref_impact in {"high", "medium", "low"}:
-            impact = pref_impact
+    # فیلتر اهمیت فقط از پارامتر UI می‌آید (دکمه «فقط مهم»)، نه از pref پیش‌فرض
     days = 7 if mode == "week" else 2 if mode == "tomorrow" else 1
     events = await refresh_calendar()
     # تقویم «امروز» باید کل روز را نشان بدهد (از ۰۰:۰۰)، نه فقط رویدادهای باقی‌مانده.
