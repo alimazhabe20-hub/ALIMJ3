@@ -19,8 +19,14 @@ _cache_t = {}
 _cache_locks = {}
 _HTTP_DATA_CACHE = {}
 _HTTP_DATA_CACHE_T = {}
-_HTTP_DATA_CACHE_TTL = 30
-_HTTP_DATA_CACHE_MAX = 128
+# TTL matrix — fast market data is intentionally short-lived; slower context is longer-lived.
+MARKET_CACHE_TTLS = {
+    "price": 5, "klines": 15, "indicators": 30, "derivatives": 20,
+    "fundamentals": 300, "macro": 300, "news": 120, "onchain": 180,
+    "calendar": 1800, "market_context": 60,
+}
+_HTTP_DATA_CACHE_TTL = 30  # legacy compatibility; klines now use the stricter 15s TTL
+_HTTP_DATA_CACHE_MAX = 256
 
 async def _cache_lock(key):
     lock = _cache_locks.get(key)
@@ -337,7 +343,7 @@ async def _fetch_klines_interval(pair: str, interval: str, limit: int) -> list:
     key = f"klines:{pair}:{interval}:{limit}"
     now = asyncio.get_running_loop().time()
     cached = _HTTP_DATA_CACHE.get(key)
-    if cached is not None and now - _HTTP_DATA_CACHE_T.get(key, 0) < _HTTP_DATA_CACHE_TTL:
+    if cached is not None and now - _HTTP_DATA_CACHE_T.get(key, 0) < MARKET_CACHE_TTLS["klines"]:
         return cached
     retries = max(0, int(__import__('os').getenv("MARKET_HTTP_RETRIES", "0")))
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -393,7 +399,7 @@ async def _fetch_coingecko_detail(coin_id: str) -> dict:
     key = f"cg-detail:{coin_id}"
     now = asyncio.get_running_loop().time()
     cached = _HTTP_DATA_CACHE.get(key)
-    if cached is not None and now - _HTTP_DATA_CACHE_T.get(key, 0) < 30:
+    if cached is not None and now - _HTTP_DATA_CACHE_T.get(key, 0) < MARKET_CACHE_TTLS["fundamentals"]:
         return cached
     retries = max(0, int(__import__('os').getenv("MARKET_HTTP_RETRIES", "0")))
     try:
@@ -420,12 +426,54 @@ async def _fetch_coingecko_detail(coin_id: str) -> dict:
 
 
 
+async def _fetch_onchain_context(base: str = "BTC") -> dict:
+    """Real network-level on-chain stats from Blockchair; never fabricate missing values."""
+    base = (base or "BTC").upper()
+    chain_map = {
+        "BTC": "bitcoin", "BCH": "bitcoin-cash", "LTC": "litecoin", "DOGE": "dogecoin",
+        "DASH": "dash", "ADA": "cardano", "XRP": "ripple", "XLM": "stellar",
+        "XMR": "monero", "XTZ": "tezos", "EOS": "eos", "ETH": "ethereum",
+    }
+    chain = chain_map.get(base)
+    if not chain:
+        return {"available": False, "reason": "no_supported_public_chain"}
+    key = f"onchain:{chain}"
+    now = asyncio.get_running_loop().time()
+    cached = _HTTP_DATA_CACHE.get(key)
+    if cached is not None and now - _HTTP_DATA_CACHE_T.get(key, 0) < MARKET_CACHE_TTLS["onchain"]:
+        return dict(cached)
+    retries = max(0, int(__import__('os').getenv("MARKET_HTTP_RETRIES", "0")))
+    try:
+        r = await request_with_retry("GET", f"https://api.blockchair.com/{chain}/stats", retries=retries, params={"limit": 1})
+        if getattr(r, "status_code", 0) != 200:
+            return {"available": False, "reason": f"http_{getattr(r, 'status_code', 0)}"}
+        payload = safe_json(r) or {}
+        d = payload.get("data") or {}
+        out = {"available": bool(d), "source": "Blockchair", "chain": chain}
+        for k in ("blocks", "transactions", "transactions_24h", "blocks_24h", "circulation",
+                  "circulation_approximate", "volume_24h", "volume_24h_approximate",
+                  "difficulty", "hashrate_24h", "nodes", "hodling_addresses", "best_block_height"):
+            if d.get(k) is not None:
+                out[k] = d.get(k)
+        # Convert the most useful raw values to normalized scores only when real data exists.
+        if d:
+            activity = float(d.get("transactions_24h") or 0)
+            out["activity_24h"] = activity
+            if base == "BTC" and d.get("hashrate_24h") is not None:
+                out["network_security"] = "فعال"
+        _HTTP_DATA_CACHE[key] = dict(out); _HTTP_DATA_CACHE_T[key] = now; _trim_http_data_cache()
+        return out
+    except Exception as e:
+        logger.warning(f"onchain context: {e}")
+        return {"available": False, "reason": "request_failed"}
+
+
 async def _fetch_market_context(base: str = "BTC") -> dict:
     """Market-wide context: dominance, total caps, macro proxies and lightweight news sentiment."""
     key = "market_context:v2"
     now = asyncio.get_running_loop().time()
     cached = _HTTP_DATA_CACHE.get(key)
-    if cached is not None and now - _HTTP_DATA_CACHE_T.get(key, 0) < 120:
+    if cached is not None and now - _HTTP_DATA_CACHE_T.get(key, 0) < MARKET_CACHE_TTLS["market_context"]:
         return dict(cached)
     out = {"sources": [], "news": {"label": "نامشخص", "score": 0, "count": 0}, "macro": {}}
     retries = max(0, int(__import__('os').getenv("MARKET_HTTP_RETRIES", "0")))
@@ -547,7 +595,15 @@ async def _fetch_market_context(base: str = "BTC") -> dict:
     except Exception:
         pass
 
-    out["data_quality"] = min(100, 35 + len(out["sources"])*13 + (15 if out.get("btc_dominance") is not None else 0) + (10 if out.get("macro") else 0))
+    # Real on-chain stats (BTC/ETH and other supported chains). Missing providers remain unavailable.
+    try:
+        out["onchain"] = await _fetch_onchain_context(base)
+        if out["onchain"].get("available"):
+            out["sources"].append("Blockchair On-chain")
+    except Exception:
+        out["onchain"] = {"available": False, "reason": "unavailable"}
+
+    out["data_quality"] = min(100, 35 + len(out["sources"])*10 + (15 if out.get("btc_dominance") is not None else 0) + (10 if out.get("macro") else 0) + (10 if (out.get("onchain") or {}).get("available") else 0))
     _HTTP_DATA_CACHE[key]=dict(out); _HTTP_DATA_CACHE_T[key]=now; _trim_http_data_cache()
     return out
 
@@ -557,7 +613,7 @@ async def _fetch_binance_futures(symbol: str) -> dict:
     key = f"futures:{sym}"
     now = asyncio.get_running_loop().time()
     cached = _HTTP_DATA_CACHE.get(key)
-    if cached is not None and now - _HTTP_DATA_CACHE_T.get(key, 0) < 20:
+    if cached is not None and now - _HTTP_DATA_CACHE_T.get(key, 0) < MARKET_CACHE_TTLS["derivatives"]:
         return dict(cached)
     retries = max(0, int(__import__('os').getenv("MARKET_HTTP_RETRIES", "0")))
     out = {}

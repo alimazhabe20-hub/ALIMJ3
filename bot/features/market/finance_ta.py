@@ -363,7 +363,13 @@ def _professional_score(ta, mtf=None, structure=None, binance=None, fg=None, cur
     dxy=((market.get("macro") or {}).get("DXY") or {}).get("change_pct");f["macro"]=max(20,min(80,50-float(dxy)*12)) if dxy is not None else 50
     dom=market.get("btc_dominance");f["market"]=max(25,min(75,50+(float(dom)-50)*1.2)) if dom is not None else 50
     f["trend"]=max(10,min(90,f["trend"]+float(mtf.get("bias") or 0)*20))
-    if market.get("onchain_score") is not None:f["onchain"]=float(market["onchain_score"])
+    onchain = market.get("onchain") or {}
+    if onchain.get("available"):
+        # Activity is used only as a real-data confidence/health signal; direction stays neutral
+        # unless a source supplies a directional metric.
+        activity = float(onchain.get("transactions_24h") or 0)
+        f["onchain"] = 55.0 if activity > 0 else 50.0
+        market["onchain_score"] = f["onchain"]
     weights={"trend":.18,"momentum":.12,"volume":.10,"structure":.14,"derivatives":.12,"sentiment":.08,"macro":.08,"market":.10,"onchain":.08}
     score=round(sum(f[k]*weights[k] for k in weights))
     vals=[trend,rsi,vr,fr,fg,mtf.get("scores"),market.get("btc_dominance"),market.get("macro"),market.get("news"),market.get("onchain_score")]

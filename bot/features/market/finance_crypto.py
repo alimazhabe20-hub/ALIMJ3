@@ -44,6 +44,8 @@ _pair_from_symbol = _f._pair_from_symbol
 _format_long_short = _f._format_long_short
 _fetch_fear_greed = _f._fetch_fear_greed
 _tgju_price = getattr(_f, "_tgju_price", None)
+_request_with_retry = _f.request_with_retry
+safe_json = _f.safe_json
 logger = _f.logger
 
 if _format_fear_greed is None:
@@ -51,69 +53,103 @@ if _format_fear_greed is None:
         return str(data or "")
 
 async def analyze_gold(timeframe: str = "4h") -> str:
-    """تحلیل طلا با PAXG/USDT به‌عنوان پروکسی بازار جهانی + طلای ۱۸ عیار TGJU."""
-    pair = "PAXGUSDT"
+    """تحلیل طلا با XAU/USD spot واقعی + طلای ۱۸ عیار TGJU؛ PAXG فقط fallback تکنیکال است."""
     tf = (timeframe or "4h").lower().strip()
     if tf not in ("1h", "4h", "1d"):
         tf = "4h"
     limit = 168 if tf == "1h" else 180 if tf == "4h" else 120
-    local_task = _tgju_price("geram18") if _tgju_price else _empty_async()
-    klines_task = _fetch_klines_interval(pair, tf, limit)
-    klines, local18 = await asyncio.gather(klines_task, local_task, return_exceptions=True)
-    if isinstance(klines, Exception):
-        klines = []
-    if isinstance(local18, Exception):
-        local18 = None
-    opens, highs, lows, closes, vols = [], [], [], [], []
-    for k in klines or []:
+
+    async def _xau_chart():
         try:
-            opens.append(float(k[1])); highs.append(float(k[2])); lows.append(float(k[3]))
-            closes.append(float(k[4])); vols.append(float(k[5]))
+            r = await _request_with_retry("GET", "https://xaus.com/api/v1/chart", retries=0,
+                                         params={"symbol": "xau", "range": "7d", "interval": "1h"})
+            if getattr(r, "status_code", 0) == 200:
+                d = safe_json(r) or {}
+                rows = d.get("data") or d.get("series") or d.get("candles") or []
+                out=[]
+                for x in rows:
+                    if isinstance(x, dict):
+                        ts=x.get("timestamp") or x.get("time") or x.get("t")
+                        o=x.get("open") or x.get("o"); h=x.get("high") or x.get("h")
+                        l=x.get("low") or x.get("l"); c=x.get("close") or x.get("c"); v=x.get("volume") or x.get("v") or 0
+                        if None not in (o,h,l,c): out.append([ts,o,h,l,c,v])
+                    elif isinstance(x, (list,tuple)) and len(x)>=5:
+                        out.append(list(x[:6]))
+                return out
         except Exception:
-            continue
+            pass
+        return []
+
+    async def _xau_spot():
+        try:
+            r = await _request_with_retry("GET", "https://xaus.com/api/v1/spot", retries=0,
+                                         params={"compact": "1"})
+            if getattr(r, "status_code", 0) == 200:
+                d=safe_json(r) or {}
+                return d.get("spot_usd_oz") or ((d.get("xau") or {}).get("price")), d.get("data_state") or {}
+        except Exception:
+            pass
+        return None, {}
+
+    chart_task = _xau_chart()
+    spot_task = _xau_spot()
+    local_task = _tgju_price("geram18") if _tgju_price else _empty_async()
+    chart, spot, local18 = await asyncio.gather(chart_task, spot_task, local_task, return_exceptions=True)
+    if isinstance(chart, Exception): chart=[]
+    if isinstance(spot, Exception): spot=(None,{})
+    if isinstance(local18, Exception): local18=None
+    direct_price, state = spot if isinstance(spot, tuple) else (None,{})
+
+    # If the direct XAU chart is unavailable, use PAXG only as a technical fallback.
+    pair = "XAU/USD"
+    if chart and len(chart) >= 30:
+        rows=chart[-limit:]
+        opens=[]; highs=[]; lows=[]; closes=[]; vols=[]
+        for k in rows:
+            try:
+                opens.append(float(k[1])); highs.append(float(k[2])); lows.append(float(k[3])); closes.append(float(k[4])); vols.append(float(k[5] if len(k)>5 else 0))
+            except Exception: continue
+        source_label="XAU/USD مستقیم"
+    else:
+        pair="PAXGUSDT"
+        klines=await _fetch_klines_interval(pair, tf, limit)
+        opens=[]; highs=[]; lows=[]; closes=[]; vols=[]
+        for k in klines or []:
+            try:
+                opens.append(float(k[1])); highs.append(float(k[2])); lows.append(float(k[3])); closes.append(float(k[4])); vols.append(float(k[5]))
+            except Exception: continue
+        source_label="PAXG/USDT fallback"
     if len(closes) < 30:
         return "❌ داده کافی برای تحلیل حرفه‌ای طلا در دسترس نیست."
-    cur = closes[-1]
-    ta = _compute_ta(closes, highs, lows, vols)
-    ta["atr"] = _atr(highs, lows, closes, 14)
-    support, resistance = _support_resistance(closes, highs, lows, cur)
-    struct = _market_structure(highs, lows, closes)
-    demand, supply = _demand_supply_zone(highs, lows, closes)
-    atr = ta.get("atr")
-    mtf = await _mtf_bundle(pair)
+    cur = float(direct_price) if direct_price is not None else closes[-1]
+    ta=_compute_ta(closes, highs, lows, vols); ta["atr"]=_atr(highs,lows,closes,14)
+    support,resistance=_support_resistance(closes,highs,lows,cur)
+    struct=_market_structure(highs,lows,closes); demand,supply=_demand_supply_zone(highs,lows,closes)
+    mtf=await _mtf_bundle(pair)
     def f(v):
-        if v is None: return "—"
-        return f"{float(v):,.2f}"
-    lines = [
-        "🥇 تحلیل حرفه‌ای طلا",
-        "────────────────────",
-        f"پروکسی بازار جهانی: PAXG/USDT | تایم‌فریم: {tf.upper()}",
-        f"💰 قیمت لحظه‌ای پروکسی: ${f(cur)}",
-        f"🇮🇷 طلای ۱۸ عیار: {f(local18)} تومان/گرم" if local18 else "🇮🇷 طلای ۱۸ عیار: —",
-        f"🧭 روند: {ta.get('trend','خنثی')}",
-        f"🛡 حمایت اصلی: ${f(support)}",
-        f"🧱 مقاومت اصلی: ${f(resistance)}",
-        f"📐 ATR(14): ${f(atr)}",
-        f"📊 RSI: {float(ta.get('rsi')):.1f}" if ta.get('rsi') is not None else "📊 RSI: —",
-        f"📈 ADX: {float(ta.get('adx')):.1f}" if ta.get('adx') is not None else "📈 ADX: —",
-    ]
+        return "—" if v is None else f"{float(v):,.2f}"
+    lines=["🥇 تحلیل حرفه‌ای طلا","────────────────────",
+           f"منبع جهانی: {source_label} | XAU/USD: ${f(cur)} | تایم‌فریم: {tf.upper()}",
+           f"🇮🇷 طلای ۱۸ عیار: {f(local18)} تومان/گرم" if local18 else "🇮🇷 طلای ۱۸ عیار: —",
+           f"🧭 روند: {ta.get('trend','خنثی')}",f"🛡 حمایت اصلی: ${f(support)}",f"🧱 مقاومت اصلی: ${f(resistance)}",
+           f"📐 ATR(14): ${f(ta.get('atr'))}",f"📊 RSI: {float(ta.get('rsi')):.1f}" if ta.get('rsi') is not None else "📊 RSI: —",
+           f"📈 ADX: {float(ta.get('adx')):.1f}" if ta.get('adx') is not None else "📈 ADX: —"]
+    if state: lines.append(f"🕒 وضعیت منبع: {state.get('status','نامشخص')} | {state.get('age_seconds','—')}s")
     if struct:
         lines.append(f"🏗 ساختار: {struct.get('structure','—')}")
         if struct.get('bos'): lines.append(f"🔀 BOS/CHOCH: {struct['bos']}")
     if demand: lines.append(f"🟢 ناحیه تقاضا: ${f(demand[0])} – ${f(demand[1])}")
     if supply: lines.append(f"🔴 ناحیه عرضه: ${f(supply[0])} – ${f(supply[1])}")
-    sc, di = mtf.get('scores') or {}, mtf.get('dirs') or {}
-    lines += ["", "⏱ همگرایی تایم‌فریم‌ها:"]
-    for k in ("15M", "1H", "4H", "1D", "1W"):
+    sc,di=mtf.get('scores') or {},mtf.get('dirs') or {}
+    lines += ["","⏱ همگرایی تایم‌فریم‌ها:"]
+    for k in ("15M","1H","4H","1D","1W"):
         lines.append(f"• {k}: {sc.get(k,'—')}/10 | {di.get(k,'—')}")
-    if resistance and cur > resistance:
-        lines.append("🟢 سناریو صعودی: تثبیت بالای مقاومت و تبدیل آن به حمایت، ادامه حرکت را معتبرتر می‌کند.")
-    elif support and cur < support:
-        lines.append("🔴 سناریو نزولی: بازپس‌گیری حمایت شرط مهم کاهش فشار فروش است.")
-    else:
-        lines.append("🟡 سناریوی فعلی: واکنش قیمت به حمایت/مقاومت تعیین‌کننده است؛ وسط محدوده، ورود کم‌کیفیت‌تر است.")
-    lines.append("⚠️ PAXG پروکسی نزدیک به طلاست و جایگزین مستقیم XAUUSD نیست؛ سطوح بر اساس داده موجود محاسبه شده‌اند.")
+    if resistance and cur > resistance: lines.append("🟢 سناریو صعودی: تثبیت بالای مقاومت و تبدیل آن به حمایت، اعتبار حرکت را بیشتر می‌کند.")
+    elif support and cur < support: lines.append("🔴 سناریو نزولی: بازپس‌گیری حمایت شرط مهم کاهش فشار فروش است.")
+    else: lines.append("🟡 سناریو: واکنش قیمت به حمایت/مقاومت تعیین‌کننده است؛ ورود وسط محدوده کم‌کیفیت‌تر است.")
+    if source_label != "XAU/USD مستقیم": lines.append("⚠️ منبع مستقیم XAU/USD در دسترس نبود؛ PAXG فقط به‌عنوان fallback تکنیکال استفاده شد.")
     return "\n".join(lines)
+
 
 async def _empty_async():
     return None
