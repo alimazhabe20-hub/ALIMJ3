@@ -433,74 +433,77 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
                 from bot.services.ai_service import ask_ai
                 prompt = (
-                    "تو تحلیل‌گر ارشد اقتصاد کلان و بازارهای مالی هستی. این رویداد را عمیق، کاربردی و کاملاً فارسی تحلیل کن. "
-                    "داده‌های عددی رویداد منبع حقیقت هستند؛ هیچ عدد، خبر، سخنرانی، تصمیم بانک مرکزی یا رویداد دیگری که در ورودی نیست اضافه نکن. "
-                    "اما برای تفسیر اثر بازار، از روابط استاندارد اقتصاد کلان استفاده کن؛ مثلاً داده تورمی قوی‌تر یا ضعیف‌تر از انتظار "
-                    "را از مسیر تورم، سیاست پولی، نرخ بهره، بازدهی اوراق و قدرت دلار به دارایی‌ها وصل کن. این روابط را به‌عنوان «اثر معمول/احتمالی» بیان کن، نه واقعیت قطعی. "
-                    "اول دقیقاً مشخص کن Actual نسبت به Forecast و Previous چه پیامی دارد و آیا سورپرایز مثبت، منفی یا خنثی است. "
-                    "اگر واحد یا جهت شاخص مهم است، توضیح بده که بالا/پایین رفتن همین شاخص معمولاً چه معنایی دارد؛ صرفاً از قانون ساده «عدد بالاتر = خوب» استفاده نکن. "
-                    "سپس زنجیره انتقال اثر را توضیح بده: داده → انتظار سیاست پولی → نرخ‌ها/بازدهی → DXY → نقدینگی و ریسک‌پذیری → دارایی‌ها. "
-                    "برای کریپتو، بیت‌کوین و اتریوم را جدا از آلت‌کوین‌ها در نظر بگیر و تفاوت واکنش احتمالی را توضیح بده. "
-                    "برای هر بخش اگر اثر مستقیم یا قابل اتکایی از این داده وجود ندارد، صریحاً بگو اثر مستقیم محدود است و از نتیجه‌گیری ساختگی خودداری کن. "
-                    "بین «آنچه داده واقعاً نشان می‌دهد» و «سناریوی بازار» تفاوت روشن بگذار. توصیه قطعی خرید/فروش، تارگت قیمتی یا پیش‌بینی عددی نساز. "
-                    "پاسخ را بدون Markdown و بدون جدول بنویس و حتماً با تیترهای کوتاه دقیقاً در همین ترتیب جدا کن: "
-                    "«معنی خبر»، «کریپتو»، «دلار/DXY»، «طلا»، «سهام»، «اوراق و بازدهی»، «سناریوی Actual در برابر Forecast»، «جمع‌بندی». "
-                    "در «جمع‌بندی» یک جهت‌گیری احتمالی کلی برای ریسک‌پذیری بازار بده (مثلاً ریسک‌پذیرتر، ریسک‌گریزتر یا خنثی) و دلیلش را کوتاه بگو. "
-                    "اگر Actual منتشر نشده است، تحلیل را بر اساس سناریوهای بالاتر/پایین‌تر/مطابق انتظار انجام بده و آن را به‌عنوان نتیجه واقعی معرفی نکن. "
-                    "پاسخ باید کامل و خودبسنده باشد و هیچ جمله یا تیتر ناتمام نماند. برای هر تیتر 2 تا 4 جمله کافی است؛ کل پاسخ را حدود 2200 تا 3200 کاراکتر نگه دار.\n\n"
-                    "داده رویداد هدف:\n" + ai_context([e], tz_name) +
-                    "\n\nکانتکست تقویم اقتصادی مرتبط:\n" + ai_context(events, tz_name, limit=60)
+                    "تو یک تحلیل‌گر حرفه‌ای اقتصاد کلان و بازارهای مالی هستی. "
+                    "پاسخ را کاملاً فارسی، کامل و بدون جمله ناتمام بنویس. "
+                    "فقط از داده همین رویداد استفاده کن و عدد یا خبر جعلی نساز. "
+                    "اگر Actual خالی است، صریحاً بگو هنوز منتشر نشده و سناریوها را جدا بنویس. "
+                    "فارکس را تحلیل نکن. "
+                    "حتماً این تیترها را به ترتیب و کامل بنویس:\n"
+                    "معنی خبر\nکریپتو\nدلار/DXY\nطلا\nسهام\nاوراق و بازدهی\nسناریوی Actual در برابر Forecast\nجمع‌بندی\n"
+                    "هر تیتر حداکثر ۲ جمله کوتاه. کل پاسخ حداکثر ۱۸۰۰ کاراکتر. "
+                    "بدون Markdown و بدون جدول.\n\n"
+                    "داده رویداد:\n" + ai_context([e], tz_name)
                 )
                 answer, _ = await ask_ai(user_id, prompt)
                 from html import escape
 
-                # Telegram text messages support up to 4096 chars. Never truncate an
-                # AI answer mid-sentence: split it at paragraph/line boundaries and
-                # keep the event message + first analysis part on the original message.
-                def _split_ai_text(txt: str, limit: int = 3800):
+                def _split_ai_text(txt: str, limit: int = 3500):
                     txt = (txt or "").strip()
                     if not txt:
                         return ["تحلیل در دسترس نیست."]
-                    parts, buf, size = [], [], 0
+                    # Prefer splitting on section headers / blank lines so nothing is cut mid-sentence.
+                    raw_parts = []
+                    buf = []
                     for line in txt.splitlines():
-                        piece = line.strip()
-                        add = len(piece) + (1 if buf else 0)
-                        if buf and size + add > limit:
-                            parts.append("\n".join(buf).strip())
-                            buf, size = [], 0
-                        if len(piece) > limit:
-                            if buf:
-                                parts.append("\n".join(buf).strip())
-                                buf, size = [], 0
-                            while len(piece) > limit:
-                                parts.append(piece[:limit])
-                                piece = piece[limit:]
-                            if piece:
-                                buf, size = [piece], len(piece)
-                        elif piece:
-                            buf.append(piece)
-                            size += add
+                        if line.strip() in {
+                            "معنی خبر", "کریپتو", "دلار/DXY", "طلا", "سهام",
+                            "اوراق و بازدهی", "سناریوی Actual در برابر Forecast", "جمع‌بندی",
+                        } and buf:
+                            raw_parts.append("\n".join(buf).strip())
+                            buf = [line]
+                        else:
+                            buf.append(line)
                     if buf:
-                        parts.append("\n".join(buf).strip())
-                    return parts or ["تحلیل در دسترس نیست."]
+                        raw_parts.append("\n".join(buf).strip())
+                    parts, cur, size = [], [], 0
+                    for block in raw_parts or [txt]:
+                        add = len(block) + (2 if cur else 0)
+                        if cur and size + add > limit:
+                            parts.append("\n\n".join(cur).strip())
+                            cur, size = [block], len(block)
+                        else:
+                            cur.append(block)
+                            size += add
+                    if cur:
+                        parts.append("\n\n".join(cur).strip())
+                    # hard safety if a single block is huge
+                    final = []
+                    for p in parts:
+                        while len(p) > limit:
+                            cut = p.rfind(" ", 0, limit)
+                            if cut < limit // 2:
+                                cut = limit
+                            final.append(p[:cut].strip())
+                            p = p[cut:].strip()
+                        if p:
+                            final.append(p)
+                    return final or ["تحلیل در دسترس نیست."]
 
-                chunks = _split_ai_text(answer, 3600)
-                first = escape(chunks[0], quote=False)
-                text = event_detail(e, tz_name) + (
-                    "\n\n🤖 <b>تحلیل هوشمند بازار</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"<blockquote>{first}</blockquote>"
+                # جزئیات خبر را دست‌نخورده نگه می‌داریم؛ تحلیل در پیام‌های جدا می‌آید تا قطع نشود.
+                await query.edit_message_text(
+                    event_detail(e, tz_name),
+                    parse_mode="HTML",
+                    reply_markup=get_event_keyboard(event_id),
                 )
-                # بخش اول روی همان پیام رویداد قرار می‌گیرد. ادامه تحلیل بدون حذف
-                # یا کوتاه‌کردن، در پیام‌های بعدی ارسال می‌شود.
-                await query.edit_message_text(text, parse_mode="HTML", reply_markup=get_event_keyboard(event_id))
-                for idx, chunk in enumerate(chunks[1:], start=2):
-                    continuation = (
-                        f"🤖 <b>ادامه تحلیل هوشمند بازار ({idx}/{len(chunks)})</b>\n"
+                chunks = _split_ai_text(answer, 3500)
+                for idx, chunk in enumerate(chunks, start=1):
+                    header = "🤖 <b>تحلیل هوشمند بازار</b>" if idx == 1 else f"🤖 <b>ادامه تحلیل ({idx}/{len(chunks)})</b>"
+                    msg = (
+                        f"{header}\n"
                         "━━━━━━━━━━━━━━━━━━━━\n"
                         f"<blockquote>{escape(chunk, quote=False)}</blockquote>"
                     )
-                    await query.message.reply_text(continuation, parse_mode="HTML")
+                    await query.message.reply_text(msg, parse_mode="HTML")
                 return
             if data == "ec:back":
                 _set_ec_view(context, mode="today", impact="all")
