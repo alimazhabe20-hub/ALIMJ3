@@ -351,6 +351,44 @@ def _mtf_convergence(mtf: dict) -> tuple:
     return ("تمایل صعودی با تضاد تایم‌فریم" if bull>bear else "تمایل نزولی با تضاد تایم‌فریم"),power
 
 
+def _advanced_levels(closes, highs, lows, current=None, max_levels=3):
+    """Clustered support/resistance zones with strength scoring."""
+    if not closes or not highs or not lows:
+        return {"supports": [], "resistances": []}
+    price = float(current if current is not None else closes[-1])
+    atr = _atr(highs, lows, closes, 14) or (price * 0.01)
+    tol = max(atr * 0.45, price * 0.0025)
+    pivots = []
+    for i in range(2, len(closes) - 2):
+        if highs[i] >= max(highs[i-2:i+3]):
+            pivots.append((float(highs[i]), "R", i))
+        if lows[i] <= min(lows[i-2:i+3]):
+            pivots.append((float(lows[i]), "S", i))
+    def cluster(kind):
+        vals = sorted([(p, i) for p, k, i in pivots if k == kind], key=lambda x: x[0])
+        groups = []
+        for p, idx in vals:
+            if not groups or abs(p - groups[-1]["center"]) > tol:
+                groups.append({"prices": [p], "idx": [idx], "center": p})
+            else:
+                groups[-1]["prices"].append(p); groups[-1]["idx"].append(idx)
+                groups[-1]["center"] = sum(groups[-1]["prices"]) / len(groups[-1]["prices"])
+        out = []
+        for g in groups:
+            center = g["center"]
+            touches = len(g["prices"])
+            recency = max(g["idx"] or [0]) / max(1, len(closes)-1)
+            strength = min(100, 35 + touches * 12 + recency * 25)
+            out.append({"price": center, "low": min(g["prices"]), "high": max(g["prices"]), "touches": touches, "strength": round(strength)})
+        return out
+    supports = [x for x in cluster("S") if x["price"] < price * 0.999]
+    resistances = [x for x in cluster("R") if x["price"] > price * 1.001]
+    supports.sort(key=lambda x: (abs(price-x["price"]), -x["strength"]))
+    resistances.sort(key=lambda x: (abs(price-x["price"]), -x["strength"]))
+    return {"supports": supports[:max_levels], "resistances": resistances[:max_levels], "atr": atr}
+
+
+
 def _professional_score(ta, mtf=None, structure=None, binance=None, fg=None, current=None, support=None, resistance=None, market=None):
     """0-100 multi-factor score; missing data lowers confidence instead of inventing facts."""
     ta=ta or {};mtf=mtf or {};structure=structure or {};binance=binance or {};market=market or {}
