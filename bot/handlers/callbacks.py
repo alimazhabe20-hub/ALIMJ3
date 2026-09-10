@@ -804,49 +804,54 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         kwargs["reply_markup"] = reply_markup
                     await target.reply_text(**kwargs)
 
-            async def _edit_photo_caption(png: bytes | None, caption: str):
-                """Update the visual message, then deliver the FULL text separately.
+            async def _edit_photo_caption(_png: bytes | None, caption: str):
+                """Edit the EXISTING visual message; never replace/re-send its photo.
 
-                This avoids Telegram's 1024-char photo-caption limit, which previously
-                caused long AI/analysis reports to end abruptly mid-section.
+                Telegram limits photo captions to 1024 characters. Therefore the
+                original photo is always kept in place and its caption is edited.
+                Only the overflow, when it genuinely does not fit, is sent as a
+                follow-up text message.
                 """
                 msg = query.message
                 full = (caption or "").strip()
                 caption_chunks = _split_telegram_text(full, limit=1000)
                 cap = caption_chunks[0] if caption_chunks else "داده کافی نیست."
-                if len(caption_chunks) > 1:
-                    cap += "\n\n📄 ادامه تحلیل در پیام‌های بعدی…"
                 try:
-                    if png:
-                        bio = BytesIO(png)
-                        bio.name = f"{symbol}.png"
-                        media = InputMediaPhoto(media=bio, caption=cap, parse_mode="HTML")
-                        await msg.edit_media(media=media, reply_markup=menu)
-                        for chunk in _split_telegram_text("\n".join(caption_chunks[1:]), limit=3900):
-                            await msg.reply_text(chunk, parse_mode="HTML")
-                        return
                     if msg.photo:
-                        await msg.edit_caption(caption=cap, parse_mode="HTML", reply_markup=menu)
+                        await msg.edit_caption(
+                            caption=cap,
+                            parse_mode="HTML",
+                            reply_markup=menu,
+                        )
                         if len(caption_chunks) > 1:
                             remainder = "\n".join(caption_chunks[1:])
                             await _send_full_text(remainder, reply_to=msg, reply_markup=menu)
-                    else:
-                        chunks = _split_telegram_text(full)
-                        first = chunks[0] if chunks else "داده کافی نیست."
-                        await msg.edit_text(first, parse_mode="HTML", reply_markup=menu)
-                        for chunk in chunks[1:]:
-                            await msg.reply_text(chunk, parse_mode="HTML")
-                except Exception:
+                        return
+
+                    # If the current message is text-only, edit it normally.
+                    chunks = _split_telegram_text(full)
+                    first = chunks[0] if chunks else "داده کافی نیست."
+                    await msg.edit_text(first, parse_mode="HTML", reply_markup=menu)
+                    for chunk in chunks[1:]:
+                        await msg.reply_text(chunk, parse_mode="HTML")
+                except Exception as e:
+                    logger.warning("analysis message edit failed: %s", e)
                     try:
-                        if png:
-                            bio = BytesIO(png)
-                            bio.name = f"{symbol}.png"
-                            await msg.reply_photo(photo=bio, caption=cap, parse_mode="HTML", reply_markup=menu)
-                            if len(caption_chunks) > 1:
-                                remainder = "\n".join(caption_chunks[1:])
-                                await _send_full_text(remainder, reply_to=msg, reply_markup=menu)
+                        # Last resort: edit the existing message as text. Do NOT
+                        # create a new photo, because the user's original image
+                        # must remain the visual anchor of the analysis.
+                        if msg.photo:
+                            await msg.edit_caption(
+                                caption=cap[:1024],
+                                parse_mode="HTML",
+                                reply_markup=menu,
+                            )
                         else:
-                            await _send_full_text(full, reply_to=msg, reply_markup=menu)
+                            await msg.edit_text(
+                                first[:4000],
+                                parse_mode="HTML",
+                                reply_markup=menu,
+                            )
                     except Exception as e2:
                         await _safe_answer(query, f"خطا: {e2}", show_alert=True)
 
@@ -901,8 +906,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 answer, _ = await ask_ai(query.from_user.id, prompt)
                 safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند طلا وجود ندارد.").strip())
                 out = "🧠 <b>تحلیل هوشمند XAU/USD</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
-                png, _cap = await get_gold_chart("1h")
-                await _edit_photo_caption(png, out)
+                # همان عکس اولیه را نگه می‌داریم؛ فقط کپشن همان پیام ویرایش می‌شود.
+                await _edit_photo_caption(None, out)
                 return
 
             if action == "ai":
@@ -921,8 +926,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 answer, _ = await ask_ai(query.from_user.id, prompt)
                 safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip())
                 out = "🧠 <b>تحلیل هوشمند حرفه‌ای</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
-                png, _cap = await get_crypto_chart(symbol, 7)
-                await _edit_photo_caption(png, out)
+                # عکس جدید نساز/نفرست؛ همان عکس اولیه تحلیل را نگه دار.
+                await _edit_photo_caption(None, out)
                 return
 
             if action == "pa":
