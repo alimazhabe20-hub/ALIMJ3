@@ -109,27 +109,26 @@ def get_religious_keyboard():
         resize_keyboard=True,
     )
 
+def get_gold_analysis_keyboard():
+    """کیبورد اختصاصی تحلیل طلا؛ از منوی تحلیل کریپتو مستقل است."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🟡 تحلیل 15 دقیقه‌ای طلا", callback_data="cx:15m:gold"),
+         InlineKeyboardButton("🟠 تحلیل 1 ساعته طلا", callback_data="cx:hr:gold")],
+        [InlineKeyboardButton("🔵 تحلیل 4 ساعته طلا", callback_data="cx:ref:gold"),
+         InlineKeyboardButton("🟣 تحلیل روزانه طلا", callback_data="cx:day:gold")],
+        [InlineKeyboardButton("🔄 بروزرسانی تحلیل طلا", callback_data="cx:ref:gold")],
+        [InlineKeyboardButton("🔙 بازگشت به بازار", callback_data="market_back")],
+    ])
+
 def get_market_keyboard():
-    """منوی بازار با دکمه‌های واضح و نشانه‌های رنگی برای تشخیص سریع بخش‌ها."""
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("💵 قیمت کامل بازار"), KeyboardButton("💎 ۲۰ ارز برتر کریپتو")],
             [KeyboardButton("🔄 تبدیل ارز / کریپتو"), KeyboardButton("📈 سود و ضرر")],
             [KeyboardButton("🗓 تقویم اقتصادی")],
-            [KeyboardButton("🔵 📊 نمودار و تحلیل ارز دیجیتال"), KeyboardButton("🟡 🥇 تحلیل طلا")],
+            [KeyboardButton("📊 نمودار و تحلیل ارز دیجیتال")],
+            [KeyboardButton("🥇 تحلیل طلا / XAUUSD")],
             [KeyboardButton("🔙 بازگشت به بیشتر")],
-        ],
-        resize_keyboard=True,
-    )
-
-
-def get_gold_analysis_keyboard():
-    """کیبورد اختصاصی تحلیل طلا؛ طلا بعد از گزارش کریپتو به‌صورت مستقل نمایش داده می‌شود."""
-    return ReplyKeyboardMarkup(
-        [
-            [KeyboardButton("🟢 🔄 بروزرسانی تحلیل طلا")],
-            [KeyboardButton("🔵 📊 نمودار و تحلیل ارز دیجیتال")],
-            [KeyboardButton("🔙 بازگشت به بازار")],
         ],
         resize_keyboard=True,
     )
