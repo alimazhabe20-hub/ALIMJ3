@@ -548,7 +548,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     # یک درخواست واحد با ساختار اجباری (کریپتو و طلا حتماً)
                     prompt = (
                         "نقش: تحلیل‌گر اقتصاد کلان.\n"
-                        "قوانین: فقط فارسی، عدد جعلی نساز، فارکس ننویس، جمله ناتمام نگذار.\n"
+                        "قوانین: فقط فارسی، عدد جعلی نساز، فارکس ننویس، جمله و تیتر ناتمام نگذار.\n"
                         "حتماً هر ۸ تیتر را به ترتیب و کامل بنویس (حتی اگر اثر ضعیف است بنویس «اثر مستقیم کم»):\n"
                         "معنی خبر:\n"
                         "کریپتو: (اثر احتمالی روی بیت‌کوین و آلت‌کوین)\n"
@@ -558,7 +558,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "اوراق و بازدهی:\n"
                         "سناریوی Actual در برابر Forecast:\n"
                         "جمع‌بندی:\n"
-                        "هر بخش ۱ تا ۲ جمله کوتاه. کل پاسخ زیر ۱۵۰۰ کاراکتر.\n\n"
+                        "هر بخش ۱ تا ۲ جمله کوتاه و کامل. پاسخ را تا آخر بنویس و قطع نکن.\n\n"
                         "داده:\n" + ctx
                     )
 
@@ -573,7 +573,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                     answer = (answer or "").strip() or "تحلیل در دسترس نیست."
                     # اگر مدل کریپتو/طلا را جا انداخت، یک بار دیگر فقط همان دو بخش را بخواه
-                    low = answer.lower()
                     if ("کریپتو" not in answer and "بیت" not in answer) or ("طلا" not in answer):
                         try:
                             fix_prompt = (
@@ -588,45 +587,87 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         except Exception:
                             pass
 
+                    from html import escape as _esc
+
+                    def _split_ai_text(txt: str, limit: int = 3200):
+                        txt = (txt or "").strip()
+                        if not txt:
+                            return ["تحلیل در دسترس نیست."]
+                        parts, buf, size = [], [], 0
+                        for line in txt.splitlines() or [txt]:
+                            piece = line.strip()
+                            add = len(piece) + (1 if buf else 0)
+                            if buf and size + add > limit:
+                                parts.append("\n".join(buf).strip())
+                                buf, size = [], 0
+                            if len(piece) > limit:
+                                if buf:
+                                    parts.append("\n".join(buf).strip())
+                                    buf, size = [], 0
+                                while len(piece) > limit:
+                                    parts.append(piece[:limit])
+                                    piece = piece[limit:]
+                                if piece:
+                                    buf, size = [piece], len(piece)
+                            elif piece:
+                                buf.append(piece)
+                                size += add
+                        if buf:
+                            parts.append("\n".join(buf).strip())
+                        return parts or ["تحلیل در دسترس نیست."]
+
                     detail = event_detail(e, tz_name)
-                    # همان پیام: جزئیات + تحلیل
-                    combined = (
+                    kb = get_event_keyboard(e.get("id") or event_id, e)
+                    chunks = _split_ai_text(answer, 3000)
+                    msg_target = query.message or update.effective_message
+
+                    # پیام اول: جزئیات رویداد + بخش اول تحلیل (بدون برش وسط جمله)
+                    head = (
                         detail
                         + "\n\n🤖 <b>تحلیل هوشمند بازار</b>\n"
                         + "━━━━━━━━━━━━━━━━━━━━\n"
-                        + "<blockquote>" + __import__("html").escape(answer, quote=False) + "</blockquote>"
                     )
-                    kb = get_event_keyboard(e.get("id") or event_id, e)
-                    if len(combined) <= 4000:
+                    first_body = _esc(chunks[0], quote=False)
+                    first_msg = head + f"<blockquote>{first_body}</blockquote>"
+                    if len(chunks) > 1:
+                        first_msg += f"\n\n<i>… ادامه در پیام بعدی (1/{len(chunks)})</i>"
+
+                    if len(first_msg) <= 4000:
                         try:
                             await query.edit_message_text(
-                                combined, parse_mode="HTML", reply_markup=kb
+                                first_msg, parse_mode="HTML", reply_markup=kb
                             )
                         except Exception:
-                            # fallback plain text در همان پیام
                             plain = (
                                 detail.replace("<b>", "").replace("</b>", "")
                                 .replace("<i>", "").replace("</i>", "")
                                 .replace("<code>", "").replace("</code>", "")
-                                + "\n\n🤖 تحلیل هوشمند بازار\n━━━━━━━━━━━━━━━━━━━━\n" + answer
+                                + "\n\n🤖 تحلیل هوشمند بازار\n━━━━━━━━━━━━━━━━━━━━\n"
+                                + chunks[0]
                             )
                             await query.edit_message_text(plain[:4000], reply_markup=kb)
                     else:
-                        # جزئیات در همان پیام، تحلیل هم در همان پیام تا حد ممکن
-                        head = detail + "\n\n🤖 <b>تحلیل هوشمند بازار</b>\n━━━━━━━━━━━━━━━━━━━━\n"
-                        room = 3900 - len(head)
-                        body = __import__("html").escape(answer, quote=False)
+                        # جزئیات را نگه دار؛ تحلیل را جدا بفرست
                         try:
                             await query.edit_message_text(
-                                head + "<blockquote>" + body[: max(500, room)] + "</blockquote>",
-                                parse_mode="HTML",
-                                reply_markup=kb,
+                                detail, parse_mode="HTML", reply_markup=kb
                             )
                         except Exception:
-                            await query.edit_message_text(
-                                (detail + "\n\n🤖 تحلیل:\n" + answer)[:4000],
-                                reply_markup=kb,
-                            )
+                            pass
+                        await msg_target.reply_text(
+                            "🤖 <b>تحلیل هوشمند بازار</b>\n━━━━━━━━━━━━━━━━━━━━\n"
+                            f"<blockquote>{first_body}</blockquote>",
+                            parse_mode="HTML",
+                        )
+
+                    # بقیه تحلیل کامل در پیام‌های بعدی — هیچ بخشی حذف نشود
+                    for idx, chunk in enumerate(chunks[1:], start=2):
+                        continuation = (
+                            f"🤖 <b>ادامه تحلیل ({idx}/{len(chunks)})</b>\n"
+                            "━━━━━━━━━━━━━━━━━━━━\n"
+                            f"<blockquote>{_esc(chunk, quote=False)}</blockquote>"
+                        )
+                        await msg_target.reply_text(continuation, parse_mode="HTML")
                     return
                 except Exception as err:
                     logger.error("ec analyze outer: %s", err, exc_info=True)
