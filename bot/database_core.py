@@ -154,10 +154,15 @@ def backup_db() -> None:
         # SQLite Backup API is safe with WAL and concurrent writes.
         src = sqlite3.connect(_current_db_path(), check_same_thread=False, timeout=30)
         try:
+            try:
+                src.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                pass
             for target in (backup_path, stable):
                 dst = sqlite3.connect(str(target), check_same_thread=False)
                 try:
                     src.backup(dst)
+                    dst.commit()
                 finally:
                     dst.close()
         finally:

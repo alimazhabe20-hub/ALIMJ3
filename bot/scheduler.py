@@ -281,10 +281,11 @@ def setup_scheduler(app):
         first=25,
         name="economic_calendar_alerts",
     )
+    # بکاپ پرتکرارتر: Render دیسک را بین دیپلوی‌ها پاک می‌کند
     job_queue.run_repeating(
         periodic_backup,
-        interval=12 * 3600,
-        first=300,
+        interval=2 * 3600,  # هر ۲ ساعت
+        first=120,          # ۲ دقیقه بعد از استارت
         name="db_backup_telegram",
     )
     # Opt-in proactive digest; disabled for users by default.
@@ -295,4 +296,4 @@ def setup_scheduler(app):
         time=time(hour=digest_hour, minute=0, second=0, tzinfo=tehran),
         name="proactive_daily_digest",
     )
-    logger.info("Scheduler ready: daily + azan + reminders + proactive digest + telegram backup every 12h")
+    logger.info("Scheduler ready: daily + azan + reminders + proactive digest + backup every 2h")

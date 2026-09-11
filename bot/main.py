@@ -126,15 +126,16 @@ async def post_init(app: Application):
 
 
 def _do_shutdown_backup(reason: str = "shutdown"):
+    """قبل از هر دیپلوی/خاموش شدن یک‌بار بکاپ هوشمند می‌گیرد."""
     if _shutdown_done["done"]:
         return
     _shutdown_done["done"] = True
-    logger.info(f"🛑 {reason} — backup to admin + GitHub...")
+    logger.info(f"🛑 pre-deploy backup starting — reason={reason}")
     try:
-        msg = shutdown_backup()
-        logger.info(f"shutdown_backup result: {msg}")
+        msg = shutdown_backup(reason=reason)
+        logger.info(f"pre-deploy backup result: {msg}")
     except Exception as e:
-        logger.error(f"shutdown_backup failed: {e}")
+        logger.error(f"pre-deploy backup failed: {e}", exc_info=True)
 
 
 async def post_shutdown(app: Application):

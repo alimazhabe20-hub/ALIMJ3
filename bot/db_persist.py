@@ -90,10 +90,45 @@ def github_enabled() -> bool:
 
 def _github_get_sha():
     url = f"{API}/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}?ref={GITHUB_BRANCH}"
-    r = requests.get(url, headers=_gh_headers(), timeout=REMOTE_BACKUP_TIMEOUT)
+    r = requests.get(url, headers=_gh_headers(), timeout=max(REMOTE_BACKUP_TIMEOUT, 20))
     if r.status_code == 200:
         return r.json().get("sha")
     return None
+
+
+def _sqlite_snapshot_to_temp() -> Path | None:
+    """اسنپ‌شات امن SQLite (شامل WAL) به فایل موقت — برای آپلود/ارسال."""
+    src_path = Path(DB_PATH)
+    if not src_path.exists():
+        return None
+    tmp = src_path.with_suffix(f".db.snap.{secrets.token_hex(4)}")
+    try:
+        src = sqlite3.connect(str(src_path), timeout=30, check_same_thread=False)
+        try:
+            # ادغام WAL قبل از بکاپ تا چیزی جا نماند
+            try:
+                src.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                pass
+            dst = sqlite3.connect(str(tmp), timeout=30, check_same_thread=False)
+            try:
+                src.backup(dst)
+                dst.commit()
+            finally:
+                dst.close()
+        finally:
+            src.close()
+        if tmp.stat().st_size < 100:
+            tmp.unlink(missing_ok=True)
+            return None
+        return tmp
+    except Exception as exc:
+        logger.error("sqlite snapshot failed: %s", exc)
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return None
 
 
 def github_upload_db():
@@ -105,8 +140,19 @@ def github_upload_db():
     users = _user_count(DB_PATH)
     if users == 0:
         return False, "DB خالی است — آپلود نشد"
+
+    snap = _sqlite_snapshot_to_temp()
+    if not snap:
+        return False, "اسنپ‌شات SQLite ساخته نشد"
     try:
-        content_b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+        raw = snap.read_bytes()
+        # GitHub Contents API حدود ۱ مگابایت محدودیت دارد
+        if len(raw) > 900_000:
+            return False, (
+                f"حجم DB ({len(raw)//1024}KB) برای GitHub Contents API بزرگ است. "
+                "دیسک پایدار Render یا بکاپ تلگرام را فعال کن."
+            )
+        content_b64 = base64.b64encode(raw).decode("ascii")
         sha = _github_get_sha()
         payload = {
             "message": f"auto backup — {users} users — {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC",
@@ -116,14 +162,71 @@ def github_upload_db():
         if sha:
             payload["sha"] = sha
         url = f"{API}/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}"
-        r = requests.put(url, headers=_gh_headers(), json=payload, timeout=REMOTE_BACKUP_TIMEOUT)
+        r = requests.put(
+            url,
+            headers=_gh_headers(),
+            json=payload,
+            timeout=max(REMOTE_BACKUP_TIMEOUT, 45),
+        )
         if r.status_code in (200, 201):
-            logger.info(f"GitHub backup OK ({users} users)")
+            logger.info(f"GitHub backup OK ({users} users, {len(raw)} bytes)")
             return True, f"GitHub بکاپ شد ({users} کاربر)"
+        # conflict sha → یکبار دیگر با sha تازه
+        if r.status_code == 409:
+            sha2 = _github_get_sha()
+            if sha2:
+                payload["sha"] = sha2
+                r2 = requests.put(
+                    url,
+                    headers=_gh_headers(),
+                    json=payload,
+                    timeout=max(REMOTE_BACKUP_TIMEOUT, 45),
+                )
+                if r2.status_code in (200, 201):
+                    logger.info(f"GitHub backup OK after sha retry ({users} users)")
+                    return True, f"GitHub بکاپ شد ({users} کاربر)"
+                return False, f"GitHub error {r2.status_code}: {r2.text[:200]}"
         return False, f"GitHub error {r.status_code}: {r.text[:200]}"
     except Exception as e:
         logger.error(f"github_upload: {e}")
         return False, str(e)
+    finally:
+        try:
+            snap.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def github_remote_user_count() -> int:
+    """تعداد کاربر در بکاپ GitHub بدون جایگزینی DB محلی."""
+    if not github_enabled():
+        return 0
+    try:
+        url = f"{API}/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}?ref={GITHUB_BRANCH}"
+        r = requests.get(url, headers=_gh_headers(), timeout=max(REMOTE_BACKUP_TIMEOUT, 20))
+        if r.status_code != 200:
+            return 0
+        data = r.json()
+        content_b64 = data.get("content", "")
+        if content_b64:
+            raw = base64.b64decode("".join(content_b64.split()))
+        else:
+            dl = data.get("download_url")
+            if not dl:
+                return 0
+            raw = requests.get(dl, timeout=max(REMOTE_BACKUP_TIMEOUT, 30)).content
+        tmp = Path(DB_PATH).with_suffix(f".db.ghprobe.{secrets.token_hex(3)}")
+        try:
+            tmp.write_bytes(raw)
+            valid, count_or_error = _validate_sqlite_backup(tmp)
+            if not valid:
+                return 0
+            return int(count_or_error)
+        finally:
+            tmp.unlink(missing_ok=True)
+    except Exception as exc:
+        logger.debug("github_remote_user_count failed: %s", exc)
+        return 0
 
 
 def github_download_db():
@@ -131,7 +234,7 @@ def github_download_db():
         return False, "GitHub تنظیم نشده"
     try:
         url = f"{API}/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}?ref={GITHUB_BRANCH}"
-        r = requests.get(url, headers=_gh_headers(), timeout=REMOTE_BACKUP_TIMEOUT)
+        r = requests.get(url, headers=_gh_headers(), timeout=max(REMOTE_BACKUP_TIMEOUT, 30))
         if r.status_code != 200:
             return False, f"دانلود نشد ({r.status_code})"
         data = r.json()
@@ -139,7 +242,7 @@ def github_download_db():
         if not content_b64:
             dl = data.get("download_url")
             if dl:
-                raw = requests.get(dl, timeout=REMOTE_BACKUP_TIMEOUT).content
+                raw = requests.get(dl, timeout=max(REMOTE_BACKUP_TIMEOUT, 45)).content
             else:
                 return False, "محتوای خالی"
         else:
@@ -147,7 +250,7 @@ def github_download_db():
         if len(raw) < 100:
             return False, "فایل دانلودشده خیلی کوچک است"
         Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-        tmp = Path(DB_PATH).with_suffix(".db.ghdownload")
+        tmp = Path(DB_PATH).with_suffix(f".db.ghdownload.{secrets.token_hex(3)}")
         tmp.write_bytes(raw)
         valid, count_or_error = _validate_sqlite_backup(tmp)
         if not valid:
@@ -157,13 +260,25 @@ def github_download_db():
         if n == 0:
             tmp.unlink(missing_ok=True)
             return False, "بکاپ گیت‌هاب کاربر ندارد"
-        if Path(DB_PATH).exists() and _user_count(DB_PATH) > 0:
+        local_n = _user_count(DB_PATH) if Path(DB_PATH).exists() else 0
+        if local_n > 0:
             try:
                 backup_db()
             except Exception as _exc:
                 logger.debug("%s: %s", __name__, _exc)
-        tmp.replace(DB_PATH)
-        logger.warning(f"Restored from GitHub — {n} users")
+        # جایگزینی امن با backup API تا connectionهای باز نشکنند
+        dest = Path(DB_PATH)
+        source = sqlite3.connect(str(tmp), timeout=30)
+        target = sqlite3.connect(str(dest), timeout=30)
+        try:
+            target.execute("PRAGMA busy_timeout=30000")
+            source.backup(target)
+            target.commit()
+        finally:
+            target.close()
+            source.close()
+            tmp.unlink(missing_ok=True)
+        logger.warning(f"Restored from GitHub — {n} users (local was {local_n})")
         return True, f"از GitHub بازگردانی شد — {n} کاربر"
     except Exception as e:
         logger.error(f"github_download: {e}")
@@ -171,14 +286,34 @@ def github_download_db():
 
 
 def auto_restore_if_empty() -> bool:
-    if _user_count(DB_PATH) > 0:
-        return False
+    """
+    ریستور خودکار:
+    - اگر DB محلی خالی است → از GitHub بگیر
+    - اگر GitHub کاربر بیشتری دارد → از GitHub بگیر (جلوگیری از فراموشی بعد از دیپلوی)
+    """
     if not github_enabled():
-        logger.info("DB empty and GitHub not configured — skip auto-restore")
+        logger.info("GitHub not configured — skip auto-restore")
         return False
-    ok, msg = github_download_db()
-    logger.info(f"auto_restore: {msg}")
-    return ok
+    local_n = _user_count(DB_PATH) if Path(DB_PATH).exists() else 0
+    if local_n == 0:
+        ok, msg = github_download_db()
+        logger.info(f"auto_restore (empty local): {msg}")
+        return ok
+    # محلی داده دارد؛ فقط اگر ریموت غنی‌تر است جایگزین کن
+    try:
+        remote_n = github_remote_user_count()
+    except Exception:
+        remote_n = 0
+    if remote_n > local_n:
+        logger.warning(
+            "GitHub backup has more users (%s > %s) — restoring to avoid data loss",
+            remote_n, local_n,
+        )
+        ok, msg = github_download_db()
+        logger.info(f"auto_restore (remote richer): {msg}")
+        return ok
+    logger.info("DB OK — local=%s remote=%s — no restore needed", local_n, remote_n)
+    return False
 
 
 def auto_backup():
@@ -210,8 +345,8 @@ def auto_backup():
     else:
         results.append("github:disabled")
 
-    # موفقیت کلی اگر حداقل یکی موفق باشد (محلی معمولاً کافی است)
-    overall = local_ok or gh_ok
+    # روی Render بدون دیسک پایدار، فقط GitHub/تلگرام نجات‌دهنده است
+    overall = gh_ok or local_ok
     return overall, " | ".join(results)
 
 
@@ -235,7 +370,10 @@ def send_db_to_admins_sync(caption: str = None):
         logger.debug("%s: %s", __name__, _exc)
 
     users = _user_count(DB_PATH)
-    size_kb = path.stat().st_size / 1024
+    # اسنپ‌شات امن به‌جای خواندن مستقیم فایل WAL
+    snap = _sqlite_snapshot_to_temp()
+    send_path = snap if snap else path
+    size_kb = send_path.stat().st_size / 1024
     cap = caption or (
         f"💾 بکاپ خودکار (قبل از دیپلوی / خاموش شدن)\n"
         f"👥 کاربران: {users}\n"
@@ -246,22 +384,29 @@ def send_db_to_admins_sync(caption: str = None):
     url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/sendDocument"
     ok = 0
     errors = []
-    for admin_id in config.ADMIN_IDS:
-        try:
-            with open(path, "rb") as f:
-                r = requests.post(
-                    url,
-                    data={"chat_id": admin_id, "caption": cap},
-                    files={"document": (f"bot_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db", f)},
-                    timeout=REMOTE_BACKUP_TIMEOUT,
-                )
-            if r.status_code == 200 and r.json().get("ok"):
-                ok += 1
-            else:
-                errors.append(f"{admin_id}:{r.status_code} {r.text[:120]}")
-        except Exception as e:
-            errors.append(f"{admin_id}:{e}")
-            logger.error(f"sync send backup to {admin_id}: {e}")
+    try:
+        for admin_id in config.ADMIN_IDS:
+            try:
+                with open(send_path, "rb") as f:
+                    r = requests.post(
+                        url,
+                        data={"chat_id": admin_id, "caption": cap},
+                        files={"document": (f"bot_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db", f)},
+                        timeout=max(REMOTE_BACKUP_TIMEOUT, 45),
+                    )
+                if r.status_code == 200 and r.json().get("ok"):
+                    ok += 1
+                else:
+                    errors.append(f"{admin_id}:{r.status_code} {r.text[:120]}")
+            except Exception as e:
+                errors.append(f"{admin_id}:{e}")
+                logger.error(f"sync send backup to {admin_id}: {e}")
+    finally:
+        if snap:
+            try:
+                snap.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     msg = f"ارسال sync به {ok}/{len(config.ADMIN_IDS)} ادمین"
     if errors:
@@ -269,31 +414,73 @@ def send_db_to_admins_sync(caption: str = None):
     return ok > 0, msg
 
 
-def shutdown_backup():
-    """بکاپ کامل موقع خاموش شدن: GitHub + تلگرام ادمین (همگام)"""
-    results = []
+def shutdown_backup(reason: str = "shutdown"):
+    """
+    بکاپ هوشمند قبل از دیپلوی / خاموش شدن:
+    1) اسنپ‌شات محلی
+    2) آپلود GitHub با چند بار تلاش
+    3) ارسال به ادمین تلگرام
+    Render قبل از دیپلوی جدید SIGTERM می‌فرستد؛ این تابع همان لحظه اجرا می‌شود.
+    """
+    users = _user_count(DB_PATH) if Path(DB_PATH).exists() else 0
+    results = [f"reason={reason}", f"users={users}"]
+    if users == 0:
+        logger.warning("shutdown_backup: DB has 0 users — nothing to persist")
+        results.append("skip:empty-db")
+        return " | ".join(results)
+
     try:
-        ok, msg = auto_backup()
-        results.append(f"GitHub: {msg}")
-        logger.info(f"shutdown_backup GitHub: {msg}")
+        backup_db()
+        results.append("local:OK")
     except Exception as e:
-        results.append(f"GitHub error: {e}")
-        logger.error(f"shutdown_backup GitHub: {e}")
+        results.append(f"local:FAIL({e})")
+        logger.error("shutdown local backup: %s", e)
+
+    if github_enabled():
+        gh_ok = False
+        last_msg = ""
+        for attempt in range(1, 4):
+            try:
+                ok, msg = github_upload_db()
+                last_msg = msg
+                if ok:
+                    gh_ok = True
+                    results.append(f"github:OK(try={attempt})")
+                    break
+                logger.warning("shutdown GitHub try %s failed: %s", attempt, msg)
+            except Exception as e:
+                last_msg = str(e)
+                logger.error("shutdown GitHub try %s error: %s", attempt, e)
+            try:
+                import time as _time
+                _time.sleep(min(1.5 * attempt, 4))
+            except Exception:
+                pass
+        if not gh_ok:
+            results.append(f"github:FAIL({last_msg})")
+    else:
+        results.append("github:disabled")
+
     try:
         ok, msg = send_db_to_admins_sync(
             caption=(
                 "💾 بکاپ خودکار قبل از دیپلوی / خاموش شدن\n"
-                f"👥 کاربران: {_user_count(DB_PATH)}\n"
+                f"📌 دلیل: {reason}\n"
+                f"👥 کاربران: {users}\n"
                 f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
-                "نسخه جدید در حال بالا آمدن است."
+                "نسخه جدید در حال بالا آمدن است.\n"
+                "برای ریستور دستی: همین فایل را با کپشن /restore بفرست."
             )
         )
-        results.append(f"Telegram: {msg}")
-        logger.info(f"shutdown_backup Telegram: {msg}")
+        results.append(f"telegram:{'OK' if ok else 'FAIL'}({msg})")
+        logger.info("shutdown_backup Telegram: %s", msg)
     except Exception as e:
-        results.append(f"Telegram error: {e}")
-        logger.error(f"shutdown_backup Telegram: {e}")
-    return " | ".join(results)
+        results.append(f"telegram:FAIL({e})")
+        logger.error("shutdown_backup Telegram: %s", e)
+
+    summary = " | ".join(results)
+    logger.info("shutdown_backup done: %s", summary)
+    return summary
 
 
 async def send_db_to_admins(bot, caption: str = None):
