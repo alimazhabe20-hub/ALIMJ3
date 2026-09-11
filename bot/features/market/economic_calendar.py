@@ -63,11 +63,25 @@ TITLE_MAP = {
     "PPI m/m": "شاخص قیمت تولیدکننده ماهانه",
     "Core PPI m/m": "شاخص قیمت تولیدکننده هسته ماهانه",
     "PPI y/y": "شاخص قیمت تولیدکننده سالانه",
+    "GDP m/m": "تولید ناخالص داخلی ماهانه",
     "GDP q/q": "رشد تولید ناخالص داخلی فصلی",
     "GDP y/y": "رشد تولید ناخالص داخلی سالانه",
+    "GDP 3m/3m": "تولید ناخالص داخلی سه‌ماهه",
     "Retail Sales m/m": "فروش خرده‌فروشی ماهانه",
     "Core Retail Sales m/m": "فروش خرده‌فروشی هسته ماهانه",
     "Industrial Production m/m": "تولید صنعتی ماهانه",
+    "Industrial Production y/y": "تولید صنعتی سالانه",
+    "Manufacturing Production m/m": "تولید کارخانه‌ای ماهانه",
+    "Manufacturing Production y/y": "تولید کارخانه‌ای سالانه",
+    "Construction Output m/m": "تولید ساختمانی ماهانه",
+    "Construction Output y/y": "تولید ساختمانی سالانه",
+    "Index of Services": "شاخص خدمات",
+    "Balance of Trade": "تراز تجاری",
+    "BusinessNZ Manufacturing Index": "شاخص تولید BusinessNZ",
+    "BSI Large Manufacturing": "شاخص BSI تولیدکنندگان بزرگ",
+    "BSI Manufacturing Index": "شاخص تولید BSI",
+    "BoJ Corporate Goods Price Index m/m": "شاخص قیمت کالاهای شرکتی بانک ژاپن ماهانه",
+    "BoJ Corporate Goods Price Index y/y": "شاخص قیمت کالاهای شرکتی بانک ژاپن سالانه",
     "Manufacturing PMI": "شاخص مدیران خرید تولیدی",
     "Services PMI": "شاخص مدیران خرید خدمات",
     "PMI": "شاخص مدیران خرید",
@@ -106,13 +120,49 @@ TITLE_MAP = {
     "Personal Income m/m": "درآمد شخصی ماهانه",
 }
 
+# عبارات چندکلمه‌ای اول تا خروجی‌هایی مثل «تراز of Trade» ساخته نشود.
 TERM_MAP = {
-    " m/m": " ماهانه", " y/y": " سالانه", " q/q": " فصلی",
-    "Core": "هسته", "Final": "نهایی", "Prelim": "اولیه", "Preliminary": "اولیه",
-    "Flash": "اولیه سریع", "Index": "شاخص", "Rate": "نرخ", "Statement": "بیانیه",
-    "Press Conference": "کنفرانس خبری", "Sales": "فروش", "Orders": "سفارش‌ها",
-    "Change": "تغییر", "Balance": "تراز", "Expectations": "انتظارات", "Forecast": "پیش‌بینی",
-    "Previous": "قبلی", "Actual": "واقعی", "Estimate": "برآورد", "Minutes": "صورت‌جلسه",
+    "Balance of Trade": "تراز تجاری",
+    "Index of Services": "شاخص خدمات",
+    "Industrial Production": "تولید صنعتی",
+    "Manufacturing Production": "تولید کارخانه‌ای",
+    "Construction Output": "تولید ساختمانی",
+    "Corporate Goods Price Index": "شاخص قیمت کالاهای شرکتی",
+    "BusinessNZ Manufacturing Index": "شاخص تولید BusinessNZ",
+    "BSI Large Manufacturing": "شاخص BSI تولیدکنندگان بزرگ",
+    "BSI Manufacturing Index": "شاخص تولید BSI",
+    "Current Account": "حساب جاری",
+    "Trade Balance": "تراز تجاری",
+    "Press Conference": "کنفرانس خبری",
+    "Interest Rate": "نرخ بهره",
+    " m/m": " ماهانه",
+    " y/y": " سالانه",
+    " q/q": " فصلی",
+    " 3m/3m": " سه‌ماهه",
+    "Core": "هسته",
+    "Final": "نهایی",
+    "Prelim": "اولیه",
+    "Preliminary": "اولیه",
+    "Flash": "اولیه سریع",
+    "Index": "شاخص",
+    "Rate": "نرخ",
+    "Statement": "بیانیه",
+    "Sales": "فروش",
+    "Orders": "سفارش‌ها",
+    "Change": "تغییر",
+    "Balance": "تراز",
+    "Expectations": "انتظارات",
+    "Forecast": "پیش‌بینی",
+    "Previous": "قبلی",
+    "Actual": "واقعی",
+    "Estimate": "برآورد",
+    "Minutes": "صورت‌جلسه",
+    "Manufacturing": "تولید",
+    "Production": "تولید",
+    "Construction": "ساختمان",
+    "Services": "خدمات",
+    "Output": "خروجی",
+    "GDP": "تولید ناخالص داخلی",
 }
 
 
@@ -151,19 +201,100 @@ def _parse_dt(value: str) -> datetime | None:
 
 def _fa_title(title: str) -> str:
     t = (title or "رویداد اقتصادی").strip()
+    if not t:
+        return "رویداد اقتصادی"
     if t in TITLE_MAP:
         return TITLE_MAP[t]
-    # چند عنوان رایج که با پسوندها/نام کشورها تغییر می‌کنند.
+    low = t.lower()
     for k, v in sorted(TITLE_MAP.items(), key=lambda x: len(x[0]), reverse=True):
-        if t.lower() == k.lower():
+        if low == k.lower():
+            return v
+    # تطبیق عنوان‌های شناخته‌شده داخل عنوان بلندتر
+    for k, v in sorted(TITLE_MAP.items(), key=lambda x: len(x[0]), reverse=True):
+        if len(k) >= 8 and k.lower() in low and len(k) >= max(8, int(len(t) * 0.55)):
             return v
     out = t
     for k, v in sorted(TERM_MAP.items(), key=lambda x: len(x[0]), reverse=True):
-        out = out.replace(k, v)
+        out = re.sub(re.escape(k), v, out, flags=re.I)
     out = re.sub(r"\bHigh\b", "زیاد", out, flags=re.I)
     out = re.sub(r"\bMedium\b", "متوسط", out, flags=re.I)
     out = re.sub(r"\bLow\b", "کم", out, flags=re.I)
-    # اگر هنوز کاملاً انگلیسی است، آن را برای AI قابل‌تشخیص نگه می‌داریم اما متن UI فارسی می‌ماند.
+    # پاکسازی باقیمانده‌های انگلیسی کوتاه مثل of / the
+    out = re.sub(r"\b(of|the|and|for|in|on|to)\b", " ", out, flags=re.I)
+    out = re.sub(r"\s{2,}", " ", out).strip(" -|/\\")
+    return out or t
+
+
+# مخفف‌های استاندارد انگلیسی برای نمایش فشرده در متن و دکمه‌ها
+_EN_ABBR = (
+    ("Non-Farm Employment Change", "NFP"),
+    ("Non-Farm Payrolls", "NFP"),
+    ("ADP Non-Farm Employment Change", "ADP NFP"),
+    ("Unemployment Rate", "Unemp Rate"),
+    ("Initial Jobless Claims", "Init Claims"),
+    ("Continuing Jobless Claims", "Cont Claims"),
+    ("Balance of Trade", "Trade Bal"),
+    ("Trade Balance", "Trade Bal"),
+    ("Current Account", "Curr Acct"),
+    ("Index of Services", "Svc Idx"),
+    ("Industrial Production", "Ind Prod"),
+    ("Manufacturing Production", "Mfg Prod"),
+    ("Construction Output", "Const Out"),
+    ("Corporate Goods Price Index", "CGPI"),
+    ("BusinessNZ Manufacturing Index", "BNZ Mfg"),
+    ("BSI Large Manufacturing", "BSI Large Mfg"),
+    ("BSI Manufacturing Index", "BSI Mfg"),
+    ("Consumer Price Index", "CPI"),
+    ("Producer Price Index", "PPI"),
+    ("Consumer Confidence", "Cons Conf"),
+    ("Consumer Sentiment", "Cons Sent"),
+    ("Retail Sales", "Retail"),
+    ("Interest Rate Decision", "Rate Dec"),
+    ("Monetary Policy Statement", "MPS"),
+    ("Press Conference", "Press Conf"),
+    ("Building Permits", "Bldg Perm"),
+    ("Housing Starts", "Hous Start"),
+    ("Durable Goods Orders", "Dur Goods"),
+    ("Factory Orders", "Fact Orders"),
+    ("Existing Home Sales", "Exist Home"),
+    ("New Home Sales", "New Home"),
+    ("Average Hourly Earnings", "AHE"),
+    ("Personal Spending", "Pers Spend"),
+    ("Personal Income", "Pers Inc"),
+    ("JOLTS Job Openings", "JOLTS"),
+    ("Manufacturing PMI", "Mfg PMI"),
+    ("Services PMI", "Svc PMI"),
+    ("ISM Manufacturing PMI", "ISM Mfg"),
+    ("ISM Services PMI", "ISM Svc"),
+)
+
+
+def _en_short(title: str, *, max_len: int = 36) -> str:
+    """نسخه انگلیسی مخفف برای متن اصلی و دکمه‌ها."""
+    t = (title or "").strip()
+    if not t:
+        return ""
+    out = t
+    for full, abbr in sorted(_EN_ABBR, key=lambda x: len(x[0]), reverse=True):
+        if full.lower() in out.lower():
+            out = re.sub(re.escape(full), abbr, out, flags=re.I)
+            break
+    # فشرده‌سازی پسوندهای زمانی و کلمات پرتکرار
+    out = re.sub(r"\bmonth(?:ly)?\b", "m/m", out, flags=re.I)
+    out = re.sub(r"\byear(?:ly)?\b", "y/y", out, flags=re.I)
+    out = re.sub(r"\bquarter(?:ly)?\b", "q/q", out, flags=re.I)
+    out = re.sub(r"\bManufacturing\b", "Mfg", out, flags=re.I)
+    out = re.sub(r"\bProduction\b", "Prod", out, flags=re.I)
+    out = re.sub(r"\bConstruction\b", "Const", out, flags=re.I)
+    out = re.sub(r"\bServices?\b", "Svc", out, flags=re.I)
+    out = re.sub(r"\bIndex\b", "Idx", out, flags=re.I)
+    out = re.sub(r"\bBalance\b", "Bal", out, flags=re.I)
+    out = re.sub(r"\bOutput\b", "Out", out, flags=re.I)
+    out = re.sub(r"\bPreliminary\b|\bPrelim\b", "Prel", out, flags=re.I)
+    out = re.sub(r"\bPrevious\b", "Prev", out, flags=re.I)
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    if len(out) > max_len:
+        out = out[: max_len - 1].rstrip() + "…"
     return out
 
 
@@ -509,19 +640,24 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
             errors.append(f"biquote:{exc}")
             logger.warning("economic calendar biquote primary failed: %s", exc)
 
-        # 2) SECONDARY: Forex Factory schedule (titles/impact) merged on top when biquote thin
+        # 2) SECONDARY: Forex Factory — only needed when primary is thin/empty.
+        # FF endpoints are often down (404/DNS); avoid noisy warnings when biquote is healthy.
         ff_rows: list[dict[str, Any]] = []
-        for i, url in enumerate(FF_URLS):
-            try:
-                rows = await asyncio.to_thread(_fetch_json, url)
-                ff_rows.extend(rows)
-            except Exception as exc:
-                errors.append(f"ff:{exc}")
+        need_ff = len(normalized) < 40
+        if need_ff:
+            for i, url in enumerate(FF_URLS):
                 try:
-                    rows = await asyncio.to_thread(_fetch_json, FF_FALLBACK_URLS[i])
+                    rows = await asyncio.to_thread(_fetch_json, url)
                     ff_rows.extend(rows)
-                except Exception as exc2:
-                    errors.append(f"ff-fallback:{exc2}")
+                except Exception as exc:
+                    errors.append(f"ff:{exc}")
+                    try:
+                        rows = await asyncio.to_thread(_fetch_json, FF_FALLBACK_URLS[i])
+                        ff_rows.extend(rows)
+                    except Exception as exc2:
+                        errors.append(f"ff-fallback:{exc2}")
+        else:
+            logger.debug("economic calendar skip FF secondary — biquote already has %s events", len(normalized))
 
         ff_norm = [e for e in (_normalize(x) for x in ff_rows) if e]
         if ff_norm:
@@ -534,11 +670,9 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
                 for fe in ff_norm:
                     if fe["id"] in by_id:
                         be = by_id[fe["id"]]
-                        # Prefer non-empty numeric fields from either side
                         for field in ("actual", "forecast", "previous"):
                             if not str(be.get(field) or "").strip() and str(fe.get(field) or "").strip():
                                 be[field] = fe[field]
-                        # FF impact labels are often cleaner
                         if fe.get("impact"):
                             be["impact"] = fe["impact"]
                         if fe.get("title") and len(fe["title"]) >= len(be.get("title") or ""):
@@ -563,8 +697,11 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
             _cache = normalized
             _cache_fetched_at = time.time()
             _cache_expires = time.monotonic() + CACHE_TTL
-            if errors:
+            # Only warn when primary was weak and secondary also failed.
+            if errors and need_ff:
                 logger.warning("economic calendar partial refresh: %s", " | ".join(errors[:4]))
+            elif errors:
+                logger.debug("economic calendar secondary noise: %s", " | ".join(errors[:2]))
             return list(_cache)
 
         if _cache:
@@ -714,7 +851,7 @@ def format_event(e: dict[str, Any], tz_name: str = "", *, show_date: bool = Fals
     local = _event_local(e, tz_name)
     icon = IMPACT_ICON.get(e["impact"], "⚪")
     title_fa = _esc(e["title_fa"])
-    title_en = _esc(e["title"])
+    title_en = _esc(_en_short(e.get("title") or "", max_len=40))
     now = datetime.now(_tz(tz_name))
     past = local < now
     past_mark = " ✅" if past else ""
@@ -832,7 +969,7 @@ def event_detail(e: dict[str, Any], tz_name: str = "") -> str:
     sur = f"\n📊 <b>نتیجه:</b> {_esc(surprise)}" if surprise else ""
     return (
         f"{IMPACT_ICON.get(e['impact'], '⚪')} <b>{_esc(e['title_fa'])}</b>\n"
-        f"<i>{_esc(e['title'])}</i>\n"
+        f"<i>{_esc(_en_short(e.get('title') or '', max_len=48))}</i>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"💱 <b>ارز:</b> {_esc(e['country'])} — {_esc(e['currency_name'])}\n"
         f"📅 <b>تاریخ:</b> <code>{local.strftime('%Y/%m/%d')}</code>\n"
@@ -894,7 +1031,9 @@ def get_calendar_keyboard(user_id: int, *, mode: str = "today", impact: str = "a
         tz_name = getattr(config, "TIMEZONE", "Asia/Tehran")
         for e in list(events)[:40]:
             local = e["utc"].astimezone(_tz(tz_name))
-            label = f"{IMPACT_ICON.get(e['impact'], '⚪')} {local.strftime('%H:%M')} {e['country']} {e['title_fa'][:28]}"
+            # دکمه با انگلیسی مخفف تا جمع‌وجور و خوانا باشد
+            short_en = _en_short(e.get("title") or e.get("title_fa") or "", max_len=22)
+            label = f"{IMPACT_ICON.get(e['impact'], '⚪')} {local.strftime('%H:%M')} {e['country']} {short_en}"
             rows.append([InlineKeyboardButton(label, callback_data=f"ec:event:{e['id']}")])
     rows.append([InlineKeyboardButton("🕐 تنظیم ساعت و فیلتر", callback_data="ec:settings")])
     return InlineKeyboardMarkup(rows)
