@@ -33,7 +33,10 @@ from bot.features.date.date_tools import (
     world_clock, custom_countdown,
 )
 from bot.features.date.converters import calculate_age, parse_birth_datetime
-from bot.features.religious import qibla_direction, daily_adhkar, daily_verse_hadith, religious_countdown, istikhara, istikhara_intro
+from bot.features.religious import (
+    qibla_direction, daily_adhkar, daily_verse_hadith,
+    religious_countdown, religious_month_view, istikhara, istikhara_intro,
+)
 from bot.features.market.finance import full_market_prices, convert_currency, profit_loss, parse_profit, get_top_crypto, convert_crypto, get_crypto_chart, get_gold_chart, analyze_crypto, analyze_gold, parse_currency_input, get_crypto_analysis_keyboard, trading_recommendation, derivatives_radar, risk_scenarios, position_size_guide, calc_position_size, entry_alert_text, register_price_alert
 from bot.features.tools.app_tools import calculator, generate_password, count_text, world_distance
 from bot.features.fun.fun_tools import hafez_fal, joke_of_day, fact_of_day, daily_challenge, random_joke, get_joke_categories
@@ -53,6 +56,7 @@ from bot.logger import logger
 from bot.services.ai_extras import (
     store_answer, get_last_answer, get_ai_result_keyboard, parse_chart_request, make_chart_image,
     web_search, parse_natural_reminder, enhance_ocr_prompt,
+    get_last_answer_id, build_continue_prompt,
 )
 from bot.services.visual_search import visual_search, looks_like_visual_search
 from bot.services.ai_service import (
@@ -214,37 +218,67 @@ def _split_telegram_text(text: str, limit: int = 3900) -> list[str]:
     return [p for p in parts if p]
 
 
-async def _reply_long_text(msg, text: str, *, prefix: str = "🤖 "):
-    """ارسال پاسخ کامل؛ اگر بلند بود ادامه در پیام‌های بعدی."""
+def _looks_truncated(answer: str) -> bool:
+    """تشخیص تقریبی پاسخ ناقص (برای پیشنهاد دکمه ادامه)."""
+    a = (answer or "").strip()
+    if len(a) < 1200:
+        return False
+    # اگر خیلی بلند است یا با علائم ناتمام تمام شده
+    if len(a) >= 2800:
+        return True
+    if a.endswith(("...", "…", ":", "—", "-", ",")):
+        return True
+    # جمله کامل تمام نشده
+    if not re.search(r"[.!?؟۔]\s*$", a) and len(a) > 1600:
+        return True
+    return False
+
+
+async def _reply_long_text(msg, text: str, *, prefix: str = "🤖 ", reply_markup=None):
+    """ارسال پاسخ کامل؛ اگر بلند بود ادامه در پیام‌های بعدی. کیبورد فقط روی آخرین تکه."""
     body = (text or "").strip()
     chunks = _split_telegram_text(prefix + body, 3900)
     if not chunks:
         chunks = [prefix + "پاسخی دریافت نشد."]
     first = None
+    total = len(chunks)
     for i, chunk in enumerate(chunks):
+        is_last = i == total - 1
+        kwargs = {}
+        if is_last and reply_markup is not None:
+            kwargs["reply_markup"] = reply_markup
         if i == 0:
-            first = await msg.reply_text(chunk)
+            first = await msg.reply_text(chunk, **kwargs)
         else:
-            await msg.reply_text(f"🤖 ادامه ({i+1}/{len(chunks)})\n" + chunk.lstrip("🤖 ").lstrip())
+            body_chunk = chunk
+            if body_chunk.startswith("🤖 "):
+                body_chunk = body_chunk[2:].lstrip()
+            await msg.reply_text(f"🤖 ادامه ({i+1}/{total})\n{body_chunk}", **kwargs)
     return first
 
-async def _send_ai_answer(update, user_id, answer: str, *, stream: bool = True):
-    """ارسال جواب AI کامل — در صورت نیاز چند پیام ادامه."""
+
+async def _send_ai_answer(update, user_id, answer: str, *, prompt: str = "", stream: bool = True):
+    """ارسال جواب AI کامل — در صورت نیاز چند پیام ادامه + دکمه ادامه پاسخ."""
     msg = update.message
-    store_answer(user_id, answer)
-    return await _reply_long_text(msg, answer, prefix="🤖 ")
+    aid = store_answer(user_id, answer, prompt=prompt)
+    offer = _looks_truncated(answer) or len(answer or "") >= 1800
+    kb = get_ai_result_keyboard(user_id, aid, offer_continue=offer)
+    # ترکیب با کیبورد مدل در صورت نیاز
+    if kb is None:
+        from bot.utils.helpers import get_ai_keyboard
+        kb = get_ai_keyboard(user_id)
+    return await _reply_long_text(msg, answer, prefix="🤖 ", reply_markup=kb)
+
+
 async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
-    """استریم AI و ویرایش تدریجی پیام؛ در شکست، پیام نیمه‌کاره حذف می‌شود."""
+    """استریم AI و ویرایش تدریجی پیام؛ در پایان همه تکه‌ها ارسال و دکمه ادامه اضافه می‌شود."""
     import asyncio
     from bot.services.ai_service import ask_ai_stream
     msg = update.message
-    # هنگام تولید پاسخ فقط وضعیت «در حال نوشتن» نمایش داده شود؛
-    # آیکن ربات تا آماده شدن پاسخ نهایی نمایش داده نمی‌شود.
     sent = await msg.reply_text("✍️ در حال نوشتن...")
     buf = []
     provider_label = ""
     try:
-        # Streaming واقعی با ویرایش کنترل‌شده برای جلوگیری از Flood Limit تلگرام.
         last_edit = time.monotonic()
         last_len = 0
         last_rendered = "✍️ در حال نوشتن..."
@@ -272,35 +306,54 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
         answer = "".join(buf).strip()
         if not answer:
             raise RuntimeError("جواب خالی")
-        store_answer(user_id, answer)
+        aid = store_answer(user_id, answer, prompt=text)
         chunks = _split_telegram_text("🤖 " + answer, 3900)
         if not chunks:
             chunks = ["🤖 پاسخی دریافت نشد."]
+        offer = _looks_truncated(answer) or len(answer) >= 1800
+        kb = get_ai_result_keyboard(user_id, aid, offer_continue=offer)
+        if kb is None:
+            from bot.utils.helpers import get_ai_keyboard
+            kb = get_ai_keyboard(user_id)
+
         # پیام اول: ویرایش همان «در حال نوشتن»
         first = chunks[0]
+        total = len(chunks)
+        edit_kwargs = {}
+        if total == 1 and kb is not None:
+            edit_kwargs["reply_markup"] = kb
         if first != last_rendered:
             try:
-                await sent.edit_text(first)
+                await sent.edit_text(first, **edit_kwargs)
                 last_rendered = first
             except Exception as edit_error:
                 logger.warning("AI final edit failed; retrying same message: %s", edit_error)
                 try:
                     await asyncio.sleep(0.15)
-                    await sent.edit_text(first)
+                    await sent.edit_text(first, **edit_kwargs)
                     last_rendered = first
                 except Exception as retry_error:
                     logger.warning("AI final edit retry failed: %s", retry_error)
                     try:
-                        await msg.reply_text(first)
+                        await msg.reply_text(first, **edit_kwargs)
                     except Exception:
                         pass
+        elif total == 1 and kb is not None:
+            try:
+                await sent.edit_text(first, reply_markup=kb)
+            except Exception:
+                pass
+
         # ادامه‌ها در پیام‌های بعدی تا هیچ بخشی حذف نشود
         for i, chunk in enumerate(chunks[1:], start=2):
             try:
                 body = chunk
                 if body.startswith("🤖 "):
                     body = body[2:].lstrip()
-                await msg.reply_text(f"🤖 ادامه ({i}/{len(chunks)})\n{body}")
+                kwargs = {}
+                if i == total and kb is not None:
+                    kwargs["reply_markup"] = kb
+                await msg.reply_text(f"🤖 ادامه ({i}/{total})\n{body}", **kwargs)
             except Exception as cont_err:
                 logger.warning("AI continuation send failed: %s", cont_err)
         return answer, provider_label or "ai"
@@ -483,7 +536,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 if context.user_data is not None:
                     context.user_data["last_ai_answer"] = answer
                 if not (context.user_data or {}).get("_ai_already_sent"):
-                    await _send_ai_answer(update, user_id, answer)
+                    await _send_ai_answer(update, user_id, answer, prompt=ask_text)
                 if context.user_data is not None:
                     context.user_data.pop("_ai_already_sent", None)
                 explicit = wants_voice_reply(text)
@@ -672,7 +725,10 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(await daily_verse_hadith(user_id), reply_markup=get_religious_keyboard()); return
     if text in ("🕌 مناسبت مذهبی", "مناسبت مذهبی"):
         track_usage(user_id, "rel_cd")
-        await update.message.reply_text(religious_countdown(), reply_markup=get_religious_keyboard()); return
+        # معماری مشابه تقویم: نمای کلی + مناسبت‌های نزدیک + نمای ماه جاری قمری
+        body = religious_countdown()
+        body += "\n\n" + "—" * 12 + "\n" + religious_month_view()
+        await update.message.reply_text(body, reply_markup=get_religious_keyboard()); return
     if text in ("🙏 استخاره", "استخاره"):
         track_usage(user_id, "istikhara")
         context.user_data["waiting_for"] = "istikhara_confirm"
