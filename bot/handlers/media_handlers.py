@@ -62,7 +62,7 @@ async def media_ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 result = await analyze_video(data, prompt, mime=mime)
                 await _send_ai_answer(update, user_id, result)
             except Exception as e:
-                await msg.reply_text(f"⚠️ ویدیو: {e}")
+                await msg.reply_text(f"⚠️ ویدیو: {e}", reply_markup=get_ai_keyboard(user_id))
             finally:
                 try:
                     await notice.delete()
@@ -110,6 +110,7 @@ async def media_ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 result = await visual_search(images[0][0], caption=prompt)
                 await msg.reply_text(
                     result[:4000],
+                    reply_markup=get_ai_keyboard(user_id),
                 )
             finally:
                 try:
@@ -133,6 +134,7 @@ async def media_ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await msg.reply_photo(
                     photo=bio,
                     caption="🎨 تصویر ویرایش شد",
+                    reply_markup=get_ai_keyboard(user_id),
                 )
             finally:
                 try:
@@ -175,6 +177,7 @@ async def media_ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 await msg.reply_text(
                     "🛒 جستجوی خرید بر اساس عکس\n\n" + shopping_result[:7000],
+                    reply_markup=get_ai_keyboard(user_id),
                 )
             finally:
                 try:
@@ -195,6 +198,7 @@ async def media_ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             await msg.reply_text(
                 f"🤖 {answer}",
+                reply_markup=get_ai_keyboard(user_id),
             )
         finally:
             try:
@@ -204,6 +208,7 @@ async def media_ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as exc:
         await msg.reply_text(
             "❌ تحلیل ممکن نشد.\n\n" + str(exc)[:2500],
+            reply_markup=get_ai_keyboard(user_id),
         )
 
 
@@ -295,7 +300,7 @@ async def voice_ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         combined_for_mode = ((caption or "") + " " + (transcript or "")).strip()
         mode_msg = _apply_voice_chat_flags(context, combined_for_mode)
         if mode_msg:
-            await msg.reply_text(mode_msg)
+            await msg.reply_text(mode_msg, reply_markup=get_ai_keyboard(user_id))
 
         # ورودی ویس به خودی خود مکالمه را به سمت ویس می‌برد
         if not context.user_data.get("ai_voice_chat"):
@@ -380,5 +385,6 @@ async def voice_ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as exc:
         await msg.reply_text(
             "❌ پردازش ویس ممکن نشد.\n\n" + str(exc)[:2500],
+            reply_markup=get_ai_keyboard(user_id),
         )
 
