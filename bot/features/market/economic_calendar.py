@@ -394,7 +394,8 @@ def _merge_ff_html_values(events: list[dict[str, Any]], rows: list[dict[str, Any
         lookup.setdefault(key, []).append(r)
     for e in events:
         local = e["utc"].astimezone(london)
-        date_key = local.strftime("%b %-d")
+        # %-d روی بعضی پلتفرم‌ها ValueError می‌دهد
+        date_key = local.strftime("%b ") + str(local.day)
         key = (date_key, e["country"], _title_key(e["title"]))
         candidates = lookup.get(key, [])
         if not candidates:
@@ -485,11 +486,17 @@ def _normalize_biquote_row(raw: dict[str, Any]) -> dict[str, Any] | None:
     }.get(cur, cur)
     title = str(raw.get("name") or "رویداد اقتصادی").strip()
     impact = _biquote_importance(str(raw.get("importance") or ""))
-    actual = _to_str_num(raw.get("actual"))
+    # actual ممکن است 0 معتبر باشد؛ فقط None/خالی را خالی بگذار
+    actual_raw = raw.get("actual")
+    if actual_raw is None or actual_raw == "":
+        actual = ""
+    else:
+        actual = _to_str_num(actual_raw)
     forecast = _to_str_num(raw.get("forecast"))
-    previous = _to_str_num(
-        raw.get("previous") if raw.get("previous") is not None else raw.get("revisedPrevious")
-    )
+    prev_raw = raw.get("previous")
+    if prev_raw is None:
+        prev_raw = raw.get("revisedPrevious")
+    previous = _to_str_num(prev_raw)
     eid = _stable_event_id(dt, cur, title)
     return {
         "id": eid,
@@ -506,13 +513,47 @@ def _normalize_biquote_row(raw: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _load_biquote_events(days_back: int = 1, days_forward: int = 8) -> list[dict[str, Any]]:
+def _load_biquote_events(days_back: int = 2, days_forward: int = 8) -> list[dict[str, Any]]:
+    """بارگذاری چندپنجره‌ای — API حدود ۲۰۰ ردیف برمی‌گرداند و اگر بازه خیلی پهن باشد
+    رویدادهای آینده حذف می‌شوند. پس گذشته و آینده جداگانه گرفته می‌شوند.
+    """
     today = datetime.now(timezone.utc).date()
-    day_from = (today - timedelta(days=max(0, days_back))).isoformat()
-    day_to = (today + timedelta(days=max(1, days_forward))).isoformat()
-    rows = _fetch_biquote(day_from, day_to)
-    out = [e for e in (_normalize_biquote_row(r) for r in rows) if e]
-    dedup = {e["id"]: e for e in out}
+    windows = [
+        # دیروز تا امروز (برای Actualهای منتشرشده)
+        (today - timedelta(days=max(0, days_back)), today),
+        # امروز تا چند روز جلو
+        (today, today + timedelta(days=max(1, min(3, days_forward)))),
+    ]
+    if days_forward > 3:
+        windows.append(
+            (today + timedelta(days=3), today + timedelta(days=max(4, days_forward)))
+        )
+    # پنجره اختصاصی فردا برای اطمینان
+    windows.append((today + timedelta(days=1), today + timedelta(days=2)))
+
+    dedup: dict[str, dict[str, Any]] = {}
+    for start, end in windows:
+        if end < start:
+            continue
+        try:
+            rows = _fetch_biquote(start.isoformat(), end.isoformat())
+        except Exception as exc:
+            logger.debug("biquote window %s..%s failed: %s", start, end, exc)
+            continue
+        for r in rows:
+            e = _normalize_biquote_row(r)
+            if not e:
+                continue
+            prev = dedup.get(e["id"])
+            if not prev:
+                dedup[e["id"]] = e
+                continue
+            # اگر نسخه جدید Actual/Forecast دارد، جایگزین کن
+            for field in ("actual", "forecast", "previous"):
+                if str(e.get(field) or "").strip() and not str(prev.get(field) or "").strip():
+                    prev[field] = e[field]
+            if e.get("impact") and (not prev.get("impact") or prev.get("impact") == "Low"):
+                prev["impact"] = e["impact"]
     return sorted(dedup.values(), key=lambda e: e["utc"])[:_MAX_EVENTS]
 
 def _merge_biquote_values(events: list[dict[str, Any]], rows: list[dict[str, Any]]) -> None:
@@ -633,7 +674,7 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
 
         # 1) PRIMARY: biquote — includes published Actual values
         try:
-            normalized = await asyncio.to_thread(_load_biquote_events, 1, 8)
+            normalized = await asyncio.to_thread(_load_biquote_events, 2, 8)
             if normalized:
                 logger.info("economic calendar primary source=biquote events=%s", len(normalized))
         except Exception as exc:
@@ -885,6 +926,8 @@ def calendar_text(events, *, title: str, tz_name: str = "", limit: int = 25, sho
     ]
     if not events:
         lines.append("📭 <i>رویداد اقتصادی‌ای با این فیلتر پیدا نشد.</i>")
+        lines.append("")
+        lines.append("💡 <i>اگر روز آینده را می‌بینید، ممکن است منبع هنوز برنامه آن روز را منتشر نکرده باشد. «بروزرسانی» را بزنید یا روز دیگری را انتخاب کنید.</i>")
         return "\n".join(lines)
 
     # نمایش روزانه: ترتیب زمانی (نه فقط مهم‌ها اول)
@@ -1005,11 +1048,18 @@ def ai_context(events, tz_name: str = "", limit: int = 40) -> str:
 
 def get_calendar_keyboard(user_id: int, *, mode: str = "today", impact: str = "all", events=None, currency: str = "", selected_date=None, page: int = 0, **_kwargs):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    # روز نسبی نسبت به selected_date (نه همیشه نسبت به «امروز سیستم»)
+    base = (selected_date or "").strip()[:10]
+    if not base:
+        try:
+            base = datetime.now(_tz(getattr(config, "TIMEZONE", "Asia/Tehran"))).strftime("%Y-%m-%d")
+        except Exception:
+            base = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     rows = [
         [
-            InlineKeyboardButton("⬅️ دیروز", callback_data="ec:day:-1"),
+            InlineKeyboardButton("⬅️ دیروز", callback_data=f"ec:nav:{base}:-1"),
             InlineKeyboardButton("📅 امروز", callback_data="ec:today"),
-            InlineKeyboardButton("فردا ➡️", callback_data="ec:day:+1"),
+            InlineKeyboardButton("فردا ➡️", callback_data=f"ec:nav:{base}:+1"),
         ],
         [
             InlineKeyboardButton("🔴 فقط مهم", callback_data="ec:impact:high"),
@@ -1190,13 +1240,24 @@ async def get_calendar_for_user(
     events = await refresh_calendar()
     tz = _tz(tz_name)
     now = datetime.now(tz)
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # شروع روز محلی به‌صورت امن (DST-aware)
+    try:
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    except Exception:
+        start = datetime(now.year, now.month, now.day, tzinfo=tz)
     if date_str:
         try:
             y, m, d = [int(x) for x in str(date_str).strip()[:10].split("-")]
-            start = tz.localize(datetime(y, m, d)) if hasattr(tz, "localize") else datetime(y, m, d, tzinfo=tz)
+            naive = datetime(y, m, d)
+            if hasattr(tz, "localize"):
+                try:
+                    start = tz.localize(naive, is_dst=None)
+                except Exception:
+                    start = tz.localize(naive, is_dst=False)
+            else:
+                start = naive.replace(tzinfo=tz)
         except Exception:
-            pass
+            logger.debug("invalid date_str=%s for calendar filter", date_str)
         end = start + timedelta(days=1)
     elif mode in {"tomorrow", "day+1"}:
         start = start + timedelta(days=1)
@@ -1205,7 +1266,6 @@ async def get_calendar_for_user(
         start = start - timedelta(days=1)
         end = start + timedelta(days=1)
     elif mode == "week":
-        # سازگاری با دکمه قدیمی: همان امروز
         end = start + timedelta(days=1)
     else:
         end = start + timedelta(days=1)
