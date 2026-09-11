@@ -133,33 +133,69 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=get_calendar_keyboard(user_id, mode="today", impact="all", events=events),
                 )
                 return
-            if data.startswith("ec:day:"):
-                # ec:day:-1 یا ec:day:+1
-                try:
-                    offset = int(data.split(":", 2)[2])
-                except Exception:
-                    offset = 0
+            if data.startswith("ec:day:") or data.startswith("ec:nav:"):
+                # ec:day:-1 | ec:day:+1 | ec:nav:2026-09-11:+1
                 from bot.features.market.economic_calendar import _tz as _ec_tz
                 p = get_economic_calendar_preferences(user_id)
                 tz_name = p.get("timezone") or getattr(config, "TIMEZONE", "Asia/Tehran")
-                day = (datetime.now(_ec_tz(tz_name)) + timedelta(days=offset)).strftime("%Y-%m-%d")
-                mode = "yesterday" if offset < 0 else ("tomorrow" if offset > 0 else "today")
-                _set_ec_view(context, mode=mode, impact="all", date_str=day)
-                events, tz_name = await _ec_load(user_id, mode, "all", date_str=day)
-                await _safe_answer(query)
-                if offset == 0:
+                tz = _ec_tz(tz_name)
+                today_local = datetime.now(tz).date()
+                base_date = today_local
+                offset = 0
+                try:
+                    if data.startswith("ec:nav:"):
+                        # ec:nav:YYYY-MM-DD:+1
+                        parts = data.split(":")
+                        # ["ec", "nav", "YYYY-MM-DD", "+1"] but date has no colon
+                        # callback is ec:nav:2026-09-11:+1 → split → ec, nav, 2026-09-11, +1
+                        base_s = parts[2]
+                        offset = int(parts[3])
+                        y, m, d = [int(x) for x in base_s[:10].split("-")]
+                        base_date = datetime(y, m, d).date()
+                    else:
+                        offset = int(data.split(":", 2)[2])
+                        base_date = today_local
+                except Exception:
+                    offset = 0
+                    base_date = today_local
+                target = base_date + timedelta(days=offset)
+                day = target.strftime("%Y-%m-%d")
+                if target == today_local:
+                    mode = "today"
                     title = "تقویم اقتصادی امروز"
-                elif offset == -1:
+                elif target == today_local - timedelta(days=1):
+                    mode = "yesterday"
                     title = "تقویم اقتصادی دیروز"
-                elif offset == 1:
+                elif target == today_local + timedelta(days=1):
+                    mode = "tomorrow"
                     title = "تقویم اقتصادی فردا"
                 else:
+                    mode = "today"
                     title = f"تقویم اقتصادی {day}"
-                await query.edit_message_text(
-                    calendar_text(events, title=title, tz_name=tz_name),
-                    parse_mode="HTML",
-                    reply_markup=get_calendar_keyboard(user_id, mode=mode, impact="all", events=events, selected_date=day),
-                )
+                _set_ec_view(context, mode=mode, impact="all", date_str=day)
+                # برای روزهای آینده، یکبار force refresh تا پنجره آینده پر شود
+                if target > today_local:
+                    try:
+                        await refresh_calendar(force=True)
+                    except Exception:
+                        pass
+                events, tz_name = await _ec_load(user_id, mode, "all", date_str=day)
+                await _safe_answer(query)
+                text = calendar_text(events, title=title, tz_name=tz_name)
+                if not events and target > today_local:
+                    text += "\n\nℹ️ <i>منبع داده هنوز رویدادی برای این روز ثبت نکرده یا هنوز منتشر نشده است.</i>"
+                try:
+                    await query.edit_message_text(
+                        text,
+                        parse_mode="HTML",
+                        reply_markup=get_calendar_keyboard(
+                            user_id, mode=mode, impact="all", events=events, selected_date=day
+                        ),
+                    )
+                except Exception as edit_err:
+                    # Message is not modified و خطاهای مشابه نباید کل handler را بشکنند
+                    if "not modified" not in str(edit_err).lower():
+                        raise
                 return
             if data == "ec:impact:high":
                 _set_ec_view(context, mode="today", impact="high")
@@ -699,6 +735,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
         except Exception as e:
+            err_s = str(e).lower()
+            # خطای بی‌ضرر تلگرام وقتی محتوا عوض نشده
+            if "not modified" in err_s:
+                try:
+                    await _safe_answer(query)
+                except Exception:
+                    pass
+                return
             logger.error("economic calendar callback failed: %s", e, exc_info=True)
             try:
                 await _safe_answer(query, "⚠️ خطا در تقویم اقتصادی.", show_alert=True)
@@ -708,7 +752,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 msg = str(e).strip() or "خطای ناشناخته"
                 if len(msg) > 300:
                     msg = msg[:300] + "…"
-                # پیام قابل‌فهم برای کاربر بدون لو دادن مسیر داخلی
                 if "AI" in msg or "api" in msg.lower() or "key" in msg.lower() or "مدل" in msg or "سرویس" in msg:
                     user_msg = f"⚠️ تحلیل هوشمند الان در دسترس نیست.\n{msg}"
                 else:
