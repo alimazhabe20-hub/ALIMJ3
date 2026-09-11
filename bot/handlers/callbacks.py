@@ -545,20 +545,35 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             f"actual={e.get('actual')} forecast={e.get('forecast')} previous={e.get('previous')}"
                         )
 
-                    # یک درخواست واحد با ساختار اجباری (کریپتو و طلا حتماً)
+                    required_sections = [
+                        "معنی خبر",
+                        "کریپتو",
+                        "دلار",
+                        "طلا",
+                        "سهام",
+                        "اوراق",
+                        "سناریو",
+                        "جمع‌بندی",
+                    ]
                     prompt = (
                         "نقش: تحلیل‌گر اقتصاد کلان.\n"
-                        "قوانین: فقط فارسی، عدد جعلی نساز، فارکس ننویس، جمله و تیتر ناتمام نگذار.\n"
-                        "حتماً هر ۸ تیتر را به ترتیب و کامل بنویس (حتی اگر اثر ضعیف است بنویس «اثر مستقیم کم»):\n"
+                        "قوانین سخت:\n"
+                        "- فقط فارسی\n"
+                        "- عدد جعلی نساز\n"
+                        "- فارکس جفت‌ارز ننویس\n"
+                        "- هیچ جمله یا تیتر ناتمام نگذار\n"
+                        "- هر تیتر فقط یک‌بار بیاید\n"
+                        "دقیقاً این ۸ بخش را به ترتیب و کامل بنویس "
+                        "(اگر اثر ضعیف است بنویس «اثر مستقیم کم»):\n"
                         "معنی خبر:\n"
-                        "کریپتو: (اثر احتمالی روی بیت‌کوین و آلت‌کوین)\n"
+                        "کریپتو:\n"
                         "دلار/DXY:\n"
                         "طلا:\n"
                         "سهام:\n"
                         "اوراق و بازدهی:\n"
                         "سناریوی Actual در برابر Forecast:\n"
                         "جمع‌بندی:\n"
-                        "هر بخش ۱ تا ۲ جمله کوتاه و کامل. پاسخ را تا آخر بنویس و قطع نکن.\n\n"
+                        "هر بخش حداکثر ۲ جمله کامل. حتماً تا جمع‌بندی را تمام کن.\n\n"
                         "داده:\n" + ctx
                     )
 
@@ -572,20 +587,47 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         return
 
                     answer = (answer or "").strip() or "تحلیل در دسترس نیست."
-                    # اگر مدل کریپتو/طلا را جا انداخت، یک بار دیگر فقط همان دو بخش را بخواه
-                    if ("کریپتو" not in answer and "بیت" not in answer) or ("طلا" not in answer):
+
+                    def _missing_sections(text: str) -> list[str]:
+                        return [s for s in required_sections if s not in text]
+
+                    def _looks_cut(text: str) -> bool:
+                        t = (text or "").strip()
+                        if not t:
+                            return True
+                        if t[-1] not in ".!?…۔؟":
+                            # جمله ناتمام یا قطع‌شده
+                            if len(t) > 80:
+                                return True
+                        if t.endswith(("،", ":", "؛", "-", "—", "…")):
+                            return True
+                        return False
+
+                    # اگر بخش‌ها ناقص است یا متن قطع شده، یکبار ادامه بخواه
+                    missing = _missing_sections(answer)
+                    if missing or _looks_cut(answer):
                         try:
-                            fix_prompt = (
-                                "فقط دو بخش زیر را فارسی و کامل بنویس:\n"
-                                "کریپتو: اثر این خبر روی بیت‌کوین و آلت‌کوین\n"
-                                "طلا: اثر این خبر روی قیمت طلا\n"
-                                "هر کدام ۲ جمله.\n\nداده:\n" + ctx
+                            cont_prompt = (
+                                "پاسخ قبلی ناقص بود. از همان‌جا که قطع شده ادامه بده و "
+                                "هیچ بخشی از متن قبلی را تکرار نکن.\n"
+                                "اگر تیتری جا مانده فقط همان‌ها را کامل بنویس:\n"
+                                + "\n".join(f"- {m}" for m in (missing or required_sections[-4:]))
+                                + "\nحتماً با «جمع‌بندی:» تمام کن.\n\n"
+                                "--- انتهای پاسخ قبلی ---\n"
+                                + answer[-700:]
+                                + "\n--- ادامه از اینجا ---\n\n"
+                                "داده:\n" + ctx
                             )
-                            fix, _ = await ask_ai(user_id, fix_prompt)
-                            if fix:
-                                answer = answer.rstrip() + "\n\n" + fix.strip()
-                        except Exception:
-                            pass
+                            cont, _ = await ask_ai(user_id, cont_prompt)
+                            cont = (cont or "").strip()
+                            if cont:
+                                # جلوگیری از تکرار تیتر اول اگر مدل دوباره از اول شروع کرد
+                                if cont.startswith(answer[:40]):
+                                    answer = cont
+                                else:
+                                    answer = (answer.rstrip() + "\n" + cont).strip()
+                        except Exception as cont_err:
+                            logger.debug("ec analyze continue failed: %s", cont_err)
 
                     from html import escape as _esc
 
