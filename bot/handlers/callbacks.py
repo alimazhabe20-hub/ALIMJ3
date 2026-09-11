@@ -768,7 +768,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not cont_prompt:
             await query.message.reply_text(
                 "⚠️ پاسخ قبلی برای ادامه پیدا نشد. لطفاً سؤال را دوباره بپرسید.",
-                reply_markup=get_ai_keyboard(user_id),
             )
             return
         try:
@@ -805,9 +804,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             chunks = _split("🤖 " + answer) or ["🤖 پاسخی دریافت نشد."]
             offer = len(answer) >= 1800
+            # فقط دکمه ادامه؛ بدون کلید مدل/حافظه
             kb = get_ai_result_keyboard(user_id, aid, offer_continue=offer)
-            if kb is None:
-                kb = get_ai_keyboard(user_id)
             try:
                 await notice.delete()
             except Exception:
@@ -830,7 +828,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await query.message.reply_text(
                     f"⚠️ ادامه پاسخ ممکن نشد: {str(e)[:200]}",
-                    reply_markup=get_ai_keyboard(user_id),
                 )
             except Exception:
                 pass

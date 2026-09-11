@@ -132,7 +132,6 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
         }.get(repeat_type, "یک‌بار")
         await update.message.reply_text(
             f"⏰ یادآوری ثبت شد.\nموضوع: {body}\nزمان: {when.strftime('%Y-%m-%d %H:%M')}\nتکرار: {repeat_label}",
-            reply_markup=get_ai_keyboard(user_id),
         )
         return True
     # Weather/Crypto عمدی اینجا مستقیم پاسخ داده نمی‌شوند.
@@ -145,7 +144,7 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
         notice = await update.message.reply_text("🔎 در حال جستجو...")
         try:
             result = await web_search(q)
-            await update.message.reply_text(result, reply_markup=get_ai_keyboard(user_id))
+            await update.message.reply_text(result)
         finally:
             try:
                 await notice.delete()
@@ -161,9 +160,7 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
             png = make_chart_image(title, labels, values, ctype)
             bio = BytesIO(png)
             bio.name = "chart.png"
-            await update.message.reply_photo(
-                photo=bio, caption=title, reply_markup=get_ai_keyboard(user_id)
-            )
+            await update.message.reply_photo(photo=bio, caption=title)
         except Exception as e:
             await update.message.reply_text(f"⚠️ نمودار: {e}")
         finally:
@@ -179,14 +176,9 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
             audio = await generate_music(text)
             bio = BytesIO(audio)
             bio.name = "music.mp3"
-            await update.message.reply_audio(
-                audio=bio, caption="🎵", reply_markup=get_ai_keyboard(user_id)
-            )
+            await update.message.reply_audio(audio=bio, caption="🎵")
         except Exception as e:
-            await update.message.reply_text(
-                f"⚠️ ساخت موسیقی در دسترس نبود:\n{e}",
-                reply_markup=get_ai_keyboard(user_id),
-            )
+            await update.message.reply_text(f"⚠️ ساخت موسیقی در دسترس نبود:\n{e}")
         finally:
             try:
                 await notice.delete()
@@ -258,15 +250,12 @@ async def _reply_long_text(msg, text: str, *, prefix: str = "🤖 ", reply_marku
 
 
 async def _send_ai_answer(update, user_id, answer: str, *, prompt: str = "", stream: bool = True):
-    """ارسال جواب AI کامل — در صورت نیاز چند پیام ادامه + دکمه ادامه پاسخ."""
+    """ارسال جواب AI کامل — بدون کلید مدل/حافظه؛ فقط در صورت نیاز دکمه ادامه."""
     msg = update.message
     aid = store_answer(user_id, answer, prompt=prompt)
     offer = _looks_truncated(answer) or len(answer or "") >= 1800
+    # فقط دکمه ادامه؛ کلیدهای «انتخاب مدل» و «حذف حافظه» زیر پاسخ نباشد.
     kb = get_ai_result_keyboard(user_id, aid, offer_continue=offer)
-    # ترکیب با کیبورد مدل در صورت نیاز
-    if kb is None:
-        from bot.utils.helpers import get_ai_keyboard
-        kb = get_ai_keyboard(user_id)
     return await _reply_long_text(msg, answer, prefix="🤖 ", reply_markup=kb)
 
 
@@ -311,10 +300,8 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
         if not chunks:
             chunks = ["🤖 پاسخی دریافت نشد."]
         offer = _looks_truncated(answer) or len(answer) >= 1800
+        # فقط دکمه ادامه؛ بدون کلید مدل/حافظه زیر پاسخ
         kb = get_ai_result_keyboard(user_id, aid, offer_continue=offer)
-        if kb is None:
-            from bot.utils.helpers import get_ai_keyboard
-            kb = get_ai_keyboard(user_id)
 
         # پیام اول: ویرایش همان «در حال نوشتن»
         first = chunks[0]
@@ -455,9 +442,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.message.reply_text(
                     "🤖 دستیار هوشمند روز زیبا\n\n"
                     "پیامت را بفرست تا به هوش مصنوعی ارسال شود.\n"
-                    f"سرویس‌های فعال: {provider_text}\n\n"
-                    "مدل دلخواهت را از «🎛 انتخاب مدل» انتخاب کن.",
-                    reply_markup=get_ai_keyboard(user_id),
+                    f"سرویس‌های فعال: {provider_text}"
                 )
                 return
         else:
@@ -483,7 +468,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                         await update.message.reply_photo(
                             photo=bio,
                             caption="🎨 تصویر ساخته شد",
-                            reply_markup=get_ai_keyboard(user_id),
                         )
                     finally:
                         try:
@@ -493,9 +477,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                     return
                 mode_msg = _apply_voice_chat_flags(context, text)
                 if mode_msg:
-                    await update.message.reply_text(
-                        mode_msg, reply_markup=get_ai_keyboard(user_id)
-                    )
+                    await update.message.reply_text(mode_msg)
                 # «ویس بفرست» بدون سؤال → آخرین جواب را با ویس بفرست
                 if is_voice_only_request(text):
                     last = get_last_answer(user_id) or (context.user_data or {}).get("last_ai_answer")
@@ -620,9 +602,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(
             "🤖 دستیار هوشمند روز زیبا\n\n"
             "پیامت را بفرست تا به هوش مصنوعی ارسال شود.\n"
-            f"سرویس‌های فعال: {provider_text}\n\n"
-            "مدل دلخواهت را از «🎛 انتخاب مدل» انتخاب کن.",
-            reply_markup=get_ai_keyboard(user_id),
+            f"سرویس‌های فعال: {provider_text}"
         )
         return
     if text == "📅 تاریخ و سن":
@@ -880,7 +860,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(
             "🤖 دستیار هوشمند فعال است.\n\n"
             "اسم محصول، قیمت، لینک خرید یا عکس محصول را بفرست؛ خودم جستجوی فروشگاهی و مقایسه را انجام می‌دهم.",
-            reply_markup=get_ai_keyboard(user_id),
         )
         return
     if text in ("💵 قیمت کامل بازار", "قیمت کامل بازار"):
