@@ -442,7 +442,8 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.message.reply_text(
                     "🤖 دستیار هوشمند روز زیبا\n\n"
                     "پیامت را بفرست تا به هوش مصنوعی ارسال شود.\n"
-                    f"سرویس‌های فعال: {provider_text}"
+                    f"سرویس‌های فعال: {provider_text}",
+                    reply_markup=get_ai_keyboard(user_id),
                 )
                 return
         else:
@@ -602,7 +603,8 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(
             "🤖 دستیار هوشمند روز زیبا\n\n"
             "پیامت را بفرست تا به هوش مصنوعی ارسال شود.\n"
-            f"سرویس‌های فعال: {provider_text}"
+            f"سرویس‌های فعال: {provider_text}",
+            reply_markup=get_ai_keyboard(user_id),
         )
         return
     if text == "📅 تاریخ و سن":
