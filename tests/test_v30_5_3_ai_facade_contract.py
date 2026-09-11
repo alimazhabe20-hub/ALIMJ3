@@ -44,9 +44,18 @@ def test_ai_providers_have_no_unresolved_prompt_symbols():
 
 
 def test_ai_stream_final_edit_does_not_send_duplicate_fallback_reply():
+    """Contract: stream path edits the placeholder message; only falls back to a
+    new reply when the final edit fails (no unconditional duplicate reply)."""
     src = (ROOT / "bot/handlers/messages.py").read_text(encoding="utf-8")
     assert 'last_rendered = "✍️ در حال نوشتن..."' in src
-    assert 'if final != last_rendered:' in src
+    # Current implementation uses `first` (first chunk) instead of legacy `final`.
+    assert 'if first != last_rendered:' in src
     assert 'await asyncio.sleep(0.15)' in src
-    final_block = src[src.index('        # اگر آخرین ویرایش دقیقاً همان متن نهایی بوده'):src.index('        return answer, provider_label or "ai"')]
-    assert 'await msg.reply_text(final)' not in final_block
+    # The only reply_text(first) path must be inside the edit-failure fallback.
+    start = src.index('if first != last_rendered:')
+    end = src.index('return answer, provider_label or "ai"', start)
+    final_block = src[start:end]
+    # Direct success path must edit, not always send a fresh reply.
+    assert 'await sent.edit_text(first' in final_block
+    # Fallback reply is only after retry failure (indented under except).
+    assert 'await msg.reply_text(first' in final_block

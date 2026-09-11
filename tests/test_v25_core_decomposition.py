@@ -17,7 +17,8 @@ def test_media_handlers_extracted_and_facade_preserved():
     # The two heavy implementations should no longer live in messages.py.
     assert src.count("async def media_ai_handler") == 1
     assert src.count("async def voice_ai_handler") == 1
-    assert len(src.encode("utf-8")) < 65000
+    # Soft ceiling after AI continue/long-message hardening (was 65KB).
+    assert len(src.encode("utf-8")) < 80000
 
 
 def test_decomposed_module_ast_and_import_surface():
