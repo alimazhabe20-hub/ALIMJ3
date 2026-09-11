@@ -178,7 +178,6 @@ async def _gemini(
         tools_enabled = bool(use_tools)
         try:
             working_contents = list(contents)
-            accumulated_text: list[str] = []
 
             for _round in range(max_tool_rounds + 2 if tools_enabled else 1):
                 payload = {
@@ -304,28 +303,9 @@ async def _gemini(
                         f"Gemini پاسخ متنی خالی داد: {str(data)[:700]}"
                     )
 
-                finish_reason = str(
-                    (candidates[0] or {}).get("finishReason")
-                    or (candidates[0] or {}).get("finish_reason")
-                    or ""
-                ).upper()
-                if finish_reason in {"MAX_TOKENS", "MAX_OUTPUT_TOKENS"} and _round < (max_tool_rounds + 1):
-                    accumulated_text.append(text)
-                    working_contents.append({"role": "model", "parts": parts})
-                    working_contents.append({
-                        "role": "user",
-                        "parts": [{"text": (
-                            "پاسخ قبلی به سقف خروجی رسید. دقیقاً از همان نقطه ادامه بده. "
-                            "هیچ بخش قبلی را تکرار نکن، مقدمه نده و فقط ادامه طبیعی پاسخ را بنویس. "
-                            "اگر جمله، کد، فهرست یا جدول نیمه‌تمام است، ابتدا همان را کامل کن."
-                        )}],
-                    })
-                    continue
-
-                full_text = "\n".join(x for x in accumulated_text + [text] if x).strip()
-                full_text = _normalize_final_text(full_text)
+                text = _normalize_final_text(text)
                 _advance_rr("gemini")
-                return full_text
+                return text
 
         except RuntimeError as exc:
             errors.append(str(exc)[:300])
@@ -373,12 +353,11 @@ async def _openai_compatible(
             headers.update(extra_headers)
 
         messages = _legacy_ai_context()[1](user_id, prompt)
-        accumulated_text: list[str] = []
         # حداکثر ۲ دور tool calling تا گیر نکند
         max_tool_rounds = 2 if tools_enabled else 0
         # یک دور اضافه فقط برای synthesis نهایی است؛ اگر مدل در آخرین دور
         # دوباره tool-call بدهد، نتیجه ابزار را می‌گیرد و پاسخ طبیعی را می‌سازد.
-        total_rounds = max_tool_rounds + 5 if tools_enabled else 4
+        total_rounds = max_tool_rounds + 2 if tools_enabled else 1
 
         try:
             for _round in range(total_rounds):
@@ -484,24 +463,8 @@ async def _openai_compatible(
                     continue
 
                 text = _extract_openai(data)
-                finish_reason = str((choices[0] or {}).get("finish_reason") or "").lower()
-                # اگر مدل به سقف خروجی رسیده، بخش فعلی را نگه می‌داریم و ادامه را
-                # می‌گیریم؛ در پایان همه بخش‌ها را به یک پاسخ کامل تبدیل می‌کنیم.
-                if finish_reason in {"length", "max_tokens", "max_output_tokens"} and text and _round < total_rounds - 1:
-                    accumulated_text.append(text.strip())
-                    messages.append({"role": "assistant", "content": text})
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "پاسخ قبلی به سقف خروجی رسید. دقیقاً از همان نقطه ادامه بده. "
-                            "هیچ بخش قبلی را تکرار نکن، مقدمه نده و فقط ادامهٔ طبیعی پاسخ را بنویس. "
-                            "اگر یک بخش/جدول/فهرست نیمه‌تمام است ابتدا همان را کامل کن."
-                        ),
-                    })
-                    continue
-                full_text = "\n".join(x for x in accumulated_text + [text] if x).strip()
                 _advance_rr(provider)
-                return full_text
+                return text
 
             # اگر از حلقه key بیرون آمدیم بدون return
             continue
