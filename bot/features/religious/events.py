@@ -1,42 +1,31 @@
-"""مناسبت‌های مذهبی و قمری — نمایش مناسبت‌های ثبت‌شده در ۳۰ روز آینده."""
+"""
+مناسبت‌های مذهبی و قمری — معماری هم‌تراز با تقویم (bot/api/calendar.py + bot/utils/events.py)
+
+از getterهای مشترک get_hijri_events استفاده می‌کند تا منبع حقیقت واحد باشد
+و نمایش ساختاریافته (امروز / آینده نزدیک / ماه جاری) ارائه دهد.
+"""
+from __future__ import annotations
+
 from datetime import datetime, timedelta
+from typing import List, Tuple, Optional
 
 import jdatetime
 import pytz
 from hijri_converter import Gregorian
 
 from bot.config import config
-from bot.utils.events import hijri_events
+from bot.utils.events import get_hijri_events
 
 tehran_tz = pytz.timezone(config.TIMEZONE)
 
-# مناسبت‌های مهم و منتخب. علاوه بر این لیست، تمام مناسبت‌های موجود در
-# bot.utils.events.hijri_events نیز بررسی می‌شوند تا مناسبت‌های قمری جا نیفتند.
-RELIGIOUS_EVENTS = [
-    (1, 1, "آغاز سال قمری / محرم"),
-    (1, 9, "تاسوعای حسینی"),
-    (1, 10, "عاشورای حسینی"),
-    (2, 20, "اربعین حسینی"),
-    (2, 28, "رحلت پیامبر (ص) و شهادت امام حسن (ع)"),
-    (3, 8, "شهادت امام حسن عسکری (ع)"),
-    (3, 17, "ولادت پیامبر (ص) و امام صادق (ع)"),
-    (7, 13, "ولادت امام علی (ع)"),
-    (7, 27, "مبعث پیامبر (ص)"),
-    (8, 15, "ولادت امام زمان (عج)"),
-    (9, 1, "آغاز ماه رمضان"),
-    (9, 19, "ضربت خوردن امام علی (ع)"),
-    (9, 21, "شهادت امام علی (ع)"),
-    (9, 23, "شب قدر"),
-    (10, 1, "عید فطر"),
-    (10, 25, "شهادت امام جعفر صادق (ع)"),
-    (12, 9, "روز عرفه"),
-    (12, 10, "عید قربان"),
-    (12, 18, "عید غدیر خم"),
-]
+HIJRI_MONTH_NAMES = {
+    1: "محرم", 2: "صفر", 3: "ربیع‌الاول", 4: "ربیع‌الثانی",
+    5: "جمادی‌الاول", 6: "جمادی‌الثانی", 7: "رجب", 8: "شعبان",
+    9: "رمضان", 10: "شوال", 11: "ذی‌قعده", 12: "ذی‌الحجه",
+}
 
 
-def _to_shamsi(gregorian_date) -> str:
-    """تبدیل تاریخ میلادی به شمسی برای نمایش."""
+def _to_shamsi_str(gregorian_date) -> str:
     try:
         jd = jdatetime.date.fromgregorian(date=gregorian_date)
         return f"{jd.year}/{jd.month:02d}/{jd.day:02d}"
@@ -44,95 +33,163 @@ def _to_shamsi(gregorian_date) -> str:
         return str(gregorian_date)
 
 
-def _event_names_for_hijri(month: int, day: int):
-    """برگرداندن نام مناسبت‌های ثبت‌شده برای یک تاریخ قمری."""
-    names = []
-
-    # منبع اصلی و کامل مناسبت‌های قمری پروژه.
-    values = hijri_events.get(f"{month}-{day}", [])
-    if isinstance(values, str):
-        values = [values]
-
-    for value in values:
-        if value and str(value).strip():
-            names.append(str(value).strip())
-
-    # مناسبت‌های منتخب قدیمی پروژه را هم نگه می‌داریم تا چیزی حذف نشود.
-    for event_month, event_day, name in RELIGIOUS_EVENTS:
-        if event_month == month and event_day == day and name not in names:
-            names.append(name)
-
-    return names
+def _hijri_label(hijri) -> str:
+    month_name = HIJRI_MONTH_NAMES.get(hijri.month, str(hijri.month))
+    return f"{hijri.day} {month_name} {hijri.year}"
 
 
-def religious_countdown() -> str:
-    """نمایش مناسبت‌های قمری ثبت‌شده در امروز و ۳۰ روز آینده.
+def _events_for_gregorian(g_date) -> List[str]:
+    """مناسبت‌های قمری یک روز میلادی — دقیقاً از منبع مشترک تقویم."""
+    try:
+        h = Gregorian(g_date.year, g_date.month, g_date.day).to_hijri()
+        return get_hijri_events(h.month, h.day)
+    except Exception:
+        return []
 
-    به‌جای بررسی یک فهرست محدود و محاسبه دستی فاصله ماه‌های قمری،
-    تک‌تک ۳۱ روز میلادی از امروز تا پایان بازه بررسی می‌شوند و برای
-    هر روز، تاریخ قمری واقعی همان روز از hijri_converter گرفته می‌شود.
-    این روش تغییر ماه و سال قمری را نیز بدون محاسبه دستی مدیریت می‌کند.
+
+def get_today_religious_events() -> List[Tuple[str, str, str]]:
     """
-    now = datetime.now(tehran_tz)
-    today = now.date()
+    مناسبت‌های امروز.
+    برمی‌گرداند لیست (نام, قمری_label, شمسی)
+    """
+    now = datetime.now(tehran_tz).date()
+    names = _events_for_gregorian(now)
+    if not names:
+        return []
+    try:
+        h = Gregorian(now.year, now.month, now.day).to_hijri()
+        q_label = _hijri_label(h)
+    except Exception:
+        q_label = "—"
+    shamsi = _to_shamsi_str(now)
+    return [(name, q_label, shamsi) for name in names]
 
-    # تبدیل امروز به قمری فقط برای نمایش سربرگ.
-    today_hijri = Gregorian(today.year, today.month, today.day).to_hijri()
 
-    lines = ["🕌 **مناسبت‌های مذهبی و قمری (تا یک ماه)**\n"]
-    lines.append(
-        f"امروز قمری: {today_hijri.day}/{today_hijri.month}/{today_hijri.year}\n"
-    )
+def get_upcoming_religious_events(days: int = 30, limit: int = 25) -> List[Tuple[int, str, str, str]]:
+    """
+    مناسبت‌های از امروز تا `days` روز آینده.
+    خروجی: (offset_روز, نام, قمری_label, شمسی)
+    اولین وقوع هر نام در بازه نگه‌داشته می‌شود.
+    """
+    today = datetime.now(tehran_tz).date()
+    found: List[Tuple[int, str, str, str]] = []
+    seen = set()
 
-    found = []
-
-    # ۰ تا ۳۰ یعنی امروز + ۳۰ روز آینده.
-    for offset in range(31):
-        target_date = today + timedelta(days=offset)
-
-        try:
-            target_hijri = Gregorian(
-                target_date.year,
-                target_date.month,
-                target_date.day,
-            ).to_hijri()
-        except Exception:
-            continue
-
-        names = _event_names_for_hijri(target_hijri.month, target_hijri.day)
+    for offset in range(0, max(1, days) + 1):
+        target = today + timedelta(days=offset)
+        names = _events_for_gregorian(target)
         if not names:
             continue
-
-        shamsi = _to_shamsi(target_date)
-        qamari = (
-            f"{target_hijri.day}/{target_hijri.month}/{target_hijri.year}"
-        )
-
+        try:
+            h = Gregorian(target.year, target.month, target.day).to_hijri()
+            q_label = _hijri_label(h)
+        except Exception:
+            q_label = "—"
+        shamsi = _to_shamsi_str(target)
         for name in names:
-            found.append((offset, name, shamsi, qamari))
+            key = name.strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            found.append((offset, key, q_label, shamsi))
+            if len(found) >= limit:
+                return found
+    return found
 
-    # حذف نام‌های تکراری فقط وقتی که همان مناسبت در چند تاریخ ثبت شده باشد.
-    # اگر یک مناسبت در دو روز مختلف آمده باشد، اولین وقوع در بازه نمایش داده می‌شود.
-    seen = set()
-    unique = []
-    for item in found:
-        name = item[1]
-        if name in seen:
+
+def get_month_religious_events(hijri_year: Optional[int] = None, hijri_month: Optional[int] = None) -> List[Tuple[int, str, str]]:
+    """
+    مناسبت‌های یک ماه قمری مشخص (پیش‌فرض: ماه جاری قمری).
+    خروجی: (روز_قمری, نام, قمری_label)
+    """
+    today = datetime.now(tehran_tz).date()
+    try:
+        today_h = Gregorian(today.year, today.month, today.day).to_hijri()
+    except Exception:
+        return []
+
+    year = hijri_year or today_h.year
+    month = hijri_month or today_h.month
+    results = []
+    # حداکثر ۳۰ روز برای ماه‌های قمری
+    for day in range(1, 31):
+        names = get_hijri_events(month, day)
+        if not names:
             continue
-        seen.add(name)
-        unique.append(item)
+        label = f"{day} {HIJRI_MONTH_NAMES.get(month, month)} {year}"
+        for name in names:
+            results.append((day, name, label))
+    return results
 
-    if not unique:
-        lines.append("مناسبت قمری ثبت‌شده‌ای در ۳۰ روز آینده یافت نشد.")
+
+def religious_countdown(days: int = 30) -> str:
+    """
+    نمایش اصلی منوی «مناسبت مذهبی» — ساختاریافته مثل تقویم:
+    - امروز
+    - نزدیک‌ترین مناسبت‌ها در بازه
+    """
+    today = datetime.now(tehran_tz).date()
+    try:
+        today_h = Gregorian(today.year, today.month, today.day).to_hijri()
+        today_q = _hijri_label(today_h)
+    except Exception:
+        today_q = "نامشخص"
+
+    lines = [
+        "🕌 **مناسبت‌های مذهبی و قمری**",
+        f"امروز قمری: {today_q}",
+        f"امروز شمسی: {_to_shamsi_str(today)}",
+        "",
+    ]
+
+    today_events = get_today_religious_events()
+    if today_events:
+        lines.append("📌 **امروز:**")
+        for name, q_label, _ in today_events:
+            lines.append(f"• {name}")
+        lines.append("")
+
+    upcoming = get_upcoming_religious_events(days=days, limit=20)
+    # فقط آینده (offset > 0) را در بخش جداگانه نشان بده
+    future = [u for u in upcoming if u[0] > 0]
+    if future:
+        lines.append(f"📅 **نزدیک‌ترین مناسبت‌ها (تا {days} روز):**")
+        for offset, name, q_label, shamsi in future:
+            lines.append(
+                f"• **{name}** — {offset} روز دیگر\n"
+                f"  قمری: {q_label} | شمسی: {shamsi}"
+            )
+    elif not today_events:
+        lines.append("مناسبت قمری ثبت‌شده‌ای در بازه فعلی یافت نشد.")
+
+    return "\n".join(lines)
+
+
+def religious_month_view() -> str:
+    """نمای ماه جاری قمری — شبیه تقویم ماهانه."""
+    today = datetime.now(tehran_tz).date()
+    try:
+        h = Gregorian(today.year, today.month, today.day).to_hijri()
+    except Exception:
+        return "خطا در محاسبه تاریخ قمری."
+
+    month_name = HIJRI_MONTH_NAMES.get(h.month, str(h.month))
+    events = get_month_religious_events(h.year, h.month)
+    lines = [
+        f"🕌 **مناسبت‌های ماه {month_name} {h.year}**",
+        "",
+    ]
+    if not events:
+        lines.append("مناسبتی برای این ماه ثبت نشده است.")
         return "\n".join(lines)
 
-    for days, name, shamsi, qamari in unique[:20]:
-        if days == 0:
-            lines.append(f"• **{name}** — امروز ({qamari} قمری)")
-        else:
-            lines.append(
-                f"• **{name}** — {days} روز دیگر\n"
-                f"  قمری: {qamari} | شمسی: {shamsi}"
-            )
+    by_day: dict[int, list[str]] = {}
+    for day, name, _ in events:
+        by_day.setdefault(day, []).append(name)
+
+    for day in sorted(by_day.keys()):
+        mark = " ← امروز" if day == h.day else ""
+        names = "، ".join(by_day[day])
+        lines.append(f"• روز {day}: {names}{mark}")
 
     return "\n".join(lines)
