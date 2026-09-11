@@ -17,12 +17,15 @@ from bot.logger import logger
 
 TEHRAN = pytz.timezone("Asia/Tehran")
 
-# answer_id -> (user_id, text, expires)
-_ANSWER_CACHE: Dict[str, Tuple[int, str, float]] = {}
+# answer_id -> (user_id, text, expires, prompt)
+_ANSWER_CACHE: Dict[str, Tuple[int, str, float, str]] = {}
 _CACHE_TTL = 3600 * 6
 
-
 _LAST_ANSWER: Dict[int, str] = {}
+# user_id -> last original user prompt (for continue)
+_LAST_PROMPT: Dict[int, str] = {}
+# user_id -> last answer_id
+_LAST_ANSWER_ID: Dict[int, str] = {}
 
 
 def parse_natural_weather(text: str) -> Optional[Tuple[str, bool]]:
@@ -80,12 +83,15 @@ def parse_natural_crypto_price(text: str) -> Optional[str]:
     return None
 
 
-def store_answer(user_id: int, text: str) -> str:
-    """ذخیره جواب برای دکمه ویس و درخواست «ویس بفرست»."""
+def store_answer(user_id: int, text: str, prompt: str = "") -> str:
+    """ذخیره جواب برای دکمه ویس، ادامه پاسخ و درخواست «ویس بفرست»."""
     aid = hashlib.md5(f"{user_id}:{time.time()}:{text[:80]}".encode()).hexdigest()[:12]
-    _ANSWER_CACHE[aid] = (user_id, text, time.time() + _CACHE_TTL)
+    _ANSWER_CACHE[aid] = (user_id, text or "", time.time() + _CACHE_TTL, prompt or "")
     if text:
         _LAST_ANSWER[user_id] = text
+        _LAST_ANSWER_ID[user_id] = aid
+    if prompt:
+        _LAST_PROMPT[user_id] = prompt
     if len(_ANSWER_CACHE) > 2000:
         now = time.time()
         dead = [k for k, v in _ANSWER_CACHE.items() if v[2] < now]
@@ -98,15 +104,37 @@ def get_stored_answer(answer_id: str, user_id: int) -> Optional[str]:
     item = _ANSWER_CACHE.get(answer_id)
     if not item:
         return None
-    uid, text, exp = item
+    uid, text, exp, _prompt = item if len(item) == 4 else (*item, "")
     if exp < time.time() or uid != user_id:
         return None
     return text
 
 
+def get_stored_prompt(answer_id: str, user_id: int) -> Optional[str]:
+    item = _ANSWER_CACHE.get(answer_id)
+    if not item:
+        return None
+    if len(item) == 4:
+        uid, _text, exp, prompt = item
+    else:
+        uid, _text, exp = item
+        prompt = ""
+    if exp < time.time() or uid != user_id:
+        return None
+    return prompt or _LAST_PROMPT.get(user_id)
+
+
 def get_last_answer(user_id: int) -> Optional[str]:
     """آخرین جواب AI همین کاربر."""
     return _LAST_ANSWER.get(user_id) or None
+
+
+def get_last_prompt(user_id: int) -> Optional[str]:
+    return _LAST_PROMPT.get(user_id)
+
+
+def get_last_answer_id(user_id: int) -> Optional[str]:
+    return _LAST_ANSWER_ID.get(user_id)
 
 
 # ── نمودار ──────────────────────────────────────────────────────────────────
@@ -352,8 +380,48 @@ def enhance_ocr_prompt(user_prompt: str, has_image: bool) -> str:
 
 # ── کیبورد اینلاین زیر جواب AI ───────────────────────────────────────────────
 
-def get_ai_result_keyboard(user_id: int, answer_id: str):
-    """زیر جواب AI و ویس هیچ دکمه‌ای نباشد."""
-    return None
+def get_ai_result_keyboard(user_id: int, answer_id: str = "", *, offer_continue: bool = False):
+    """
+    کیبورد زیر جواب AI.
+    اگر offer_continue=True یا پاسخ بلند باشد، دکمه «ادامه پاسخ» اضافه می‌شود.
+    """
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    rows = []
+    aid = answer_id or get_last_answer_id(user_id) or ""
+    last = get_last_answer(user_id) or ""
+    should_continue = offer_continue or (len(last) >= 1800)
+    if should_continue and aid:
+        rows.append([
+            InlineKeyboardButton("▶️ ادامه پاسخ", callback_data=f"ai_continue:{aid}")
+        ])
+    # مدل و حافظه از get_ai_keyboard جدا هستند؛ اینجا فقط ادامه
+    if not rows:
+        return None
+    return InlineKeyboardMarkup(rows)
+
+
+def build_continue_prompt(user_id: int, answer_id: str = "") -> Optional[str]:
+    """ساخت پرامپت ادامه برای AI بدون تکرار بخش قبلی."""
+    prev = None
+    prompt = None
+    if answer_id:
+        prev = get_stored_answer(answer_id, user_id)
+        prompt = get_stored_prompt(answer_id, user_id)
+    if not prev:
+        prev = get_last_answer(user_id)
+    if not prompt:
+        prompt = get_last_prompt(user_id)
+    if not prev:
+        return None
+    tail = prev[-900:] if len(prev) > 900 else prev
+    base = (
+        "ادامه بده دقیقاً از جایی که پاسخ قبلی قطع شد. "
+        "هیچ بخشی از متن قبلی را تکرار نکن. مستقیم ادامه بده.\n\n"
+        f"--- انتهای پاسخ قبلی ---\n{tail}\n--- ادامه از اینجا ---"
+    )
+    if prompt:
+        return f"موضوع اصلی کاربر: {prompt}\n\n{base}"
+    return base
 
 
