@@ -230,6 +230,7 @@ _EN_ABBR = (
     ("Non-Farm Employment Change", "NFP"),
     ("Non-Farm Payrolls", "NFP"),
     ("ADP Non-Farm Employment Change", "ADP NFP"),
+    ("Quarterly Unemployment Rate", "Unemp Rate q/q"),
     ("Unemployment Rate", "Unemp Rate"),
     ("Initial Jobless Claims", "Init Claims"),
     ("Continuing Jobless Claims", "Cont Claims"),
@@ -279,14 +280,20 @@ def _en_short(title: str, *, max_len: int = 36) -> str:
         if full.lower() in out.lower():
             out = re.sub(re.escape(full), abbr, out, flags=re.I)
             break
-    # فشرده‌سازی پسوندهای زمانی و کلمات پرتکرار
-    out = re.sub(r"\bmonth(?:ly)?\b", "m/m", out, flags=re.I)
-    out = re.sub(r"\byear(?:ly)?\b", "y/y", out, flags=re.I)
-    out = re.sub(r"\bquarter(?:ly)?\b", "q/q", out, flags=re.I)
+    # پسوندهای زمانی — فقط در انتهای عنوان / با فاصله، نه وسط کلمه
+    out = re.sub(r"(?i)\bmonthly\b", "m/m", out)
+    out = re.sub(r"(?i)\byearly\b|\bannual(?:ly)?\b", "y/y", out)
+    out = re.sub(r"(?i)\bquarterly\b", "q/q", out)
+    # اگر هنوز m/m y/y جدا هستند نگه دار
+    out = re.sub(r"(?i)\bmonth\b(?!\s*/)", "m/m", out)
+    out = re.sub(r"(?i)\byear\b(?!\s*/)", "y/y", out)
+    out = re.sub(r"(?i)\bquarter\b(?!\s*/)", "q/q", out)
     out = re.sub(r"\bManufacturing\b", "Mfg", out, flags=re.I)
     out = re.sub(r"\bProduction\b", "Prod", out, flags=re.I)
     out = re.sub(r"\bConstruction\b", "Const", out, flags=re.I)
     out = re.sub(r"\bServices?\b", "Svc", out, flags=re.I)
+    # اگر q/q اول آمده جابجا کن: "q/q Unemp Rate" → "Unemp Rate q/q"
+    out = re.sub(r"^(m/m|y/y|q/q)\s+(.+)$", r"\2 \1", out.strip())
     out = re.sub(r"\bIndex\b", "Idx", out, flags=re.I)
     out = re.sub(r"\bBalance\b", "Bal", out, flags=re.I)
     out = re.sub(r"\bOutput\b", "Out", out, flags=re.I)
@@ -681,24 +688,21 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
             errors.append(f"biquote:{exc}")
             logger.warning("economic calendar biquote primary failed: %s", exc)
 
-        # 2) SECONDARY: Forex Factory — only needed when primary is thin/empty.
-        # FF endpoints are often down (404/DNS); avoid noisy warnings when biquote is healthy.
+        # 2) SECONDARY: Forex Factory JSON — همیشه تلاش می‌کنیم (کم‌صدا)؛
+        # برای forecast/previous/impact و رویدادهای غایب مفید است. فیلد actual در JSON اغلب خالی است.
         ff_rows: list[dict[str, Any]] = []
-        need_ff = len(normalized) < 40
-        if need_ff:
-            for i, url in enumerate(FF_URLS):
+        for i, url in enumerate(FF_URLS):
+            try:
+                rows = await asyncio.to_thread(_fetch_json, url)
+                ff_rows.extend(rows)
+            except Exception as exc:
+                logger.debug("economic calendar FF secondary failed: %s", exc)
                 try:
-                    rows = await asyncio.to_thread(_fetch_json, url)
+                    rows = await asyncio.to_thread(_fetch_json, FF_FALLBACK_URLS[i])
                     ff_rows.extend(rows)
-                except Exception as exc:
-                    errors.append(f"ff:{exc}")
-                    try:
-                        rows = await asyncio.to_thread(_fetch_json, FF_FALLBACK_URLS[i])
-                        ff_rows.extend(rows)
-                    except Exception as exc2:
-                        errors.append(f"ff-fallback:{exc2}")
-        else:
-            logger.debug("economic calendar skip FF secondary — biquote already has %s events", len(normalized))
+                except Exception as exc2:
+                    logger.debug("economic calendar FF fallback failed: %s", exc2)
+                    errors.append(f"ff:{exc2}")
 
         ff_norm = [e for e in (_normalize(x) for x in ff_rows) if e]
         if ff_norm:
@@ -738,8 +742,7 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
             _cache = normalized
             _cache_fetched_at = time.time()
             _cache_expires = time.monotonic() + CACHE_TTL
-            # Only warn when primary was weak and secondary also failed.
-            if errors and need_ff:
+            if errors and not normalized:
                 logger.warning("economic calendar partial refresh: %s", " | ".join(errors[:4]))
             elif errors:
                 logger.debug("economic calendar secondary noise: %s", " | ".join(errors[:2]))
