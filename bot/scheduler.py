@@ -214,16 +214,26 @@ async def check_economic_calendar_alerts(context):
             logger.warning("economic calendar alert user failed: %s", e, exc_info=True)
 
 async def periodic_backup(context):
-    """بکاپ خودکار: GitHub (اگر ست شده) + تلگرام ادمین"""
+    """بکاپ خودکار کامل: محلی + GitHub (اگر ست) + ارسال به ادمین‌ها در تلگرام."""
     try:
-        from bot.db_persist import auto_backup, send_db_to_admins, github_enabled
+        from bot.db_persist import auto_backup, send_db_to_admins
         ok, msg = auto_backup()
         logger.info(f"auto_backup: {msg}")
-        if not github_enabled():
-            ok2, msg2 = await send_db_to_admins(context.bot)
+        # همیشه به ادمین‌ها هم بفرست تا بکاپ offline داشته باشند (حتی اگر GitHub فعال باشد)
+        try:
+            ok2, msg2 = await send_db_to_admins(
+                context.bot,
+                caption=(
+                    "💾 بکاپ خودکار دوره‌ای\n"
+                    f"وضعیت: {msg}\n"
+                    f"🕐 {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                ),
+            )
             logger.info(f"telegram backup: {msg2}")
+        except Exception as te:
+            logger.error(f"telegram periodic backup failed: {te}")
     except Exception as e:
-        logger.error(f"periodic backup error: {e}")
+        logger.error(f"periodic backup error: {e}", exc_info=True)
 
 
 def setup_scheduler(app):

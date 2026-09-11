@@ -182,13 +182,37 @@ def auto_restore_if_empty() -> bool:
 
 
 def auto_backup():
+    """
+    بکاپ کامل خودکار:
+    1) همیشه بکاپ محلی چرخشی (backups/ + bot_data.backup.db)
+    2) اگر GitHub تنظیم شده باشد، آپلود به ریپو
+    برمی‌گرداند: (موفقیت_کلی, پیام_خلاصه)
+    """
+    results = []
+    local_ok = False
     try:
         backup_db()
+        local_ok = True
+        results.append("local:OK")
     except Exception as e:
         logger.error(f"local backup: {e}")
+        results.append(f"local:FAIL({e})")
+
+    gh_ok = False
     if github_enabled():
-        return github_upload_db()
-    return False, "GitHub غیرفعال — فقط بکاپ محلی"
+        try:
+            ok, msg = github_upload_db()
+            gh_ok = bool(ok)
+            results.append(f"github:{'OK' if ok else 'FAIL'}({msg})")
+        except Exception as e:
+            logger.error(f"github backup: {e}")
+            results.append(f"github:FAIL({e})")
+    else:
+        results.append("github:disabled")
+
+    # موفقیت کلی اگر حداقل یکی موفق باشد (محلی معمولاً کافی است)
+    overall = local_ok or gh_ok
+    return overall, " | ".join(results)
 
 
 
