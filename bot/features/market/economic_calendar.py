@@ -509,24 +509,19 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
             errors.append(f"biquote:{exc}")
             logger.warning("economic calendar biquote primary failed: %s", exc)
 
-        # 2) SECONDARY: Forex Factory — only needed when primary is thin/empty.
-        # FF endpoints are often down (404/DNS); avoid noisy warnings when biquote is healthy.
+        # 2) SECONDARY: Forex Factory schedule (titles/impact) merged on top when biquote thin
         ff_rows: list[dict[str, Any]] = []
-        need_ff = len(normalized) < 40
-        if need_ff:
-            for i, url in enumerate(FF_URLS):
+        for i, url in enumerate(FF_URLS):
+            try:
+                rows = await asyncio.to_thread(_fetch_json, url)
+                ff_rows.extend(rows)
+            except Exception as exc:
+                errors.append(f"ff:{exc}")
                 try:
-                    rows = await asyncio.to_thread(_fetch_json, url)
+                    rows = await asyncio.to_thread(_fetch_json, FF_FALLBACK_URLS[i])
                     ff_rows.extend(rows)
-                except Exception as exc:
-                    errors.append(f"ff:{exc}")
-                    try:
-                        rows = await asyncio.to_thread(_fetch_json, FF_FALLBACK_URLS[i])
-                        ff_rows.extend(rows)
-                    except Exception as exc2:
-                        errors.append(f"ff-fallback:{exc2}")
-        else:
-            logger.debug("economic calendar skip FF secondary — biquote already has %s events", len(normalized))
+                except Exception as exc2:
+                    errors.append(f"ff-fallback:{exc2}")
 
         ff_norm = [e for e in (_normalize(x) for x in ff_rows) if e]
         if ff_norm:
@@ -539,9 +534,11 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
                 for fe in ff_norm:
                     if fe["id"] in by_id:
                         be = by_id[fe["id"]]
+                        # Prefer non-empty numeric fields from either side
                         for field in ("actual", "forecast", "previous"):
                             if not str(be.get(field) or "").strip() and str(fe.get(field) or "").strip():
                                 be[field] = fe[field]
+                        # FF impact labels are often cleaner
                         if fe.get("impact"):
                             be["impact"] = fe["impact"]
                         if fe.get("title") and len(fe["title"]) >= len(be.get("title") or ""):
@@ -566,11 +563,8 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
             _cache = normalized
             _cache_fetched_at = time.time()
             _cache_expires = time.monotonic() + CACHE_TTL
-            # Only warn when primary was weak and secondary also failed.
-            if errors and need_ff:
+            if errors:
                 logger.warning("economic calendar partial refresh: %s", " | ".join(errors[:4]))
-            elif errors:
-                logger.debug("economic calendar secondary noise: %s", " | ".join(errors[:2]))
             return list(_cache)
 
         if _cache:
