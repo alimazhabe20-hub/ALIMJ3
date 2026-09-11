@@ -127,7 +127,8 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
         }.get(repeat_type, "یک‌بار")
         await update.message.reply_text(
             f"⏰ یادآوری ثبت شد.\nموضوع: {body}\nزمان: {when.strftime('%Y-%m-%d %H:%M')}\nتکرار: {repeat_label}",
-                    )
+            reply_markup=get_ai_keyboard(user_id),
+        )
         return True
     m = re.match(r"^(جستجو|سرچ|search)\s*[:：]?\s*(.+)$", text, re.I | re.S)
     if m or re.search(r"\b(در\s*اینترنت|تو\s*وب)\s*جستجو", text, re.I):
@@ -135,7 +136,7 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
         notice = await update.message.reply_text("🔎 در حال جستجو...")
         try:
             result = await web_search(q)
-            await update.message.reply_text(result)
+            await update.message.reply_text(result, reply_markup=get_ai_keyboard(user_id))
         finally:
             try:
                 await notice.delete()
@@ -151,7 +152,7 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
             bio = BytesIO(png)
             bio.name = "chart.png"
             await update.message.reply_photo(
-                photo=bio, caption=title
+                photo=bio, caption=title, reply_markup=get_ai_keyboard(user_id)
             )
         except Exception as e:
             await update.message.reply_text(f"⚠️ نمودار: {e}")
@@ -168,12 +169,13 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
             bio = BytesIO(audio)
             bio.name = "music.mp3"
             await update.message.reply_audio(
-                audio=bio, caption="🎵"
+                audio=bio, caption="🎵", reply_markup=get_ai_keyboard(user_id)
             )
         except Exception as e:
             await update.message.reply_text(
                 f"⚠️ ساخت موسیقی در دسترس نبود:\n{e}",
-                            )
+                reply_markup=get_ai_keyboard(user_id),
+            )
         finally:
             try:
                 await notice.delete()
@@ -181,6 +183,7 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
                 logger.debug("%s: %s", __name__, _exc)
         return True
     return False
+
 def _split_telegram_text(text: str, limit: int = 3900) -> list[str]:
     """تقسیم امن متن بلند؛ هیچ کاراکتری در مرز chunk حذف نمی‌شود."""
     text = (text or "").strip()
@@ -196,6 +199,8 @@ def _split_telegram_text(text: str, limit: int = 3900) -> list[str]:
         text = text[cut:]
     parts.append(text)
     return parts
+
+
 async def _reply_long_text(msg, text: str, *, prefix: str = "🤖 "):
     body = (text or "").strip()
     chunks = _split_telegram_text(prefix + body, 3900) or [prefix + "پاسخی دریافت نشد."]
@@ -217,25 +222,20 @@ async def _reply_long_text(msg, text: str, *, prefix: str = "🤖 "):
         if not sent:
             raise RuntimeError(f"AI reply chunk {i+1}/{len(chunks)} could not be delivered")
     return first
-AI_CONTINUE_THRESHOLD = 2500
+
 async def _send_ai_answer(update, user_id, answer: str, *, stream: bool = True):
-    """ارسال پاسخ AI؛ فقط پاسخ‌های طولانی دکمه ادامه دارند."""
+    """ارسال جواب AI کامل؛ روی پیام اول دکمه «ادامه پاسخ» هم قرار می‌گیرد."""
     msg = update.message
-    clean_answer = (answer or "").strip()
-    store_answer(user_id, clean_answer)
-    chunks = _split_telegram_text("🤖 " + clean_answer, 3900) or ["🤖 پاسخی دریافت نشد."]
-    is_long = len(clean_answer) >= AI_CONTINUE_THRESHOLD
-    first = None
-    for i, chunk in enumerate(chunks):
+    store_answer(user_id, answer)
+    chunks = _split_telegram_text("🤖 " + (answer or "").strip(), 3900) or ["🤖 پاسخی دریافت نشد."]
+    first = await msg.reply_text(chunks[0], reply_markup=get_ai_answer_keyboard(user_id))
+    for i, chunk in enumerate(chunks[1:], start=2):
         body = chunk[2:].lstrip() if chunk.startswith("🤖 ") else chunk
-        payload = chunk if i == 0 else f"🤖 ادامه ({i+1}/{len(chunks)})\n{body}"
-        markup = get_ai_answer_keyboard(user_id) if is_long and i == len(chunks) - 1 else None
-        sent = await msg.reply_text(payload, reply_markup=markup)
-        if first is None:
-            first = sent
+        await msg.reply_text(f"🤖 ادامه ({i}/{len(chunks)})\\n{body}", reply_markup=get_ai_answer_keyboard(user_id))
     return first
 async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
     """استریم AI و ویرایش تدریجی پیام؛ در شکست، پیام نیمه‌کاره حذف می‌شود."""
+    import asyncio
     from bot.services.ai_service import ask_ai_stream
     msg = update.message
     sent = await msg.reply_text("✍️ در حال نوشتن...")
@@ -273,24 +273,18 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
         chunks = _split_telegram_text("🤖 " + answer, 3900)
         if not chunks:
             chunks = ["🤖 پاسخی دریافت نشد."]
-        final = chunks[0]
         # اگر آخرین ویرایش دقیقاً همان متن نهایی بوده، دوباره پیام نفرست.
-        is_long = len(answer) >= AI_CONTINUE_THRESHOLD
-        final_markup = get_ai_answer_keyboard(user_id) if is_long and len(chunks) == 1 else None
-        needs_final_edit = False
+        # این جلوی Duplicate Reply را در خطای «Message is not modified» می‌گیرد.
+        final = chunks[0]
         if final != last_rendered:
-            needs_final_edit = True
-        if final_markup is not None:
-            needs_final_edit = True
-        if needs_final_edit:
             try:
-                await sent.edit_text(final, reply_markup=final_markup)
+                await sent.edit_text(final, reply_markup=get_ai_answer_keyboard(user_id))
                 last_rendered = final
             except Exception as edit_error:
                 logger.warning("AI final edit failed; retrying same message: %s", edit_error)
                 try:
                     await asyncio.sleep(0.15)
-                    await sent.edit_text(final, reply_markup=final_markup)
+                    await sent.edit_text(final, reply_markup=get_ai_answer_keyboard(user_id))
                     last_rendered = final
                 except Exception as retry_error:
                     logger.warning("AI final edit retry failed: %s", retry_error)
@@ -299,8 +293,7 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
             sent_cont = False
             for attempt in range(3):
                 try:
-                    markup = get_ai_answer_keyboard(user_id) if is_long and i == len(chunks) else None
-                    await msg.reply_text(f"🤖 ادامه ({i}/{len(chunks)})\n{body}", reply_markup=markup)
+                    await msg.reply_text(f"🤖 ادامه ({i}/{len(chunks)})\n{body}", reply_markup=get_ai_answer_keyboard(user_id))
                     sent_cont = True
                     break
                 except Exception as cont_err:
@@ -429,7 +422,8 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                         await update.message.reply_photo(
                             photo=bio,
                             caption="🎨 تصویر ساخته شد",
-                                                    )
+                            reply_markup=get_ai_keyboard(user_id),
+                        )
                     finally:
                         try:
                             await notice.delete()
@@ -439,7 +433,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 mode_msg = _apply_voice_chat_flags(context, text)
                 if mode_msg:
                     await update.message.reply_text(
-                        mode_msg
+                        mode_msg, reply_markup=get_ai_keyboard(user_id)
                     )
                 if is_voice_only_request(text):
                     last = get_last_answer(user_id) or (context.user_data or {}).get("last_ai_answer")
@@ -742,9 +736,12 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 reply_markup=get_market_keyboard(),
             )
             return
+    # تحلیل مستقیم طلا: کاربر می‌تواند فقط «gold»، «طلا»، «اونس»، «XAUUSD» یا عبارت تحلیلی مشابه را بفرستد.
+    # این مسیر قبل از fallback عمومی اجرا می‌شود تا Gold هرگز به‌عنوان «نماد نامعتبر» پاسخ داده نشود.
     _gold_text = re.sub(r"[\s\u200c_/\-]+", "", text.lower())
     _gold_aliases = ("gold", "xau", "xauusd", "طلا", "طلایجهانی", "اونس", "اونسجهانی")
     if any(alias in _gold_text for alias in _gold_aliases):
+        # فقط وقتی پیام واقعاً درباره طلاست؛ اعداد/متن‌های نامرتبطی که کلمه gold را داخل جمله دارند هم به تحلیل طلا می‌روند.
         try:
             track_usage(user_id, "gold_analysis")
             notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…")
@@ -767,6 +764,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
                 context.user_data["market_chart_message_id"] = chart_msg.message_id
                 context.user_data["market_chart_chat_id"] = update.effective_chat.id
+            # گزارش کامل را به‌صورت پیام متنی می‌فرستیم تا محدودیت 1024 کاراکتری کپشن باعث ناقص شدن تحلیل نشود.
             chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
             text_ids = []
             for chunk in chunks:
@@ -782,6 +780,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.error("direct gold analysis failed: %s", exc, exc_info=True)
             await update.message.reply_text("⚠️ دریافت تحلیل طلا موقتاً ناموفق بود؛ دوباره تلاش کنید.")
             return
+    # دکمه‌های تکی اذان (با ✅ یا ❌)
     _azan_btn_map = {
         "اذان صبح": "fajr",
         "اذان ظهر": "dhuhr",
@@ -798,6 +797,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("🔙 بازگشت به مذهبی",):
         await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard())
         return
+    # «دستیار خرید» قدیمی حذف شده؛ خرید اکنون بخشی از همان دستیار هوشمند است.
     if text in ("🛒 دستیار خرید", "دستیار خرید", "🛍 دستیار خرید"):
         context.user_data["ai_mode"] = True
         context.user_data.pop("ai_shopping_mode", None)
@@ -873,6 +873,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=get_market_keyboard(),
         )
         return
+    # هوا
     if text in ("🌤 پیش‌بینی هوا", "پیش‌بینی هوا"):
         track_usage(user_id, "forecast")
         await update.message.reply_text(await weather_forecast(city), reply_markup=get_weather_geo_keyboard()); return
@@ -895,6 +896,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("📍 لوکیشن من", "لوکیشن من"):
         track_usage(user_id, "location")
         await update.message.reply_text(f"📍 لوکیشن را از 📎 بفرستید.\nشهر فعلی: {city}", reply_markup=get_weather_geo_keyboard()); return
+    # ابزار
     if text in ("🔢 ماشین‌حساب", "ماشین‌حساب"):
         context.user_data["waiting_for"] = "calc"; track_usage(user_id, "calc")
         await update.message.reply_text("🔢 `2+3*4`", reply_markup=get_tools_keyboard()); return
@@ -909,6 +911,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("📝 شمارش متن", "شمارش متن"):
         context.user_data["waiting_for"] = "count_text"; track_usage(user_id, "count")
         await update.message.reply_text("📝 متن را بفرستید:", reply_markup=get_tools_keyboard()); return
+    # سرگرمی
     if text in ("📖 فال حافظ", "فال حافظ"):
         track_usage(user_id, "hafez"); await update.message.reply_text(await hafez_fal(user_id), reply_markup=get_fun_keyboard()); return
     if text in ("😂 جوک روز", "جوک روز"):
@@ -917,6 +920,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             "😂 دسته جوک را انتخاب کن:\n(بیش از ۸۷۰۰ جوک از farsijokes)",
             reply_markup=get_joke_keyboard(),
         ); return
+    # دسته‌های جوک
     _joke_map = {
         "🎲 جوک تصادفی": None,
         "😄 عمومی": "general",
@@ -943,6 +947,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         track_usage(user_id, "challenge"); await update.message.reply_text(await daily_challenge(), reply_markup=get_fun_keyboard()); return
     if text in ("💖 جمله انگیزشی", "جمله انگیزشی"):
         track_usage(user_id, "motivation"); await update.message.reply_text(f"💖 {get_motivation()}", reply_markup=get_fun_keyboard()); return
+    # پروفایل
     if text in ("⚙️ تنظیمات هوشمند", "تنظیمات هوشمند"):
         from bot.database import get_user_preferences
         prefs = get_user_preferences(user_id)
