@@ -1,6 +1,6 @@
 from bot.utils.city_data import IRAN_CITIES, IRAQ_CITIES, CITY_COUNTRY, ALL_CITIES
 from bot.utils.keyboard_factory import (
-    get_refresh_button, get_main_keyboard, get_ai_keyboard, get_ai_answer_keyboard, get_ai_model_keyboard,
+    get_refresh_button, get_main_keyboard, get_ai_keyboard, get_ai_model_keyboard,
     get_more_keyboard, get_date_tools_keyboard, get_religious_keyboard, get_market_keyboard,
     get_weather_geo_keyboard, get_tools_keyboard, get_azan_keyboard, get_fun_keyboard,
     get_joke_keyboard, get_profile_keyboard, get_smart_settings_keyboard, get_country_keyboard,
@@ -396,7 +396,7 @@ def get_calendar_text(year, month, day, user_id):
 # by legacy handlers. Keep this list stable when refactoring the implementation.
 __all__ = [
     "build_message", "to_persian_num", "get_calendar_buttons", "get_calendar_text",
-    "get_refresh_button", "get_main_keyboard", "get_ai_keyboard", "get_ai_answer_keyboard", "get_ai_model_keyboard",
+    "get_refresh_button", "get_main_keyboard", "get_ai_keyboard", "get_ai_model_keyboard",
     "get_more_keyboard", "get_date_tools_keyboard", "get_religious_keyboard",
     "get_market_keyboard", "get_weather_geo_keyboard", "get_tools_keyboard",
     "get_azan_keyboard", "get_fun_keyboard", "get_joke_keyboard", "get_profile_keyboard",
