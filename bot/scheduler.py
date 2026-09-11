@@ -249,8 +249,16 @@ def setup_scheduler(app):
         time=time(hour=0, minute=0, second=0, tzinfo=tehran),
         name="daily_broadcast",
     )
+
+    async def _job_update_stats(context):
+        # update_stats is sync; JobQueue in PTB v20 awaits the callback.
+        try:
+            update_stats()
+        except Exception as exc:
+            logger.error("daily_stats job failed: %s", exc, exc_info=True)
+
     job_queue.run_daily(
-        lambda ctx: update_stats(),
+        _job_update_stats,
         time=time(hour=23, minute=59, second=0, tzinfo=tehran),
         name="daily_stats",
     )
