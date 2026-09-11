@@ -156,7 +156,7 @@ def backup_db() -> None:
         try:
             try:
                 src.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            except Exception:
+            except sqlite3.Error:
                 pass
             for target in (backup_path, stable):
                 dst = sqlite3.connect(str(target), check_same_thread=False)
