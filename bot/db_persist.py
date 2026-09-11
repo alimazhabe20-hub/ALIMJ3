@@ -285,25 +285,49 @@ def github_download_db():
         return False, str(e)
 
 
+# آخرین وضعیت ریستور (برای پیام ادمین)
+_LAST_RESTORE_STATUS: dict[str, str | bool | int] = {
+    "ok": False,
+    "msg": "",
+    "local_users": 0,
+    "remote_users": -1,
+}
+
+
+def get_last_restore_status() -> dict:
+    return dict(_LAST_RESTORE_STATUS)
+
+
 def auto_restore_if_empty() -> bool:
     """
     ریستور خودکار:
     - اگر DB محلی خالی است → از GitHub بگیر
     - اگر GitHub کاربر بیشتری دارد → از GitHub بگیر (جلوگیری از فراموشی بعد از دیپلوی)
     """
-    if not github_enabled():
-        logger.info("GitHub not configured — skip auto-restore")
-        return False
+    global _LAST_RESTORE_STATUS
     local_n = _user_count(DB_PATH) if Path(DB_PATH).exists() else 0
+    _LAST_RESTORE_STATUS = {
+        "ok": False,
+        "msg": "",
+        "local_users": local_n,
+        "remote_users": -1,
+    }
+    if not github_enabled():
+        msg = "GitHub تنظیم نشده (GITHUB_TOKEN / GITHUB_REPO)"
+        logger.info("GitHub not configured — skip auto-restore")
+        _LAST_RESTORE_STATUS["msg"] = msg
+        return False
     if local_n == 0:
         ok, msg = github_download_db()
         logger.info(f"auto_restore (empty local): {msg}")
+        _LAST_RESTORE_STATUS.update({"ok": ok, "msg": msg, "local_users": _user_count(DB_PATH)})
         return ok
     # محلی داده دارد؛ فقط اگر ریموت غنی‌تر است جایگزین کن
     try:
         remote_n = github_remote_user_count()
     except Exception:
         remote_n = 0
+    _LAST_RESTORE_STATUS["remote_users"] = remote_n
     if remote_n > local_n:
         logger.warning(
             "GitHub backup has more users (%s > %s) — restoring to avoid data loss",
@@ -311,8 +335,16 @@ def auto_restore_if_empty() -> bool:
         )
         ok, msg = github_download_db()
         logger.info(f"auto_restore (remote richer): {msg}")
+        _LAST_RESTORE_STATUS.update({
+            "ok": ok,
+            "msg": msg,
+            "local_users": _user_count(DB_PATH),
+            "remote_users": remote_n,
+        })
         return ok
-    logger.info("DB OK — local=%s remote=%s — no restore needed", local_n, remote_n)
+    msg = f"DB OK — local={local_n} remote={remote_n}"
+    logger.info(msg)
+    _LAST_RESTORE_STATUS.update({"ok": True, "msg": msg, "local_users": local_n})
     return False
 
 
@@ -573,16 +605,22 @@ async def notify_admins_if_empty(bot):
         return
     if not config.ADMIN_IDS:
         return
+    st = get_last_restore_status()
+    detail = str(st.get("msg") or "نامشخص")
     if github_enabled():
         text = (
-            "⚠️ دیتابیس خالی بود.\n"
-            "تلاش برای بازگردانی خودکار از GitHub انجام شد.\n"
-            "اگر هنوز خالی است فایل بکاپ را با /restore بفرست."
+            "⚠️ دیتابیس بعد از استارت هنوز خالی است.\n\n"
+            f"نتیجه ریستور GitHub:\n{detail}\n\n"
+            "کار لازم:\n"
+            "۱) آخرین فایل .db بکاپ را با کپشن /restore بفرست\n"
+            "۲) GITHUB_TOKEN و GITHUB_REPO را در Render چک کن\n"
+            "۳) در ریپوی بکاپ وجود فایل bot_data.db را بررسی کن\n"
+            "۴) بعد از ریستور موفق، یک‌بار /backup بزن تا GitHub پر شود"
         )
     else:
         text = (
-            "⚠️ دیتابیس خالی است.\n\n"
-            "برای حالت کاملاً خودکار GITHUB_TOKEN و GITHUB_REPO را ست کن.\n"
+            "⚠️ دیتابیس خالی است و GitHub تنظیم نیست.\n\n"
+            "GITHUB_TOKEN و GITHUB_REPO را در Render ست کن،\n"
             "یا فایل بکاپ را با کپشن /restore بفرست."
         )
     for admin_id in config.ADMIN_IDS:
