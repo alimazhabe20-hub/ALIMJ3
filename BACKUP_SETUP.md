@@ -1,68 +1,84 @@
-# پشتیبان‌گیری خودکار و امن دیتابیس
+# راه‌اندازی بکاپ ALIMJ3 با Telegram + Local
 
-این نسخه بکاپ دیتابیس را به‌صورت خودکار در چند لایه انجام می‌دهد:
+این نسخه برای بکاپ خارج از سرور از یک **کانال خصوصی Telegram** استفاده می‌کند و به کارت بانکی، Google Drive یا Cloudflare R2 نیاز ندارد.
 
-- SQLite snapshot محلی و چرخشی
-- GitHub در یک Repository خصوصی
-- کپی مستقل در Telegram برای ادمین‌ها
-- قبل از shutdown/deploy نیز backup اجرا می‌شود
-- اگر دیتابیس محلی خالی باشد، GitHub برای restore خودکار بررسی می‌شود
-- دیتابیس خالی یا خراب روی بکاپ معتبر overwrite نمی‌شود
-- فایل GitHub به صورت gzip ذخیره می‌شود تا حجم کمتر شود
+لایه‌ها:
+- Local: بکاپ چرخشی روی دیسک موجود سرویس
+- Telegram: کپی خارج از سرور در کانال/چت خصوصی
+- GitHub: فقط در صورت تنظیم، fallback اختیاری
 
-## تنظیم GitHub در Render
+> نکته: Telegram محل نگهداری بکاپ است، اما Bot API امکان جست‌وجوی آزاد در تاریخچه کانال برای پیدا کردن آخرین فایل را نمی‌دهد؛ بنابراین ریستور خودکار از Telegram انجام نمی‌شود. اگر DB محلی خالی شد، آخرین فایل را از کانال بردار و با `/restore` برای ربات بفرست.
 
-### 1) یک Repository خصوصی بساز
+## 1. ساخت کانال خصوصی
+در Telegram یک Channel بساز و آن را **Private** انتخاب کن.
 
 مثلاً:
+`ALIMJ3 Backups`
 
-`ALIMJ-backups`
+ربات را به‌عنوان **Administrator** اضافه کن و اجازه ارسال پیام/فایل را بده.
 
-Repository بکاپ باید **Private** باشد؛ دیتابیس شامل اطلاعات کاربران است و نباید در Repository عمومی قرار بگیرد.
+## 2. پیدا کردن Chat ID
+ساده‌ترین روش این است که بعد از اضافه‌کردن ربات، یک پیام در کانال بفرستی و از ابزار/باتی که Chat ID را نمایش می‌دهد استفاده کنی. شناسه کانال معمولاً به شکل زیر است:
 
-### 2) Token بساز
+`-1001234567890`
 
-برای GitHub Fine-grained Personal Access Token، فقط Repository بکاپ را انتخاب کن و برای آن دسترسی Contents را روی **Read and write** قرار بده.
+اگر کانال username عمومی داشته باشد، می‌توانی `@channel_username` را هم امتحان کنی؛ برای بکاپ خصوصی استفاده از شناسه عددی توصیه می‌شود.
 
-### 3) Environment Variables را در Render تنظیم کن
+## 3. تنظیم Render
+در Render → Service → Environment این موارد را تنظیم کن:
 
 ```text
-GITHUB_TOKEN=<token>
-GITHUB_REPO=<github-username>/ALIMJ-backups
-GITHUB_BRANCH=main
-GITHUB_DB_FILE=backups/latest.db.gz
-GITHUB_BACKUP_RETRIES=4
-GITHUB_BACKUP_BACKOFF=1.5
+BOT_TOKEN=توکن_واقعی_ربات
+ADMIN_IDS=شناسه_ادمین
+TELEGRAM_BACKUP_CHAT_ID=-1001234567890
+BACKUP_KEEP=14
 BACKUP_INTERVAL_SECONDS=1800
 TELEGRAM_BACKUP_INTERVAL_SECONDS=21600
 ```
 
-`GITHUB_REPO` باید به شکل `owner/repository` باشد. URL کامل لازم نیست.
-
-### زمان‌بندی
-
-- بکاپ local + GitHub: هر ۳۰ دقیقه
-- بکاپ Telegram: هر ۶ ساعت
-- ۲ دقیقه بعد از startup یک بکاپ local/GitHub انجام می‌شود
-- ۵ دقیقه بعد از startup یک بکاپ Telegram انجام می‌شود
-- هنگام shutdown/deploy نیز backup فوری اجرا می‌شود
-
-### نکته مهم درباره Render
-
-اگر برای سرویس Render دیسک Persistent نداری، روی `/data` برای حفظ دائمی دیتابیس حساب نکن. در این حالت GitHub خصوصی و Telegram باید به عنوان کپی‌های خارج از سرویس استفاده شوند.
-
-### تست
-
-بعد از تنظیم متغیرها، ربات را restart کن و در log باید چیزی شبیه این ببینی:
+`TELEGRAM_BACKUP_CHAT_ID` می‌تواند چند مقصد را هم با کاما بگیرد:
 
 ```text
-local:OK | github:OK (...)
+-1001234567890,-1009876543210
 ```
 
-اگر Repository یا Token اشتباه باشد، پیام خطا اکنون دقیق‌تر است؛ مثلاً:
+## 4. Deploy
+بعد از ذخیره Environment، یک Deploy انجام بده. نیاز به نصب کتابخانه جدیدی برای Telegram Backup نیست؛ پروژه از همان `python-telegram-bot`/HTTP موجود استفاده می‌کند.
 
-```text
-GitHub 404: repository پیدا نشد یا Token به آن دسترسی ندارد
-```
+## 5. تست
+برای تست دستی از داخل ربات:
 
-و دیگر فقط `Not Found` مبهم نمایش داده نمی‌شود.
+`/backup`
+
+باید یک فایل `.db` در کانال بکاپ ارسال شود.
+
+همچنین در لاگ باید وضعیت ارسال Telegram را ببینی.
+
+## 6. زمان‌بندی
+- هر ۳۰ دقیقه: Local backup
+- هر ۶ ساعت: Telegram backup
+- هنگام shutdown/deploy: Local + Telegram
+
+برای جلوگیری از اسپم، بکاپ Telegram هر ۶ ساعت است. اگر می‌خواهی بیشتر باشد، `TELEGRAM_BACKUP_INTERVAL_SECONDS` را تغییر بده؛ حداقل پیش‌فرض کد ۱ ساعت است.
+
+## 7. ریستور دستی
+اگر دیتابیس Render خالی یا خراب شد:
+
+1. وارد کانال خصوصی بکاپ شو.
+2. آخرین فایل `.db` را دانلود کن.
+3. فایل را برای ربات بفرست.
+4. کپشن فایل را دقیقاً بگذار:
+
+`/restore`
+
+ربات قبل از Restore، SQLite integrity check و ساختار جدول‌ها را بررسی می‌کند. اگر فایل خراب یا ناسازگار باشد، جایگزین نمی‌شود.
+
+## 8. اگر کانال پاک شد
+اگر کانال یا پیام‌های بکاپ حذف شوند، Telegram دیگر نسخه‌ای برای Restore در اختیار ربات/ادمین نمی‌گذارد. بنابراین **کانال بکاپ را حذف نکن** و در صورت امکان یک کانال خصوصی دوم هم به‌عنوان کپی اضطراری تنظیم کن.
+
+## 9. امنیت
+- کانال را Private نگه دار.
+- ربات را Admin کن.
+- Bot Token را در سورس‌کد قرار نده.
+- اگر Bot Token لو رفت، فوراً از BotFather توکن جدید بگیر.
+- فایل دیتابیس را در کانال عمومی قرار نده.

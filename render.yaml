@@ -61,6 +61,8 @@ services:
         value: "4"
       - key: GITHUB_BACKUP_BACKOFF
         value: "1.5"
+      - key: TELEGRAM_BACKUP_CHAT_ID
+        sync: false
       - key: BACKUP_INTERVAL_SECONDS
         value: "1800"
       - key: TELEGRAM_BACKUP_INTERVAL_SECONDS
@@ -70,6 +72,6 @@ services:
       - key: STARTUP_CHECK
         value: "true"
       - key: RELEASE_VERSION
-        value: "59.0.0"
+        value: "58.0.0"
     buildCommand: python -c "from bot.release import version_string; print('Building', version_string())" && pip install -r requirements.txt
     startCommand: python -m bot.main
