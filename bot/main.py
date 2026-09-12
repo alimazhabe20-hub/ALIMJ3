@@ -119,6 +119,31 @@ async def post_init(app: Application):
         logger.info("🔌 Plugins initialized")
     except Exception as e:
         logger.warning(f"Plugin initialization: {e}")
+
+    # Retry automatic restore after the Telegram application is fully initialized.
+    # Database initialization can happen before network-ready startup hooks, so a
+    # restore attempted there may fail transiently and leave an empty DB.
+    try:
+        from bot.database import DB_PATH, _user_count
+        from bot.db_persist import auto_restore_if_empty, get_last_restore_status
+        if _user_count(DB_PATH) == 0:
+            restored = False
+            for attempt in range(1, 4):
+                try:
+                    restored = await asyncio.to_thread(auto_restore_if_empty)
+                except Exception as restore_exc:
+                    logger.error("startup auto-restore attempt %s failed: %s", attempt, restore_exc, exc_info=True)
+                    restored = False
+                if restored or _user_count(DB_PATH) > 0:
+                    logger.info("startup auto-restore SUCCESS on attempt %s: %s", attempt, get_last_restore_status().get("msg"))
+                    break
+                if attempt < 3:
+                    await asyncio.sleep(2 * attempt)
+            if not restored and _user_count(DB_PATH) == 0:
+                logger.warning("startup auto-restore FAILED: %s", get_last_restore_status().get("msg") or "نامشخص")
+    except Exception as e:
+        logger.error(f"post_init auto-restore: {e}", exc_info=True)
+
     try:
         await notify_admins_if_empty(app.bot)
     except Exception as e:
