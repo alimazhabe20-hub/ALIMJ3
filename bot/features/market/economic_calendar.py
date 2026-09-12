@@ -10,6 +10,7 @@ import hashlib
 import html
 import re
 import time
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -37,6 +38,23 @@ _cache: list[dict[str, Any]] = []
 _cache_expires = 0.0
 _cache_fetched_at = 0.0
 _cache_lock: asyncio.Lock | None = None
+
+# درخواست‌ها را به‌صورت مودبانه و کم‌دفعات انجام می‌دهیم تا فشار غیرضروری
+# روی منابع عمومی ایجاد نشود. این بخش برای دورزدن سیستم ضدبات نیست.
+_REQUEST_GAP = 1.5
+_request_lock = threading.Lock()
+_last_request_by_host: dict[str, float] = {}
+
+def _polite_get(url: str, **kwargs):
+    """HTTP GET با فاصله‌ی حداقلی بین درخواست‌ها به هر میزبان."""
+    host = re.sub(r"^https?://([^/]+).*$", r"\1", url.lower())
+    with _request_lock:
+        now = time.monotonic()
+        wait = _REQUEST_GAP - (now - _last_request_by_host.get(host, 0.0))
+        if wait > 0:
+            time.sleep(wait)
+        _last_request_by_host[host] = time.monotonic()
+    return requests.get(url, **kwargs)
 
 CURRENCY_NAMES = {
     "USD": "دلار آمریکا", "EUR": "یورو", "GBP": "پوند انگلیس", "JPY": "ین ژاپن",
@@ -338,6 +356,7 @@ FF_HTML_URLS = (
     "https://mds-wss.forexfactory.com/calendar?week=this",
     "https://calendar.forexfactory.com/calendar?week=next",
     "https://www.forexfactory.com/calendar?week=next",
+    "https://mds-wss.forexfactory.com/calendar?week=next",
 )
 
 FF_DAILY_HTML_HOSTS = (
@@ -371,7 +390,7 @@ def _ff_cell_text(row, field: str) -> str:
 
 
 def _parse_ff_html(url: str) -> list[dict[str, Any]]:
-    r = requests.get(url, timeout=18, headers={
+    r = _polite_get(url, timeout=18, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
@@ -510,18 +529,6 @@ def _merge_ff_html_values(events: list[dict[str, Any]], rows: list[dict[str, Any
                 e[field] = value
 
 
-def _refresh_ff_html_values(events: list[dict[str, Any]]) -> None:
-    all_rows: list[dict[str, Any]] = []
-    for url in FF_HTML_URLS:
-        try:
-            all_rows.extend(_parse_ff_html(url))
-        except Exception as exc:
-            logger.debug("Forex Factory HTML enrichment failed for %s: %s", url, exc)
-    if all_rows:
-        _merge_ff_html_values(events, all_rows)
-
-
-
 BIQUOTE_URL = "https://biquote.io/api/calendar"
 
 
@@ -550,7 +557,7 @@ def _biquote_importance(value: str) -> str:
 
 
 def _fetch_biquote(day_from: str, day_to: str) -> list[dict[str, Any]]:
-    r = requests.get(
+    r = _polite_get(
         BIQUOTE_URL,
         params={"from": day_from, "to": day_to},
         timeout=18,
@@ -745,7 +752,7 @@ def _refresh_biquote_values(events: list[dict[str, Any]]) -> None:
     _merge_biquote_values(events, rows)
 
 def _fetch_json(url: str) -> list[dict[str, Any]]:
-    r = requests.get(url, timeout=18, headers={
+    r = _polite_get(url, timeout=18, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "application/json,text/html,*/*",
         "Accept-Language": "en-US,en;q=0.9",
