@@ -39,8 +39,13 @@ REMOTE_BACKUP_TIMEOUT = max(2.0, float(os.getenv("BACKUP_REMOTE_TIMEOUT", "8")))
 TELEGRAM_BACKUP_CHAT_ID = os.getenv("TELEGRAM_BACKUP_CHAT_ID", "").strip()
 TELEGRAM_BACKUP_MAX_DOWNLOAD_BYTES = max(1, int(os.getenv("TELEGRAM_BACKUP_MAX_DOWNLOAD_MB", "20"))) * 1024 * 1024
 
+def _telegram_backup_chat_ids() -> list[str]:
+    """Return configured Telegram backup chat IDs, accepting comma/newline separated values."""
+    raw = os.getenv("TELEGRAM_BACKUP_CHAT_ID", TELEGRAM_BACKUP_CHAT_ID).strip()
+    return [item.strip() for item in re.split(r"[,\n;]+", raw) if item.strip()]
+
 def telegram_backup_enabled() -> bool:
-    return bool(config.BOT_TOKEN and TELEGRAM_BACKUP_CHAT_ID)
+    return bool(config.BOT_TOKEN and _telegram_backup_chat_ids())
 
 def _telegram_api(method: str, **kwargs):
     url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/{method}"
@@ -531,7 +536,7 @@ def github_download_db():
         if n == 0:
             tmp.unlink(missing_ok=True)
             return False, "بکاپ گیت‌هاب کاربر ندارد"
-        local_n = _user_count(DB_PATH) if Path(DB_PATH).exists() else 0
+        local_n = _user_count(DB_PATH)
         if local_n > 0:
             try:
                 backup_db()
@@ -570,22 +575,72 @@ def get_last_restore_status() -> dict:
 
 
 def auto_restore_if_empty() -> bool:
-    """Restore automatically: pinned Telegram backup first, GitHub second."""
+    """Restore automatically: pinned Telegram backup first, GitHub second.
+
+    Every exit path records a human-readable status so the admin notification
+    can never fall back to the misleading "نامشخص" message.
+    """
     global _LAST_RESTORE_STATUS
-    local_n = _user_count(DB_PATH) if Path(DB_PATH).exists() else 0
-    _LAST_RESTORE_STATUS = {"ok": False, "msg": "", "local_users": local_n, "remote_users": -1}
+    try:
+        local_n = _user_count(DB_PATH)
+    except Exception as exc:
+        local_n = 0
+        _LAST_RESTORE_STATUS = {
+            "ok": False, "msg": f"خطا در بررسی دیتابیس محلی: {type(exc).__name__}: {exc}",
+            "local_users": 0, "remote_users": -1,
+        }
+        logger.error("auto_restore_if_empty local DB check failed", exc_info=True)
+        return False
+
+    _LAST_RESTORE_STATUS = {
+        "ok": local_n > 0,
+        "msg": f"DB OK — local={local_n}" if local_n > 0 else "در حال بررسی بکاپ‌های خودکار...",
+        "local_users": local_n,
+        "remote_users": -1,
+    }
     if local_n == 0:
         attempts = []
         if telegram_backup_enabled():
-            ok, msg = telegram_download_pinned_db(); attempts.append(f"Telegram: {msg}")
-            if ok:
-                _LAST_RESTORE_STATUS.update({"ok": True, "msg": msg, "local_users": _user_count(DB_PATH)}); return True
+            try:
+                ok, msg = telegram_download_pinned_db()
+                attempts.append(f"Telegram: {msg}")
+                if ok:
+                    restored_n = _user_count(DB_PATH)
+                    _LAST_RESTORE_STATUS.update({"ok": restored_n > 0, "msg": msg, "local_users": restored_n})
+                    if restored_n > 0:
+                        return True
+                    attempts.append("Telegram: فایل دریافت شد ولی دیتابیس محلی همچنان ۰ کاربر دارد")
+            except Exception as exc:
+                msg = f"خطای Telegram: {type(exc).__name__}: {exc}"
+                attempts.append(f"Telegram: {msg}")
+                logger.error("auto_restore_if_empty Telegram restore failed", exc_info=True)
+        else:
+            attempts.append("Telegram: غیرفعال (TELEGRAM_BACKUP_CHAT_ID تنظیم نشده)")
+
         if github_enabled():
-            ok, msg = github_download_db(); attempts.append(f"GitHub: {msg}")
-            if ok:
-                _LAST_RESTORE_STATUS.update({"ok": True, "msg": msg, "local_users": _user_count(DB_PATH)}); return True
-        _LAST_RESTORE_STATUS["msg"] = " | ".join(attempts) if attempts else "هیچ بکاپ خودکاری تنظیم نشده"
+            try:
+                ok, msg = github_download_db()
+                attempts.append(f"GitHub: {msg}")
+                if ok:
+                    restored_n = _user_count(DB_PATH)
+                    _LAST_RESTORE_STATUS.update({"ok": restored_n > 0, "msg": msg, "local_users": restored_n})
+                    if restored_n > 0:
+                        return True
+                    attempts.append("GitHub: فایل دریافت شد ولی دیتابیس محلی همچنان ۰ کاربر دارد")
+            except Exception as exc:
+                msg = f"خطای GitHub: {type(exc).__name__}: {exc}"
+                attempts.append(f"GitHub: {msg}")
+                logger.error("auto_restore_if_empty GitHub restore failed", exc_info=True)
+        else:
+            attempts.append("GitHub: غیرفعال")
+
+        _LAST_RESTORE_STATUS.update({
+            "ok": False,
+            "msg": " | ".join(attempts) if attempts else "هیچ بکاپ خودکاری تنظیم نشده",
+            "local_users": 0,
+        })
         return False
+
     logger.info("DB OK — local=%s", local_n)
     _LAST_RESTORE_STATUS.update({"ok": True, "msg": f"DB OK — local={local_n}", "local_users": local_n})
     return False
@@ -867,7 +922,7 @@ async def notify_admins_if_empty(bot):
     if not config.ADMIN_IDS:
         return
     st = get_last_restore_status()
-    detail = str(st.get("msg") or "نامشخص")
+    detail = str(st.get("msg") or "ریستور اجرا نشد یا وضعیت آن ثبت نشده است؛ لاگ startup auto-restore را بررسی کن.")
     if telegram_backup_enabled() or github_enabled():
         text = (
             "⚠️ دیتابیس بعد از استارت هنوز خالی است.\n\n"
