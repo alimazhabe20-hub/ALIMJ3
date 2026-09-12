@@ -29,9 +29,15 @@ def test_auto_backup_keeps_remote_failures_non_blocking(monkeypatch):
 def test_empty_restore_prefers_telegram(monkeypatch):
     import bot.db_persist as p
     calls = []
-    monkeypatch.setattr(p, "_user_count", lambda path: 0)
+    state = {"users": 0}
+    monkeypatch.setattr(p, "_user_count", lambda path: state["users"])
     monkeypatch.setattr(p, "telegram_backup_enabled", lambda: True)
-    monkeypatch.setattr(p, "telegram_download_pinned_db", lambda: (True, "restored 6 users"))
+
+    def fake_telegram_restore():
+        state["users"] = 6
+        return True, "restored 6 users"
+
+    monkeypatch.setattr(p, "telegram_download_pinned_db", fake_telegram_restore)
     monkeypatch.setattr(p, "github_enabled", lambda: True)
     monkeypatch.setattr(p, "github_download_db", lambda: calls.append("github") or (True, "github"))
     assert p.auto_restore_if_empty() is True
