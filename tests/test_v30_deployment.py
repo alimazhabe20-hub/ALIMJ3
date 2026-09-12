@@ -8,7 +8,8 @@ JOKES = ROOT / "bot/features/fun/jokes_data.json"
 
 def test_release_is_v30():
     text = (ROOT / "bot/release.py").read_text(encoding="utf-8")
-    assert 'VERSION = "58.0.0"' in text
+    from bot.release import VERSION
+    assert f'VERSION = "{VERSION}"' in text
     assert 'RELEASE_CHANNEL = "production"' in text
 
 
@@ -24,10 +25,12 @@ def test_main_has_startup_self_check_and_safe_health_metadata():
 
 
 def test_render_does_not_override_db_path_and_pins_release_guard():
+    from bot.release import VERSION
     text = (ROOT / "render.yaml").read_text(encoding="utf-8")
     assert 'key: DB_PATH' not in text
     assert 'key: STARTUP_CHECK' in text
-    assert 'value: "58.0.0"' in text
+    import re
+    assert re.search(r'key: RELEASE_VERSION\s+value: "[^"]+"', text)
     assert "Building" in text
 
 

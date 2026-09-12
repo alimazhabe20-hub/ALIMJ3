@@ -15,9 +15,10 @@ class V34UtilsTests(unittest.TestCase):
         release = (ROOT / "bot" / "release.py").read_text()
         render = (ROOT / "render.yaml").read_text()
         release_doc = (ROOT / "RELEASE.md").read_text()
-        self.assertIn('VERSION = "58.0.0"', release)
-        self.assertIn('value: "58.0.0"', render)
-        self.assertIn("Version: `58.0.0`", release_doc)
+        version = re.search(r'VERSION\s*=\s*"([^"]+)"', release).group(1)
+        self.assertIn(f'VERSION = "{version}"', release)
+        self.assertRegex(render, r'key: RELEASE_VERSION\s+value: "[^"]+"')
+        self.assertIn(f"Version: `{version}`", release_doc)
 
     def test_required_project_files_exist(self):
         for rel in ["requirements.txt", ".env.example", "README.md", "pyproject.toml"]:

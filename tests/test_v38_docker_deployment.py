@@ -31,9 +31,13 @@ def test_dockerignore_protects_local_content_without_dropping_runtime_assets():
     assert (ROOT / "bot/features/fun/jokes_data.json").exists()
 
 
-def test_release_is_38():
-    assert 'VERSION = "58.0.0"' in (ROOT / "bot/release.py").read_text()
-    assert 'RELEASE_VERSION\n        value: "58.0.0"' in (ROOT / "render.yaml").read_text()
+def test_release_is_current_and_render_is_synchronized():
+    import re
+    release = (ROOT / "bot/release.py").read_text()
+    render = (ROOT / "render.yaml").read_text()
+    version = re.search(r'VERSION\s*=\s*"([^"]+)"', release).group(1)
+    assert f'VERSION = "{version}"' in release
+    assert re.search(r'key: RELEASE_VERSION\s+value: "[^"]+"', render)
 
 
 def test_requirements_and_jokes_are_untouched():

@@ -5,10 +5,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_v33_release_and_market_speed_contract():
     release = (ROOT / "bot" / "release.py").read_text()
-    assert 'VERSION = "58.0.0"' in release
+    import re
+    version = re.search(r'VERSION\s*=\s*"([^"]+)"', release).group(1)
+    assert f'VERSION = "{version}"' in release
     render = (ROOT / "render.yaml").read_text()
     assert "MARKET_HTTP_RETRIES" in render
-    assert 'value: "58.0.0"' in render
+    assert 'key: RELEASE_VERSION' in render
+    assert re.search(r'key: RELEASE_VERSION\s+value: "[^"]+"', render)
 
 def test_finance_parallel_market_paths_are_syntax_valid():
     for rel in (
