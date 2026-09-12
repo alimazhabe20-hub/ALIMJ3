@@ -329,9 +329,21 @@ def _normalize(raw: dict[str, Any]) -> dict[str, Any] | None:
 
 
 
+# Actual منتشرشده در JSON هفتگی Forex Factory وجود ندارد؛
+# برای Actual از HTML تقویم استفاده می‌کنیم. چند hostname نگه داشته شده
+# تا تغییر/اختلال یکی از endpointها باعث خالی ماندن Actual نشود.
 FF_HTML_URLS = (
+    "https://calendar.forexfactory.com/calendar?week=this",
     "https://www.forexfactory.com/calendar?week=this",
+    "https://mds-wss.forexfactory.com/calendar?week=this",
+    "https://calendar.forexfactory.com/calendar?week=next",
     "https://www.forexfactory.com/calendar?week=next",
+)
+
+FF_DAILY_HTML_HOSTS = (
+    "https://calendar.forexfactory.com/calendar",
+    "https://www.forexfactory.com/calendar",
+    "https://mds-wss.forexfactory.com/calendar",
 )
 
 
@@ -341,10 +353,27 @@ def _ff_html_text(node) -> str:
     return re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip()
 
 
+def _ff_cell_text(row, field: str) -> str:
+    """Extract a calendar cell across old/new FF HTML layouts."""
+    selectors = (
+        f".calendar__{field}",
+        f"td.calendar__cell.calendar__{field}.{field}",
+        f"td.calendar__{field}.{field}",
+    )
+    for selector in selectors:
+        node = row.select_one(selector)
+        if node is None:
+            continue
+        value = _ff_html_text(node)
+        if value:
+            return value
+    return ""
+
+
 def _parse_ff_html(url: str) -> list[dict[str, Any]]:
     r = requests.get(url, timeout=18, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "application/json,text/html,*/*",
+        "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": "https://www.forexfactory.com/",
     })
@@ -352,21 +381,23 @@ def _parse_ff_html(url: str) -> list[dict[str, Any]]:
     soup = BeautifulSoup(r.text, "html.parser")
     out: list[dict[str, Any]] = []
     current_date = ""
-    for row in soup.select("tr.calendar__row, tr.calendar_row"):
-        date_node = row.select_one(".calendar__date")
-        date_text = _ff_html_text(date_node)
+
+    rows = soup.select("tr.calendar__row.calendar_row, tr.calendar_row")
+    for row in rows:
+        date_text = _ff_cell_text(row, "date")
         if date_text:
             current_date = date_text
-        time_text = _ff_html_text(row.select_one(".calendar__time"))
-        currency = _ff_html_text(row.select_one(".calendar__currency"))
-        title = _ff_html_text(row.select_one(".calendar__event"))
+
+        time_text = _ff_cell_text(row, "time")
+        currency = _ff_cell_text(row, "currency")
+        title = _ff_cell_text(row, "event")
         if not currency or not title or not current_date:
             continue
-        actual = _ff_html_text(row.select_one(".calendar__actual"))
-        forecast = _ff_html_text(row.select_one(".calendar__forecast"))
-        previous = _ff_html_text(row.select_one(".calendar__previous"))
-        # HTML is localized to Europe/London by Forex Factory. We only use
-        # its date for matching; the JSON feed remains the authoritative time.
+
+        actual = _ff_cell_text(row, "actual")
+        forecast = _ff_cell_text(row, "forecast")
+        previous = _ff_cell_text(row, "previous")
+
         out.append({
             "date_text": current_date,
             "time_text": time_text,
@@ -377,6 +408,63 @@ def _parse_ff_html(url: str) -> list[dict[str, Any]]:
             "previous": previous,
         })
     return out
+
+
+def _ff_daily_urls(day: datetime) -> list[str]:
+    """Build daily FF calendar URLs for a specific date."""
+    day_text = f"{day.strftime('%b').lower()}{day.day}.{day.year}"
+    return [f"{host}?day={day_text}" for host in FF_DAILY_HTML_HOSTS]
+
+
+def _refresh_ff_html_values(events: list[dict[str, Any]]) -> None:
+    if not events:
+        return
+
+    # First try the current/next week pages (fast path).
+    all_rows: list[dict[str, Any]] = []
+    for url in FF_HTML_URLS:
+        try:
+            rows = _parse_ff_html(url)
+            if rows:
+                all_rows.extend(rows)
+        except Exception as exc:
+            logger.debug("Forex Factory HTML enrichment failed for %s: %s", url, exc)
+
+    _merge_ff_html_values(events, all_rows)
+
+    # Critical fallback: for already-past events whose Actual is still blank,
+    # fetch their exact calendar day. The weekly JSON feed does not carry Actual,
+    # while the daily HTML page does.
+    missing = [e for e in events if not str(e.get("actual") or "").strip()]
+    if not missing:
+        return
+
+    london = pytz.timezone("Europe/London")
+    days_needed = sorted({
+        e["utc"].astimezone(london).date()
+        for e in missing
+        if e.get("utc")
+    })
+
+    for day in days_needed:
+        day_dt = datetime.combine(day, datetime.min.time())
+        day_rows: list[dict[str, Any]] = []
+
+        for url in _ff_daily_urls(day_dt):
+            try:
+                rows = _parse_ff_html(url)
+                if rows:
+                    day_rows.extend(rows)
+                    # One successful source for this exact day is enough.
+                    break
+            except Exception as exc:
+                logger.debug("Forex Factory daily HTML failed for %s: %s", url, exc)
+
+        if day_rows:
+            _merge_ff_html_values(missing, day_rows)
+            missing = [e for e in missing if not str(e.get("actual") or "").strip()]
+            if not missing:
+                break
 
 
 def _ff_date_key(text: str) -> str:
@@ -495,6 +583,12 @@ def _normalize_biquote_row(raw: dict[str, Any]) -> dict[str, Any] | None:
     impact = _biquote_importance(str(raw.get("importance") or ""))
     # actual ممکن است 0 معتبر باشد؛ فقط None/خالی را خالی بگذار
     actual_raw = raw.get("actual")
+    if actual_raw is None or actual_raw == "":
+        for _key in ("releasedActual", "actualValue", "releasedValue"):
+            _candidate = raw.get(_key)
+            if _candidate is not None and _candidate != "":
+                actual_raw = _candidate
+                break
     if actual_raw is None or actual_raw == "":
         actual = ""
     else:
