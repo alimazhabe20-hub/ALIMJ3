@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 بکاپ و ریستور خودکار و رایگان
-  1) Telegram خصوصی → کپی خارج از سرور و بدون کارت
-  2) Local → چرخش بکاپ روی دیسک موجود
-  3) GitHub → فقط در صورت تنظیم، به‌عنوان fallback اختیاری
+  1) GitHub (GITHUB_TOKEN + GITHUB_REPO) → کاملاً خودکار
+  2) تلگرام ادمین (دستی /backup و /restore)
 """
 import asyncio
 import base64
@@ -34,6 +33,142 @@ GITHUB_RETRIES = max(1, int(os.getenv("GITHUB_BACKUP_RETRIES", "4")))
 GITHUB_BACKOFF = max(0.5, float(os.getenv("GITHUB_BACKUP_BACKOFF", "1.5")))
 REMOTE_BACKUP_TIMEOUT = max(2.0, float(os.getenv("BACKUP_REMOTE_TIMEOUT", "8")))
 
+
+
+# Telegram private channel backup (off-site, no card / external cloud required)
+TELEGRAM_BACKUP_CHAT_ID = os.getenv("TELEGRAM_BACKUP_CHAT_ID", "").strip()
+TELEGRAM_BACKUP_MAX_DOWNLOAD_BYTES = max(1, int(os.getenv("TELEGRAM_BACKUP_MAX_DOWNLOAD_MB", "20"))) * 1024 * 1024
+
+def telegram_backup_enabled() -> bool:
+    return bool(config.BOT_TOKEN and TELEGRAM_BACKUP_CHAT_ID)
+
+def _telegram_api(method: str, **kwargs):
+    url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/{method}"
+    return requests.post(url, timeout=max(REMOTE_BACKUP_TIMEOUT, 30), **kwargs)
+
+def _telegram_get(method: str, **kwargs):
+    url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/{method}"
+    return requests.get(url, timeout=max(REMOTE_BACKUP_TIMEOUT, 30), **kwargs)
+
+def telegram_upload_db() -> tuple[bool, str]:
+    """Upload a fresh SQLite snapshot to the private channel and pin it.
+
+    Pinning is intentional: on a fresh Render instance the bot can call getChat
+    and recover the pinned backup without needing a second storage provider.
+    """
+    if not telegram_backup_enabled():
+        return False, "Telegram backup تنظیم نشده (TELEGRAM_BACKUP_CHAT_ID)"
+    users = _user_count(DB_PATH)
+    if users == 0:
+        return False, "DB خالی است — Telegram آپلود نشد"
+    snap = _sqlite_snapshot_to_temp()
+    if not snap:
+        return False, "اسنپ‌شات SQLite ساخته نشد"
+    try:
+        size = snap.stat().st_size
+        if size > 50 * 1024 * 1024:
+            return False, f"بکاپ {size//(1024*1024)}MB است و از سقف ارسال Bot API بیشتر است"
+        caption = (
+            "💾 بکاپ خودکار دیتابیس\n"
+            f"👥 کاربران: {users}\n"
+            f"📦 {size/1024:.1f} KB\n"
+            f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+            "🔐 نسخه اصلی بکاپ — پیام را حذف نکنید"
+        )
+        with open(snap, "rb") as f:
+            r = _telegram_api(
+                "sendDocument",
+                data={"chat_id": TELEGRAM_BACKUP_CHAT_ID, "caption": caption},
+                files={"document": (f"bot_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db", f)},
+            )
+        data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        if r.status_code != 200 or not data.get("ok"):
+            return False, f"Telegram sendDocument {r.status_code}: {r.text[:220]}"
+        msg = data.get("result") or {}
+        message_id = msg.get("message_id")
+        if not message_id:
+            return False, "Telegram message_id دریافت نشد"
+        # Latest backup is the pinned pointer used for automatic restore.
+        pin = _telegram_api(
+            "pinChatMessage",
+            data={
+                "chat_id": TELEGRAM_BACKUP_CHAT_ID,
+                "message_id": message_id,
+                "disable_notification": True,
+            },
+        )
+        pin_data = pin.json() if pin.headers.get("content-type", "").startswith("application/json") else {}
+        if pin.status_code != 200 or not pin_data.get("ok"):
+            logger.warning("Telegram backup uploaded but pin failed: %s", pin.text[:220])
+            return True, f"Telegram:OK ولی pin نشد (message_id={message_id})"
+        logger.info("Telegram channel backup OK (%s users, message_id=%s)", users, message_id)
+        return True, f"Telegram:OK ({users} کاربر، پیام {message_id} پین شد)"
+    except Exception as exc:
+        logger.error("telegram_upload_db: %s", exc, exc_info=True)
+        return False, str(exc)
+    finally:
+        try:
+            snap.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+def telegram_download_pinned_db() -> tuple[bool, str]:
+    """Automatically restore the pinned backup from the private channel."""
+    if not telegram_backup_enabled():
+        return False, "Telegram backup تنظیم نشده"
+    try:
+        r = _telegram_get("getChat", params={"chat_id": TELEGRAM_BACKUP_CHAT_ID})
+        data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        if r.status_code != 200 or not data.get("ok"):
+            return False, f"Telegram getChat {r.status_code}: {r.text[:220]}"
+        pinned = (data.get("result") or {}).get("pinned_message") or {}
+        document = pinned.get("document") or {}
+        file_id = document.get("file_id")
+        if not file_id:
+            return False, "در کانال بکاپ پین‌شده‌ای پیدا نشد"
+        file_size = int(document.get("file_size") or 0)
+        if file_size > TELEGRAM_BACKUP_MAX_DOWNLOAD_BYTES:
+            return False, f"بکاپ {file_size//(1024*1024)}MB است و از سقف دانلود امن تنظیم‌شده بیشتر است"
+        gf = _telegram_get("getFile", params={"file_id": file_id})
+        gf_data = gf.json() if gf.headers.get("content-type", "").startswith("application/json") else {}
+        if gf.status_code != 200 or not gf_data.get("ok"):
+            return False, f"Telegram getFile {gf.status_code}: {gf.text[:220]}"
+        file_path = (gf_data.get("result") or {}).get("file_path")
+        if not file_path:
+            return False, "Telegram file_path دریافت نشد"
+        dl_url = f"https://api.telegram.org/file/bot{config.BOT_TOKEN}/{file_path}"
+        dl = requests.get(dl_url, timeout=max(REMOTE_BACKUP_TIMEOUT, 45))
+        if dl.status_code != 200:
+            return False, f"Telegram file download {dl.status_code}"
+        raw = dl.content
+        if len(raw) > TELEGRAM_BACKUP_MAX_DOWNLOAD_BYTES:
+            return False, "فایل دانلودشده بزرگ‌تر از حد مجاز است"
+        tmp = Path(DB_PATH).with_suffix(f".db.telegram.{secrets.token_hex(4)}")
+        try:
+            tmp.write_bytes(raw)
+            valid, count_or_error = _validate_sqlite_backup(tmp)
+            if not valid or int(count_or_error) <= 0:
+                return False, f"بکاپ Telegram نامعتبر است: {count_or_error}"
+            n = int(count_or_error)
+            dest = Path(DB_PATH)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.exists() and _user_count(dest) > 0:
+                try: backup_db()
+                except Exception: logger.warning("pre-Telegram-restore local backup failed", exc_info=True)
+            source = sqlite3.connect(str(tmp), timeout=30)
+            target = sqlite3.connect(str(dest), timeout=30)
+            try:
+                target.execute("PRAGMA busy_timeout=30000")
+                source.backup(target); target.commit()
+            finally:
+                target.close(); source.close()
+            logger.warning("Restored from pinned Telegram backup — %s users", n)
+            return True, f"از بکاپ پین‌شده Telegram بازگردانی شد — {n} کاربر"
+        finally:
+            tmp.unlink(missing_ok=True)
+    except Exception as exc:
+        logger.error("telegram_download_pinned_db: %s", exc, exc_info=True)
+        return False, str(exc)
 
 
 def _gh_headers():
@@ -373,71 +508,52 @@ def get_last_restore_status() -> dict:
 
 
 def auto_restore_if_empty() -> bool:
-    """Restore automatically from optional GitHub; Telegram backups require /restore."""
+    """Restore automatically: pinned Telegram backup first, GitHub second."""
     global _LAST_RESTORE_STATUS
     local_n = _user_count(DB_PATH) if Path(DB_PATH).exists() else 0
     _LAST_RESTORE_STATUS = {"ok": False, "msg": "", "local_users": local_n, "remote_users": -1}
     if local_n == 0:
         attempts = []
+        if telegram_backup_enabled():
+            ok, msg = telegram_download_pinned_db(); attempts.append(f"Telegram: {msg}")
+            if ok:
+                _LAST_RESTORE_STATUS.update({"ok": True, "msg": msg, "local_users": _user_count(DB_PATH)}); return True
         if github_enabled():
             ok, msg = github_download_db(); attempts.append(f"GitHub: {msg}")
             if ok:
                 _LAST_RESTORE_STATUS.update({"ok": True, "msg": msg, "local_users": _user_count(DB_PATH)}); return True
-        if telegram_backup_enabled():
-            attempts.append("Telegram: بکاپ موجود است؛ برای ریستور فایل بکاپ را با /restore ارسال کن")
-        _LAST_RESTORE_STATUS["msg"] = " | ".join(attempts) if attempts else "بکاپ ابری تنظیم نشده؛ Telegram را برای بکاپ فعال کن"
+        _LAST_RESTORE_STATUS["msg"] = " | ".join(attempts) if attempts else "هیچ بکاپ خودکاری تنظیم نشده"
         return False
-    try: remote_n = github_remote_user_count() if github_enabled() else 0
-    except Exception: remote_n = 0
-    _LAST_RESTORE_STATUS["remote_users"] = remote_n
-    if remote_n > local_n:
-        ok, msg = github_download_db()
-        _LAST_RESTORE_STATUS.update({"ok": ok, "msg": msg, "local_users": _user_count(DB_PATH), "remote_users": remote_n}); return ok
-    msg = f"DB OK — local={local_n} remote={remote_n}"
-    logger.info(msg); _LAST_RESTORE_STATUS.update({"ok": True, "msg": msg, "local_users": local_n}); return False
-
-
-def telegram_backup_enabled() -> bool:
-    """Backup target: a private Telegram channel/group/chat."""
-    return bool(os.getenv("TELEGRAM_BACKUP_CHAT_ID", "").strip() and config.BOT_TOKEN)
-
-
-def _telegram_backup_chat_ids() -> list[int | str]:
-    raw = os.getenv("TELEGRAM_BACKUP_CHAT_ID", "").strip()
-    if not raw:
-        return []
-    result = []
-    for item in raw.split(","):
-        item = item.strip()
-        if not item:
-            continue
-        try:
-            result.append(int(item))
-        except ValueError:
-            result.append(item)
-    return result
+    logger.info("DB OK — local=%s", local_n)
+    _LAST_RESTORE_STATUS.update({"ok": True, "msg": f"DB OK — local={local_n}", "local_users": local_n})
+    return False
 
 
 def auto_backup():
-    """Local backup + Telegram off-site backup + optional GitHub."""
-    results = []; local_ok = False
+    """Local + Telegram private-channel backup + optional GitHub."""
+    results = []; remote_ok = False
     try:
         backup_db(); stable = Path(DB_PATH).parent / "bot_data.backup.db"
         local_ok = bool(stable.exists() and _validate_sqlite_backup(stable)[0])
         results.append("local:OK" if local_ok else "local:FAIL(backup artifact missing/invalid)")
     except Exception as e:
-        logger.error("local backup: %s", e, exc_info=True); results.append(f"local:FAIL({e})")
-    # Telegram is the primary no-card off-site copy. The periodic Telegram job
-    # sends a full SQLite snapshot; keeping the upload separate avoids duplicate files.
-    results.append("telegram:configured" if telegram_backup_enabled() else "telegram:disabled")
+        local_ok = False; logger.error("local backup: %s", e, exc_info=True); results.append(f"local:FAIL({e})")
+    if telegram_backup_enabled():
+        try:
+            ok, msg = telegram_upload_db(); remote_ok |= bool(ok); results.append(f"telegram:{'OK' if ok else 'FAIL'}({msg})")
+        except Exception as e:
+            logger.error("Telegram backup: %s", e, exc_info=True); results.append(f"telegram:FAIL({e})")
+    else:
+        results.append("telegram:disabled")
     if github_enabled():
         try:
-            ok, msg = github_upload_db(); results.append(f"github:{'OK' if ok else 'FAIL'}({msg})")
+            ok, msg = github_upload_db(); remote_ok |= bool(ok); results.append(f"github:{'OK' if ok else 'FAIL'}({msg})")
         except Exception as e:
             logger.error("github backup: %s", e, exc_info=True); results.append(f"github:FAIL({e})")
     else:
         results.append("github:disabled")
-    return bool(local_ok or telegram_backup_enabled()), " | ".join(results)
+    return bool(local_ok or remote_ok), " | ".join(results)
+
 
 def send_db_to_admins_sync(caption: str = None):
     """
@@ -473,11 +589,7 @@ def send_db_to_admins_sync(caption: str = None):
     ok = 0
     errors = []
     try:
-        recipients = list(config.ADMIN_IDS)
-        for backup_chat_id in _telegram_backup_chat_ids():
-            if backup_chat_id not in recipients:
-                recipients.append(backup_chat_id)
-        for admin_id in recipients:
+        for admin_id in config.ADMIN_IDS:
             try:
                 with open(send_path, "rb") as f:
                     r = requests.post(
@@ -500,7 +612,7 @@ def send_db_to_admins_sync(caption: str = None):
             except Exception:
                 pass
 
-    msg = f"ارسال sync به {ok}/{len(set(config.ADMIN_IDS) | set(map(str, _telegram_backup_chat_ids())))} مقصد"
+    msg = f"ارسال sync به {ok}/{len(config.ADMIN_IDS)} ادمین"
     if errors:
         msg += " | " + "; ".join(errors)[:200]
     return ok > 0, msg
@@ -528,7 +640,20 @@ def shutdown_backup(reason: str = "shutdown"):
         results.append(f"local:FAIL({e})")
         logger.error("shutdown local backup: %s", e)
 
-    # Telegram backup is sent below.
+    if telegram_backup_enabled():
+        tg_ok = False; last_msg = ""
+        for attempt in range(1, 4):
+            try:
+                tg_ok, last_msg = telegram_upload_db()
+                if tg_ok:
+                    results.append(f"telegram_channel:OK(try={attempt})")
+                    break
+            except Exception as e:
+                last_msg = str(e); logger.error("shutdown Telegram channel try %s error: %s", attempt, e)
+            time.sleep(min(1.5 * attempt, 4))
+        if not tg_ok: results.append(f"telegram_channel:FAIL({last_msg})")
+    else:
+        results.append("telegram_channel:disabled")
 
     if github_enabled():
         gh_ok = False
@@ -598,11 +723,7 @@ async def send_db_to_admins(bot, caption: str = None):
     )
     ok = 0
     try:
-        recipients = list(config.ADMIN_IDS)
-        for backup_chat_id in _telegram_backup_chat_ids():
-            if backup_chat_id not in recipients:
-                recipients.append(backup_chat_id)
-        for admin_id in recipients:
+        for admin_id in config.ADMIN_IDS:
             try:
                 with open(send_path, "rb") as f:
                     await bot.send_document(
@@ -621,7 +742,7 @@ async def send_db_to_admins(bot, caption: str = None):
                 snap.unlink(missing_ok=True)
             except Exception:
                 pass
-    return ok > 0, f"ارسال به {ok} مقصد ({users} کاربر)"
+    return ok > 0, f"ارسال به {ok}/{len(config.ADMIN_IDS)} ادمین ({users} کاربر)"
 
 
 async def restore_db_from_file(file_path: str):
@@ -666,6 +787,9 @@ async def restore_db_from_file(file_path: str):
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
 
+    if telegram_backup_enabled():
+        try: telegram_upload_db()
+        except Exception: logger.warning("Post-restore Telegram backup failed", exc_info=True)
     if github_enabled():
         try:
             github_upload_db()
@@ -682,14 +806,18 @@ async def notify_admins_if_empty(bot):
         return
     st = get_last_restore_status()
     detail = str(st.get("msg") or "نامشخص")
-    text = (
-        "⚠️ دیتابیس بعد از استارت هنوز خالی است.\n\n"
-        f"نتیجه ریستور خودکار:\n{detail}\n\n"
-        "کار لازم:\n"
-        "۱) از کانال/چت خصوصی بکاپ، آخرین فایل .db را بردار و با کپشن /restore بفرست\n"
-        "۲) اگر GitHub فعال است، GITHUB_TOKEN و GITHUB_REPO را بررسی کن\n"
-        "۳) بعد از ریستور موفق، /backup بزن تا یک نسخه جدید در Telegram ذخیره شود"
-    )
+    if telegram_backup_enabled() or github_enabled():
+        text = (
+            "⚠️ دیتابیس بعد از استارت هنوز خالی است.\n\n"
+            f"نتیجه ریستور خودکار:\n{detail}\n\n"
+            "اگر ریستور خودکار ناموفق بود، کانال بکاپ و TELEGRAM_BACKUP_CHAT_ID را بررسی کن.\n"
+            "ریستور دستی /restore همچنان به‌عنوان راه اضطراری فعال است."
+        )
+    else:
+        text = (
+            "⚠️ دیتابیس خالی است و بکاپ خودکار تنظیم نشده.\n\n"
+            "TELEGRAM_BACKUP_CHAT_ID را در Render تنظیم کن."
+        )
     for admin_id in config.ADMIN_IDS:
         try:
             await bot.send_message(chat_id=admin_id, text=text)
