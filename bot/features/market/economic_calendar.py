@@ -11,6 +11,7 @@ import html
 import re
 import time
 import threading
+from difflib import SequenceMatcher
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -493,6 +494,19 @@ def _ff_date_key(text: str) -> str:
 
 def _title_key(text: str) -> str:
     t = re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+    # Forex Factory و feed اصلی بعضی خبرها را با نام کامل و بعضی را
+    # با مخفف می‌فرستند. این aliasها فقط برای تطبیق همان رویداد هستند.
+    aliases = {
+        "trade bal": "trade balance",
+        "goods trade bal": "goods trade balance",
+        "const out": "construction output",
+        "ind prod": "industrial production",
+        "mfg prod": "manufacturing production",
+        "svc idx": "index of services",
+        "bsi mfg": "bsi manufacturing index",
+    }
+    for short, full in aliases.items():
+        t = re.sub(rf"\b{re.escape(short)}\b", full, t)
     return re.sub(r"\s+", " ", t)
 
 
@@ -513,11 +527,22 @@ def _merge_ff_html_values(events: list[dict[str, Any]], rows: list[dict[str, Any
         key = (date_key, e["country"], _title_key(e["title"]))
         candidates = lookup.get(key, [])
         if not candidates:
-            # Some FF rows include a country prefix or a trailing revision marker.
+            # Some FF rows use abbreviations while the feed uses full names.
+            # Try a conservative fuzzy match only within the same London date/currency.
             ek = _title_key(e["title"])
+            best_score = 0.0
+            best_vals = None
             for (dk, cur, tk), vals in lookup.items():
-                if dk == date_key and cur == e["country"] and (ek == tk or ek in tk or tk in ek):
-                    candidates.extend(vals)
+                if dk != date_key or cur != e["country"]:
+                    continue
+                score = SequenceMatcher(None, ek, tk).ratio()
+                if ek in tk or tk in ek:
+                    score = max(score, 0.90)
+                if score > best_score:
+                    best_score = score
+                    best_vals = vals
+            if best_score >= 0.68 and best_vals:
+                candidates.extend(best_vals)
         if not candidates:
             continue
         r = candidates[0]
