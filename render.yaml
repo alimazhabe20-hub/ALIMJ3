@@ -61,12 +61,12 @@ services:
         value: "4"
       - key: GITHUB_BACKUP_BACKOFF
         value: "1.5"
-      - key: TELEGRAM_BACKUP_CHAT_ID
-        sync: false
       - key: BACKUP_INTERVAL_SECONDS
         value: "1800"
       - key: TELEGRAM_BACKUP_INTERVAL_SECONDS
         value: "21600"
+      - key: TELEGRAM_BACKUP_CHAT_ID
+        sync: false
       - key: METRICS_TOKEN
         sync: false
       - key: STARTUP_CHECK
