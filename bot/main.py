@@ -133,6 +133,15 @@ async def post_init(app: Application):
                     restored = await asyncio.to_thread(auto_restore_if_empty)
                 except Exception as restore_exc:
                     logger.error("startup auto-restore attempt %s failed: %s", attempt, restore_exc, exc_info=True)
+                    try:
+                        from bot import db_persist as _dbp
+                        _dbp._LAST_RESTORE_STATUS.update({
+                            "ok": False,
+                            "msg": f"خطای اجرای ریستور: {type(restore_exc).__name__}: {restore_exc}",
+                            "local_users": 0,
+                        })
+                    except Exception:
+                        pass
                     restored = False
                 if restored or _user_count(DB_PATH) > 0:
                     logger.info("startup auto-restore SUCCESS on attempt %s: %s", attempt, get_last_restore_status().get("msg"))
