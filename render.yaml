@@ -49,11 +49,27 @@ services:
         value: 8
       - key: AI_ROUTING_MODE
         value: balanced
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_REPO
+        sync: false
+      - key: GITHUB_BRANCH
+        value: main
+      - key: GITHUB_DB_FILE
+        value: backups/latest.db.gz
+      - key: GITHUB_BACKUP_RETRIES
+        value: "4"
+      - key: GITHUB_BACKUP_BACKOFF
+        value: "1.5"
+      - key: BACKUP_INTERVAL_SECONDS
+        value: "1800"
+      - key: TELEGRAM_BACKUP_INTERVAL_SECONDS
+        value: "21600"
       - key: METRICS_TOKEN
         sync: false
       - key: STARTUP_CHECK
         value: "true"
       - key: RELEASE_VERSION
-        value: "58.0.0"
+        value: "59.0.0"
     buildCommand: python -c "from bot.release import version_string; print('Building', version_string())" && pip install -r requirements.txt
     startCommand: python -m bot.main
