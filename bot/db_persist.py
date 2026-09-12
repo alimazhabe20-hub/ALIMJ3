@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 بکاپ و ریستور خودکار و رایگان
-  1) GitHub (GITHUB_TOKEN + GITHUB_REPO) → کاملاً خودکار
-  2) تلگرام ادمین (دستی /backup و /restore)
+  1) Telegram خصوصی → کپی خارج از سرور و بدون کارت
+  2) Local → چرخش بکاپ روی دیسک موجود
+  3) GitHub → فقط در صورت تنظیم، به‌عنوان fallback اختیاری
 """
 import asyncio
 import base64
@@ -13,6 +14,7 @@ import secrets
 import gzip
 import time
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -31,6 +33,7 @@ API = "https://api.github.com"
 GITHUB_RETRIES = max(1, int(os.getenv("GITHUB_BACKUP_RETRIES", "4")))
 GITHUB_BACKOFF = max(0.5, float(os.getenv("GITHUB_BACKUP_BACKOFF", "1.5")))
 REMOTE_BACKUP_TIMEOUT = max(2.0, float(os.getenv("BACKUP_REMOTE_TIMEOUT", "8")))
+
 
 
 def _gh_headers():
@@ -370,91 +373,71 @@ def get_last_restore_status() -> dict:
 
 
 def auto_restore_if_empty() -> bool:
-    """
-    ریستور خودکار:
-    - اگر DB محلی خالی است → از GitHub بگیر
-    - اگر GitHub کاربر بیشتری دارد → از GitHub بگیر (جلوگیری از فراموشی بعد از دیپلوی)
-    """
+    """Restore automatically from optional GitHub; Telegram backups require /restore."""
     global _LAST_RESTORE_STATUS
     local_n = _user_count(DB_PATH) if Path(DB_PATH).exists() else 0
-    _LAST_RESTORE_STATUS = {
-        "ok": False,
-        "msg": "",
-        "local_users": local_n,
-        "remote_users": -1,
-    }
-    if not github_enabled():
-        msg = "GitHub تنظیم نشده (GITHUB_TOKEN / GITHUB_REPO)"
-        logger.info("GitHub not configured — skip auto-restore")
-        _LAST_RESTORE_STATUS["msg"] = msg
-        return False
+    _LAST_RESTORE_STATUS = {"ok": False, "msg": "", "local_users": local_n, "remote_users": -1}
     if local_n == 0:
-        ok, msg = github_download_db()
-        logger.info(f"auto_restore (empty local): {msg}")
-        _LAST_RESTORE_STATUS.update({"ok": ok, "msg": msg, "local_users": _user_count(DB_PATH)})
-        return ok
-    # محلی داده دارد؛ فقط اگر ریموت غنی‌تر است جایگزین کن
-    try:
-        remote_n = github_remote_user_count()
-    except Exception:
-        remote_n = 0
+        attempts = []
+        if github_enabled():
+            ok, msg = github_download_db(); attempts.append(f"GitHub: {msg}")
+            if ok:
+                _LAST_RESTORE_STATUS.update({"ok": True, "msg": msg, "local_users": _user_count(DB_PATH)}); return True
+        if telegram_backup_enabled():
+            attempts.append("Telegram: بکاپ موجود است؛ برای ریستور فایل بکاپ را با /restore ارسال کن")
+        _LAST_RESTORE_STATUS["msg"] = " | ".join(attempts) if attempts else "بکاپ ابری تنظیم نشده؛ Telegram را برای بکاپ فعال کن"
+        return False
+    try: remote_n = github_remote_user_count() if github_enabled() else 0
+    except Exception: remote_n = 0
     _LAST_RESTORE_STATUS["remote_users"] = remote_n
     if remote_n > local_n:
-        logger.warning(
-            "GitHub backup has more users (%s > %s) — restoring to avoid data loss",
-            remote_n, local_n,
-        )
         ok, msg = github_download_db()
-        logger.info(f"auto_restore (remote richer): {msg}")
-        _LAST_RESTORE_STATUS.update({
-            "ok": ok,
-            "msg": msg,
-            "local_users": _user_count(DB_PATH),
-            "remote_users": remote_n,
-        })
-        return ok
+        _LAST_RESTORE_STATUS.update({"ok": ok, "msg": msg, "local_users": _user_count(DB_PATH), "remote_users": remote_n}); return ok
     msg = f"DB OK — local={local_n} remote={remote_n}"
-    logger.info(msg)
-    _LAST_RESTORE_STATUS.update({"ok": True, "msg": msg, "local_users": local_n})
-    return False
+    logger.info(msg); _LAST_RESTORE_STATUS.update({"ok": True, "msg": msg, "local_users": local_n}); return False
+
+
+def telegram_backup_enabled() -> bool:
+    """Backup target: a private Telegram channel/group/chat."""
+    return bool(os.getenv("TELEGRAM_BACKUP_CHAT_ID", "").strip() and config.BOT_TOKEN)
+
+
+def _telegram_backup_chat_ids() -> list[int | str]:
+    raw = os.getenv("TELEGRAM_BACKUP_CHAT_ID", "").strip()
+    if not raw:
+        return []
+    result = []
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            result.append(int(item))
+        except ValueError:
+            result.append(item)
+    return result
 
 
 def auto_backup():
-    """
-    بکاپ کامل خودکار:
-    1) همیشه بکاپ محلی چرخشی (backups/ + bot_data.backup.db)
-    2) اگر GitHub تنظیم شده باشد، آپلود به ریپو
-    برمی‌گرداند: (موفقیت_کلی, پیام_خلاصه)
-    """
-    results = []
-    local_ok = False
+    """Local backup + Telegram off-site backup + optional GitHub."""
+    results = []; local_ok = False
     try:
-        backup_db()
-        stable = Path(DB_PATH).parent / "bot_data.backup.db"
-        valid = stable.exists() and _validate_sqlite_backup(stable)[0]
-        local_ok = bool(valid)
+        backup_db(); stable = Path(DB_PATH).parent / "bot_data.backup.db"
+        local_ok = bool(stable.exists() and _validate_sqlite_backup(stable)[0])
         results.append("local:OK" if local_ok else "local:FAIL(backup artifact missing/invalid)")
     except Exception as e:
-        logger.error(f"local backup: {e}")
-        results.append(f"local:FAIL({e})")
-
-    gh_ok = False
+        logger.error("local backup: %s", e, exc_info=True); results.append(f"local:FAIL({e})")
+    # Telegram is the primary no-card off-site copy. The periodic Telegram job
+    # sends a full SQLite snapshot; keeping the upload separate avoids duplicate files.
+    results.append("telegram:configured" if telegram_backup_enabled() else "telegram:disabled")
     if github_enabled():
         try:
-            ok, msg = github_upload_db()
-            gh_ok = bool(ok)
-            results.append(f"github:{'OK' if ok else 'FAIL'}({msg})")
+            ok, msg = github_upload_db(); results.append(f"github:{'OK' if ok else 'FAIL'}({msg})")
         except Exception as e:
-            logger.error(f"github backup: {e}")
-            results.append(f"github:FAIL({e})")
+            logger.error("github backup: %s", e, exc_info=True); results.append(f"github:FAIL({e})")
     else:
         results.append("github:disabled")
-
-    # روی Render بدون دیسک پایدار، فقط GitHub/تلگرام نجات‌دهنده است
-    overall = gh_ok or local_ok
-    return overall, " | ".join(results)
-
-
+    return bool(local_ok or telegram_backup_enabled()), " | ".join(results)
 
 def send_db_to_admins_sync(caption: str = None):
     """
@@ -490,7 +473,11 @@ def send_db_to_admins_sync(caption: str = None):
     ok = 0
     errors = []
     try:
-        for admin_id in config.ADMIN_IDS:
+        recipients = list(config.ADMIN_IDS)
+        for backup_chat_id in _telegram_backup_chat_ids():
+            if backup_chat_id not in recipients:
+                recipients.append(backup_chat_id)
+        for admin_id in recipients:
             try:
                 with open(send_path, "rb") as f:
                     r = requests.post(
@@ -513,7 +500,7 @@ def send_db_to_admins_sync(caption: str = None):
             except Exception:
                 pass
 
-    msg = f"ارسال sync به {ok}/{len(config.ADMIN_IDS)} ادمین"
+    msg = f"ارسال sync به {ok}/{len(set(config.ADMIN_IDS) | set(map(str, _telegram_backup_chat_ids())))} مقصد"
     if errors:
         msg += " | " + "; ".join(errors)[:200]
     return ok > 0, msg
@@ -540,6 +527,8 @@ def shutdown_backup(reason: str = "shutdown"):
     except Exception as e:
         results.append(f"local:FAIL({e})")
         logger.error("shutdown local backup: %s", e)
+
+    # Telegram backup is sent below.
 
     if github_enabled():
         gh_ok = False
@@ -609,7 +598,11 @@ async def send_db_to_admins(bot, caption: str = None):
     )
     ok = 0
     try:
-        for admin_id in config.ADMIN_IDS:
+        recipients = list(config.ADMIN_IDS)
+        for backup_chat_id in _telegram_backup_chat_ids():
+            if backup_chat_id not in recipients:
+                recipients.append(backup_chat_id)
+        for admin_id in recipients:
             try:
                 with open(send_path, "rb") as f:
                     await bot.send_document(
@@ -628,7 +621,7 @@ async def send_db_to_admins(bot, caption: str = None):
                 snap.unlink(missing_ok=True)
             except Exception:
                 pass
-    return ok > 0, f"ارسال به {ok}/{len(config.ADMIN_IDS)} ادمین ({users} کاربر)"
+    return ok > 0, f"ارسال به {ok} مقصد ({users} کاربر)"
 
 
 async def restore_db_from_file(file_path: str):
@@ -689,22 +682,14 @@ async def notify_admins_if_empty(bot):
         return
     st = get_last_restore_status()
     detail = str(st.get("msg") or "نامشخص")
-    if github_enabled():
-        text = (
-            "⚠️ دیتابیس بعد از استارت هنوز خالی است.\n\n"
-            f"نتیجه ریستور GitHub:\n{detail}\n\n"
-            "کار لازم:\n"
-            "۱) آخرین فایل .db بکاپ را با کپشن /restore بفرست\n"
-            "۲) GITHUB_TOKEN و GITHUB_REPO را در Render چک کن\n"
-            "۳) در ریپوی بکاپ وجود فایل bot_data.db را بررسی کن\n"
-            "۴) بعد از ریستور موفق، یک‌بار /backup بزن تا GitHub پر شود"
-        )
-    else:
-        text = (
-            "⚠️ دیتابیس خالی است و GitHub تنظیم نیست.\n\n"
-            "GITHUB_TOKEN و GITHUB_REPO را در Render ست کن،\n"
-            "یا فایل بکاپ را با کپشن /restore بفرست."
-        )
+    text = (
+        "⚠️ دیتابیس بعد از استارت هنوز خالی است.\n\n"
+        f"نتیجه ریستور خودکار:\n{detail}\n\n"
+        "کار لازم:\n"
+        "۱) از کانال/چت خصوصی بکاپ، آخرین فایل .db را بردار و با کپشن /restore بفرست\n"
+        "۲) اگر GitHub فعال است، GITHUB_TOKEN و GITHUB_REPO را بررسی کن\n"
+        "۳) بعد از ریستور موفق، /backup بزن تا یک نسخه جدید در Telegram ذخیره شود"
+    )
     for admin_id in config.ADMIN_IDS:
         try:
             await bot.send_message(chat_id=admin_id, text=text)
