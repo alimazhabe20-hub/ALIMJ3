@@ -64,7 +64,9 @@ class Config:
     RESTORE_MAX_BYTES = int(os.getenv("RESTORE_MAX_BYTES", str(256 * 1024 * 1024)))
 
     # تعداد بکاپ‌هایی که نگه داشته می‌شوند
-    BACKUP_KEEP = int(os.getenv("BACKUP_KEEP", "14"))
+    BACKUP_KEEP = max(3, int(os.getenv("BACKUP_KEEP", "14")))
+    BACKUP_INTERVAL_SECONDS = max(300, int(os.getenv("BACKUP_INTERVAL_SECONDS", "1800")))
+    TELEGRAM_BACKUP_INTERVAL_SECONDS = max(3600, int(os.getenv("TELEGRAM_BACKUP_INTERVAL_SECONDS", "21600")))
     AUTOMATION_DIGEST_HOUR = int(os.getenv("AUTOMATION_DIGEST_HOUR", "8"))
     # Deployment/runtime diagnostics (safe to expose only as non-secret metadata).
     RELEASE_VERSION = os.getenv("RELEASE_VERSION", "").strip()

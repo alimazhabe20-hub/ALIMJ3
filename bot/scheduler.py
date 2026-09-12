@@ -214,26 +214,31 @@ async def check_economic_calendar_alerts(context):
             logger.warning("economic calendar alert user failed: %s", e, exc_info=True)
 
 async def periodic_backup(context):
-    """بکاپ خودکار کامل: محلی + GitHub (اگر ست) + ارسال به ادمین‌ها در تلگرام."""
+    """بکاپ خودکار پرتکرار: local + GitHub؛ بدون اسپم تلگرام."""
     try:
-        from bot.db_persist import auto_backup, send_db_to_admins
+        from bot.db_persist import auto_backup
         ok, msg = auto_backup()
-        logger.info(f"auto_backup: {msg}")
-        # همیشه به ادمین‌ها هم بفرست تا بکاپ offline داشته باشند (حتی اگر GitHub فعال باشد)
-        try:
-            ok2, msg2 = await send_db_to_admins(
-                context.bot,
-                caption=(
-                    "💾 بکاپ خودکار دوره‌ای\n"
-                    f"وضعیت: {msg}\n"
-                    f"🕐 {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}"
-                ),
-            )
-            logger.info(f"telegram backup: {msg2}")
-        except Exception as te:
-            logger.error(f"telegram periodic backup failed: {te}")
+        logger.info("auto_backup: %s", msg)
     except Exception as e:
-        logger.error(f"periodic backup error: {e}", exc_info=True)
+        logger.error("periodic backup error: %s", e, exc_info=True)
+
+
+async def periodic_telegram_backup(context):
+    """یک کپی مستقل روی چت ادمین‌ها، با فاصله طولانی‌تر."""
+    try:
+        from bot.db_persist import send_db_to_admins, auto_backup
+        ok, msg = auto_backup()
+        ok2, msg2 = await send_db_to_admins(
+            context.bot,
+            caption=(
+                "💾 بکاپ خودکار دوره‌ای\n"
+                f"وضعیت: {msg}\n"
+                f"🕐 {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            ),
+        )
+        logger.info("telegram backup: %s", msg2)
+    except Exception as e:
+        logger.error("telegram periodic backup failed: %s", e, exc_info=True)
 
 
 def setup_scheduler(app):
@@ -281,11 +286,18 @@ def setup_scheduler(app):
         first=25,
         name="economic_calendar_alerts",
     )
-    # بکاپ پرتکرارتر: Render دیسک را بین دیپلوی‌ها پاک می‌کند
+    # بکاپ پرتکرار: local + GitHub. فاصله از env قابل تنظیم است (پیش‌فرض ۳۰ دقیقه).
     job_queue.run_repeating(
         periodic_backup,
-        interval=2 * 3600,  # هر ۲ ساعت
-        first=120,          # ۲ دقیقه بعد از استارت
+        interval=getattr(config, "BACKUP_INTERVAL_SECONDS", 1800),
+        first=120,
+        name="db_backup_remote",
+    )
+    # بکاپ Telegram با فاصله کمتر برای جلوگیری از اسپم (پیش‌فرض ۶ ساعت).
+    job_queue.run_repeating(
+        periodic_telegram_backup,
+        interval=getattr(config, "TELEGRAM_BACKUP_INTERVAL_SECONDS", 21600),
+        first=300,
         name="db_backup_telegram",
     )
     # Opt-in proactive digest; disabled for users by default.
@@ -296,4 +308,4 @@ def setup_scheduler(app):
         time=time(hour=digest_hour, minute=0, second=0, tzinfo=tehran),
         name="proactive_daily_digest",
     )
-    logger.info("Scheduler ready: daily + azan + reminders + proactive digest + backup every 2h")
+    logger.info("Scheduler ready: daily + azan + reminders + proactive digest + remote backup + Telegram backup")

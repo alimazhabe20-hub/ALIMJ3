@@ -10,6 +10,9 @@ import os
 import shutil
 import sqlite3
 import secrets
+import gzip
+import time
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -23,8 +26,10 @@ from bot.logger import logger
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 GITHUB_REPO = os.getenv("GITHUB_REPO", "").strip()  # مثال: username/bot-data-backup
 GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main").strip()
-GITHUB_FILE = os.getenv("GITHUB_DB_FILE", "bot_data.db").strip()
+GITHUB_FILE = os.getenv("GITHUB_DB_FILE", "backups/latest.db.gz").strip().lstrip("/")
 API = "https://api.github.com"
+GITHUB_RETRIES = max(1, int(os.getenv("GITHUB_BACKUP_RETRIES", "4")))
+GITHUB_BACKOFF = max(0.5, float(os.getenv("GITHUB_BACKUP_BACKOFF", "1.5")))
 REMOTE_BACKUP_TIMEOUT = max(2.0, float(os.getenv("BACKUP_REMOTE_TIMEOUT", "8")))
 
 
@@ -84,16 +89,76 @@ def _validate_sqlite_backup(path: Path) -> tuple[bool, str]:
         return False, "فایل SQLite معتبر نیست"
 
 
+def _normalized_repo() -> str:
+    """Normalize owner/repo and reject accidental URL forms."""
+    value = GITHUB_REPO.strip().strip("/")
+    value = re.sub(r"^https?://github\.com/", "", value, flags=re.I)
+    value = value.removesuffix(".git").strip("/")
+    return value
+
+
 def github_enabled() -> bool:
-    return bool(GITHUB_TOKEN and GITHUB_REPO)
+    return bool(GITHUB_TOKEN and _normalized_repo()) and _normalized_repo().count("/") == 1
+
+
+def _github_request(method: str, url: str, **kwargs):
+    """GitHub request with retry for transient failures and rate limits."""
+    last = None
+    for attempt in range(1, GITHUB_RETRIES + 1):
+        try:
+            r = requests.request(
+                method, url, headers=_gh_headers(),
+                timeout=kwargs.pop("timeout", max(REMOTE_BACKUP_TIMEOUT, 30)),
+                **kwargs,
+            )
+            if r.status_code in {429, 500, 502, 503, 504}:
+                last = r
+                retry_after = r.headers.get("Retry-After")
+                delay = float(retry_after) if retry_after and retry_after.replace('.', '', 1).isdigit() else GITHUB_BACKOFF * attempt
+                time.sleep(min(delay, 12))
+                continue
+            return r
+        except requests.RequestException as exc:
+            last = exc
+            if attempt < GITHUB_RETRIES:
+                time.sleep(min(GITHUB_BACKOFF * attempt, 8))
+    if isinstance(last, requests.Response):
+        return last
+    raise last if isinstance(last, Exception) else RuntimeError("GitHub request failed")
+
+
+def _github_repo_check():
+    repo = _normalized_repo()
+    if not github_enabled():
+        return False, "GITHUB_TOKEN/GITHUB_REPO تنظیم نشده یا GITHUB_REPO باید owner/repo باشد"
+    url = f"{API}/repos/{repo}"
+    try:
+        r = _github_request("GET", url, timeout=max(REMOTE_BACKUP_TIMEOUT, 20))
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("archived"):
+                return False, "Repository آرشیو شده است"
+            if data.get("private") is not True:
+                return False, "Repository بکاپ باید Private باشد تا اطلاعات کاربران عمومی نشود"
+            return True, "GitHub repository OK"
+        if r.status_code == 404:
+            return False, "GitHub 404: repository پیدا نشد یا Token به آن دسترسی ندارد (owner/repo و دسترسی Contents را بررسی کن)"
+        if r.status_code in (401, 403):
+            return False, f"GitHub {r.status_code}: Token نامعتبر یا فاقد دسترسی Repository/Contents است"
+        return False, f"GitHub repository check {r.status_code}: {r.text[:220]}"
+    except Exception as exc:
+        return False, f"GitHub connection error: {exc}"
 
 
 def _github_get_sha():
-    url = f"{API}/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}?ref={GITHUB_BRANCH}"
-    r = requests.get(url, headers=_gh_headers(), timeout=max(REMOTE_BACKUP_TIMEOUT, 20))
+    repo = _normalized_repo()
+    url = f"{API}/repos/{repo}/contents/{GITHUB_FILE}?ref={GITHUB_BRANCH}"
+    r = _github_request("GET", url, timeout=max(REMOTE_BACKUP_TIMEOUT, 20))
     if r.status_code == 200:
         return r.json().get("sha")
-    return None
+    if r.status_code in (404,):
+        return None
+    raise RuntimeError(f"GitHub lookup {r.status_code}: {r.text[:220]}")
 
 
 def _sqlite_snapshot_to_temp() -> Path | None:
@@ -132,11 +197,12 @@ def _sqlite_snapshot_to_temp() -> Path | None:
 
 
 def github_upload_db():
+    """Upload a compressed, validated SQLite snapshot to a private GitHub repo."""
     if not github_enabled():
-        return False, "GitHub تنظیم نشده"
-    path = Path(DB_PATH)
-    if not path.exists():
-        return False, "فایل DB نیست"
+        return False, "GitHub تنظیم نشده یا GITHUB_REPO نامعتبر است"
+    repo_ok, repo_msg = _github_repo_check()
+    if not repo_ok:
+        return False, repo_msg
     users = _user_count(DB_PATH)
     if users == 0:
         return False, "DB خالی است — آپلود نشد"
@@ -144,14 +210,14 @@ def github_upload_db():
     snap = _sqlite_snapshot_to_temp()
     if not snap:
         return False, "اسنپ‌شات SQLite ساخته نشد"
+    compressed = snap.with_suffix(snap.suffix + ".gz")
     try:
-        raw = snap.read_bytes()
-        # GitHub Contents API حدود ۱ مگابایت محدودیت دارد
+        with open(snap, "rb") as src, gzip.open(compressed, "wb", compresslevel=6) as dst:
+            shutil.copyfileobj(src, dst)
+        raw = compressed.read_bytes()
+        # Contents API is unsuitable for large files; compression usually keeps DBs well below this limit.
         if len(raw) > 900_000:
-            return False, (
-                f"حجم DB ({len(raw)//1024}KB) برای GitHub Contents API بزرگ است. "
-                "دیسک پایدار Render یا بکاپ تلگرام را فعال کن."
-            )
+            return False, f"بکاپ فشرده هنوز {len(raw)//1024}KB است؛ برای GitHub Contents API بزرگ است"
         content_b64 = base64.b64encode(raw).decode("ascii")
         sha = _github_get_sha()
         payload = {
@@ -161,40 +227,35 @@ def github_upload_db():
         }
         if sha:
             payload["sha"] = sha
-        url = f"{API}/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}"
-        r = requests.put(
-            url,
-            headers=_gh_headers(),
-            json=payload,
-            timeout=max(REMOTE_BACKUP_TIMEOUT, 45),
-        )
+        repo = _normalized_repo()
+        url = f"{API}/repos/{repo}/contents/{GITHUB_FILE}"
+        r = _github_request("PUT", url, json=payload, timeout=max(REMOTE_BACKUP_TIMEOUT, 45))
         if r.status_code in (200, 201):
-            logger.info(f"GitHub backup OK ({users} users, {len(raw)} bytes)")
-            return True, f"GitHub بکاپ شد ({users} کاربر)"
-        # conflict sha → یکبار دیگر با sha تازه
+            logger.info("GitHub backup OK (%s users, %s compressed bytes)", users, len(raw))
+            return True, f"GitHub:OK ({users} کاربر، {len(raw)//1024}KB)"
         if r.status_code == 409:
+            # Another backup may have updated the same path; refresh SHA once.
             sha2 = _github_get_sha()
             if sha2:
                 payload["sha"] = sha2
-                r2 = requests.put(
-                    url,
-                    headers=_gh_headers(),
-                    json=payload,
-                    timeout=max(REMOTE_BACKUP_TIMEOUT, 45),
-                )
+                r2 = _github_request("PUT", url, json=payload, timeout=max(REMOTE_BACKUP_TIMEOUT, 45))
                 if r2.status_code in (200, 201):
-                    logger.info(f"GitHub backup OK after sha retry ({users} users)")
-                    return True, f"GitHub بکاپ شد ({users} کاربر)"
-                return False, f"GitHub error {r2.status_code}: {r2.text[:200]}"
-        return False, f"GitHub error {r.status_code}: {r.text[:200]}"
+                    return True, f"GitHub:OK after conflict retry ({users} کاربر)"
+                r = r2
+        if r.status_code == 404:
+            return False, "GitHub 404: Repository/Branch/Token اشتباه است یا Token دسترسی Contents ندارد"
+        if r.status_code in (401, 403):
+            return False, f"GitHub {r.status_code}: Token دسترسی نوشتن به Contents ندارد"
+        return False, f"GitHub error {r.status_code}: {r.text[:240]}"
     except Exception as e:
-        logger.error(f"github_upload: {e}")
+        logger.error("github_upload: %s", e, exc_info=True)
         return False, str(e)
     finally:
-        try:
-            snap.unlink(missing_ok=True)
-        except Exception:
-            pass
+        for candidate in (snap, compressed):
+            try:
+                candidate.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def github_remote_user_count() -> int:
@@ -215,6 +276,11 @@ def github_remote_user_count() -> int:
             if not dl:
                 return 0
             raw = requests.get(dl, timeout=max(REMOTE_BACKUP_TIMEOUT, 30)).content
+        if GITHUB_FILE.lower().endswith(".gz"):
+            try:
+                raw = gzip.decompress(raw)
+            except OSError:
+                return 0
         tmp = Path(DB_PATH).with_suffix(f".db.ghprobe.{secrets.token_hex(3)}")
         try:
             tmp.write_bytes(raw)
@@ -247,6 +313,11 @@ def github_download_db():
                 return False, "محتوای خالی"
         else:
             raw = base64.b64decode("".join(content_b64.split()))
+        if GITHUB_FILE.lower().endswith(".gz"):
+            try:
+                raw = gzip.decompress(raw)
+            except OSError:
+                return False, "بکاپ GitHub فشرده خراب است"
         if len(raw) < 100:
             return False, "فایل دانلودشده خیلی کوچک است"
         Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
@@ -359,8 +430,10 @@ def auto_backup():
     local_ok = False
     try:
         backup_db()
-        local_ok = True
-        results.append("local:OK")
+        stable = Path(DB_PATH).parent / "bot_data.backup.db"
+        valid = stable.exists() and _validate_sqlite_backup(stable)[0]
+        local_ok = bool(valid)
+        results.append("local:OK" if local_ok else "local:FAIL(backup artifact missing/invalid)")
     except Exception as e:
         logger.error(f"local backup: {e}")
         results.append(f"local:FAIL({e})")
@@ -524,7 +597,9 @@ async def send_db_to_admins(bot, caption: str = None):
     except Exception as _exc:
         logger.debug("%s: %s", __name__, _exc)
     users = _user_count(DB_PATH)
-    size_kb = path.stat().st_size / 1024
+    snap = _sqlite_snapshot_to_temp()
+    send_path = snap if snap else path
+    size_kb = send_path.stat().st_size / 1024
     cap = caption or (
         f"💾 بکاپ دیتابیس\n"
         f"👥 کاربران: {users}\n"
@@ -533,19 +608,26 @@ async def send_db_to_admins(bot, caption: str = None):
         f"ریستور دستی: همین فایل را با کپشن /restore بفرست"
     )
     ok = 0
-    for admin_id in config.ADMIN_IDS:
-        try:
-            with open(path, "rb") as f:
-                await bot.send_document(
-                    chat_id=admin_id,
-                    document=f,
-                    filename=f"bot_backup_{datetime.now().strftime('%Y%m%d_%H%M')}.db",
-                    caption=cap,
-                )
-            ok += 1
-            await asyncio.sleep(0.3)
-        except Exception as e:
-            logger.error(f"Send backup to admin {admin_id}: {e}")
+    try:
+        for admin_id in config.ADMIN_IDS:
+            try:
+                with open(send_path, "rb") as f:
+                    await bot.send_document(
+                        chat_id=admin_id,
+                        document=f,
+                        filename=f"bot_backup_{datetime.now().strftime('%Y%m%d_%H%M')}.db",
+                        caption=cap,
+                    )
+                ok += 1
+                await asyncio.sleep(0.3)
+            except Exception as e:
+                logger.error(f"Send backup to admin {admin_id}: {e}")
+    finally:
+        if snap:
+            try:
+                snap.unlink(missing_ok=True)
+            except Exception:
+                pass
     return ok > 0, f"ارسال به {ok}/{len(config.ADMIN_IDS)} ادمین ({users} کاربر)"
 
 
