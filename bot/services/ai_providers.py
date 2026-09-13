@@ -28,6 +28,24 @@ def _legacy_ai_context():
     from bot.services import ai_service
     return ai_service.SYSTEM_PROMPT, ai_service._messages
 
+
+def _prompt_needs_tools(prompt: str) -> bool:
+    """Only enable tool/function calling when the request can actually use it.
+
+    Simple chat such as «سلام» should use a plain completion path. This avoids
+    provider/model combinations rejecting an unnecessary tools payload.
+    """
+    text = (prompt or "").strip()
+    if len(text) <= 260:
+        markers = (
+            "قیمت", "بازار", "کریپتو", "رمزارز", "طلا", "هوا", "آب و هوا",
+            "خرید", "لینک", "جستجو", "یادآوری", "اذان", "تقویم", "تحلیل",
+            "weather", "price", "market", "crypto", "bitcoin", "ethereum",
+            "search", "buy", "remind",
+        )
+        return any(m in text.lower() for m in markers)
+    return True
+
 async def _post_json(url: str, *, headers=None, json=None, params=None) -> tuple[int, dict]:
     """POST with shared connection pool and bounded transient retries."""
     client = _get_http()
@@ -139,6 +157,8 @@ async def _gemini(
     keys = _next_keys("gemini")
     if not keys:
         raise RuntimeError("هیچ کلید Gemini تنظیم نشده")
+
+    use_tools = use_tools and _prompt_needs_tools(prompt)
 
     from bot.services.ai_tools import get_tool_definitions, execute_tool, parse_tool_arguments
     from bot.services.tool_runtime import select_capability_tool
@@ -341,6 +361,7 @@ async def _openai_compatible(
         raise RuntimeError(f"هیچ کلید {name} تنظیم نشده")
 
     errors = []
+    use_tools = use_tools and _prompt_needs_tools(prompt)
     for key in keys:
         # Keep tool capability local to this key/attempt; one incompatible endpoint
         # must not disable tools for every fallback provider key.

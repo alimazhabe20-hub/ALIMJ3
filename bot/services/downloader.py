@@ -84,21 +84,33 @@ def _validate_url(url: str) -> str:
     return url
 
 
-def _normalize_media_url(url: str) -> str:
-    """Canonicalize social-media URLs without changing their content target."""
-    p = urlparse((url or "").strip())
-    host = (p.hostname or "").lower().rstrip(".")
-    if host == "instagram.com" or host.endswith(".instagram.com"):
-        # Instagram share links commonly carry tracking tokens (utm/igsh).
-        # They are not required to identify the Reel and can make extraction
-        # less deterministic. Preserve only the path/query parameters that are
-        # not known tracking parameters.
-        return p._replace(query="").geturl()
-    return url
-
-
 def is_url(text: str) -> bool:
     return bool(re.match(r"^https?://\S+$", (text or "").strip(), re.I))
+
+
+def _is_instagram_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    return host == "instagram.com" or host.endswith(".instagram.com")
+
+
+def _extractor_options(url: str) -> dict:
+    """Return conservative extractor options for supported public platforms."""
+    if _is_instagram_url(url):
+        return {
+            "http_headers": {
+                "User-Agent": UA,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.instagram.com/",
+            },
+            "extractor_args": {"instagram": {"app_id": "web"}},
+        }
+    return {
+        "http_headers": {
+            "User-Agent": UA,
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+    }
 
 
 def _safe_name(name: str, default: str = "download.bin") -> str:
@@ -111,11 +123,7 @@ def _classify_error(exc: str) -> str:
     s = (exc or "").lower()
     if any(x in s for x in ("429", "too many requests", "rate limit")):
         return "rate_limited"
-    if any(x in s for x in (
-        "captcha", "403", "forbidden", "sign in", "login required",
-        "http error 401", "access denied", "rate-limit reached",
-        "rate limit reached", "main webpage is locked behind the login page",
-    )):
+    if any(x in s for x in ("captcha", "403", "forbidden", "sign in", "login required", "http error 401", "access denied")):
         return "site_blocked"
     if any(x in s for x in ("private", "members only", "age-restricted", "authentication required")):
         return "access_restricted"
@@ -129,16 +137,16 @@ def _classify_error(exc: str) -> str:
 
 
 def _preflight_redirects(url: str) -> str:
-    """Validate redirects without turning social-media share links into login URLs."""
+    """Validate redirect targets without breaking platform extractors.
+
+    Instagram commonly redirects generic HEAD requests to a login/challenge
+    page even when the original public Reel URL is a valid extractor target.
+    For Instagram we validate the original URL only and let yt-dlp perform the
+    platform-specific extraction. Authentication/CAPTCHA is never bypassed.
+    """
     import requests
-    current = _normalize_media_url(_validate_url(url))
-    host = (urlparse(current).hostname or "").lower().rstrip(".")
-    # Instagram can redirect a HEAD request for a public Reel to its login page
-    # even when the original Reel URL is the correct extractor input. Following
-    # that redirect here makes yt-dlp receive the wrong URL. Let yt-dlp manage
-    # the Instagram session/redirects itself while still validating the original
-    # hostname for SSRF protection.
-    if host == "instagram.com" or host.endswith(".instagram.com"):
+    current = _validate_url(url)
+    if _is_instagram_url(current):
         return current
     session = requests.Session()
     headers = {"User-Agent": UA, "Accept": "*/*"}
@@ -290,7 +298,14 @@ async def probe(url: str) -> dict:
         return {"supported": False, "direct": True, "url": url, "formats": []}
     loop = asyncio.get_running_loop()
     def work():
-        opts = {"quiet": True, "no_warnings": True, "skip_download": True, "socket_timeout": int(TIMEOUT), "noplaylist": True, "http_headers": {"User-Agent": UA}}
+        opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "socket_timeout": int(TIMEOUT),
+            "noplaylist": True,
+            **_extractor_options(url),
+        }
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
         formats = []
@@ -336,18 +351,9 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
             "format": fmt, "outtmpl": outtmpl, "noplaylist": True, "quiet": True, "no_warnings": True,
             "retries": 3, "fragment_retries": 3, "socket_timeout": int(TIMEOUT), "max_filesize": MAX_BYTES,
             "restrictfilenames": True, "progress_hooks": [hook],
-            "http_headers": {
-                "User-Agent": UA,
-                "Accept-Language": "en-US,en;q=0.9",
-            },
             "merge_output_format": "mp4", "continuedl": True, "overwrites": False,
         }
-        parsed_host = (urlparse(url).hostname or "").lower().rstrip(".")
-        if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
-            opts["http_headers"]["Referer"] = "https://www.instagram.com/"
-            # Explicitly use Instagram's public web app ID; this is a normal
-            # extractor setting, not an authentication or CAPTCHA bypass.
-            opts["extractor_args"] = {"instagram": {"app_id": "web"}}
+        opts.update(_extractor_options(url))
         if mode == "audio":
             opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
         cookie = os.getenv("DOWNLOADER_COOKIES_FILE", "").strip()
@@ -379,7 +385,6 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
 async def download(url: str, *, mode: str = "best", user_id: int | None = None, progress_cb=None, use_cache: bool = True) -> dict:
     if mode not in {"best", "1080p", "720p", "480p", "audio"}:
         mode = "best"
-    url = _normalize_media_url(url)
     url = _preflight_redirects(url)
     if use_cache:
         cached = _cache_get(url, mode)
@@ -393,12 +398,16 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
                 try:
                     result = await _ytdlp(url, outdir, mode=mode, progress_cb=progress_cb)
                 except DownloadError as first:
-                    if str(first) in {"site_blocked", "rate_limited", "access_restricted", "too_large", "yt_dlp_missing"}:
-                        if str(first) == "yt_dlp_missing" and mode == "best":
-                            filename = _safe_name(Path(urlparse(url).path).name or "download.bin")
-                            result = await _direct(url, outdir / filename)
-                        else:
-                            raise
+                    code = str(first)
+                    if code in {"site_blocked", "rate_limited", "access_restricted", "too_large"}:
+                        raise
+                    if code == "yt_dlp_missing" and mode == "best" and not _is_instagram_url(url):
+                        filename = _safe_name(Path(urlparse(url).path).name or "download.bin")
+                        result = await _direct(url, outdir / filename)
+                    elif _is_instagram_url(url):
+                        # Never treat an Instagram HTML/login/challenge page as
+                        # a downloadable binary after extractor failure.
+                        raise
                     else:
                         filename = _safe_name(Path(urlparse(url).path).name or "download.bin")
                         result = await _direct(url, outdir / filename)
