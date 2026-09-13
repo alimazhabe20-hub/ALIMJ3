@@ -20,7 +20,6 @@ from bot.services.ai_runtime import (
 )
 from bot.services.ai_tools import get_tool_definitions, execute_tool
 from bot.services.tool_runtime import select_capability_tool
-from bot.utils.http_client import request_with_retry
 
 
 def _legacy_ai_context():
@@ -29,10 +28,19 @@ def _legacy_ai_context():
     return ai_service.SYSTEM_PROMPT, ai_service._messages
 
 async def _post_json(url: str, *, headers=None, json=None, params=None) -> tuple[int, dict]:
-    """POST with shared connection pool and bounded transient retries."""
+    """POST to an AI provider without the generic HTTP host circuit.
+
+    AI providers already have their own key/provider health, cooldown and
+    fallback logic. Reusing the global HTTP circuit here was unsafe: a few
+    ordinary AI 4xx responses (especially tool/schema 400s) could open the
+    shared host circuit and make every later AI request fail locally with
+    ``upstream circuit open`` even while the provider itself was healthy.
+    The admin diagnose path bypassed that circuit, which made it report OK
+    while normal chat returned the generic AI-unavailable message.
+    """
     client = _get_http()
-    response = await request_with_retry(
-        "POST", url, headers=headers, json=json, params=params,
+    response = await client.post(
+        url, headers=headers, json=json, params=params,
         timeout=httpx.Timeout(TIMEOUT, connect=5.0),
     )
     try:
@@ -554,6 +562,11 @@ async def _cloudflare(user_id: int, prompt: str, model: str) -> str:
     raise RuntimeError("همه توکن‌های Cloudflare تمام/خطا: " + " | ".join(errors[:5]))
 
 
+def _prompt_needs_tools(prompt: str) -> bool:
+    """Compatibility helper: only non-trivial prompts need tool-capable calls."""
+    return not _looks_simple_prompt(prompt)
+
+
 def _looks_simple_prompt(prompt: str) -> bool:
     import re
     text = (prompt or "").strip()
@@ -649,7 +662,11 @@ async def _call_provider(
     use_tools: bool | None = None,
 ) -> str:
     if use_tools is None:
-        use_tools = not _looks_simple_prompt(prompt)
+        use_tools = True
+    # Never send tool schemas for greetings/very short conversational prompts.
+    # This also protects the normal chat path when an outer layer has appended
+    # runtime context to an otherwise simple user message.
+    use_tools = use_tools and _prompt_needs_tools(prompt)
 
     async def _once(with_tools: bool) -> str:
         if provider == "gemini":

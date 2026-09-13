@@ -312,7 +312,7 @@ def _mark_key_cooldown(provider: str, key: str, *, daily: bool = True) -> None:
 
 def _is_quota_error(status: int, data) -> bool:
     """تشخیص محدودیت روزانه / سهمیه / rate limit."""
-    if status in (429, 403):
+    if status in (402, 429, 403):
         return True
     text = str(data).lower()
     markers = (
@@ -438,6 +438,7 @@ def _env_models(env_name: str, default: List[str]) -> List[str]:
         "llama-3.1-8b-instant": "openai/gpt-oss-20b",
         "llama3-8b-8192": "openai/gpt-oss-20b",
         "llama3-70b-8192": "openai/gpt-oss-120b",
+        "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
         "mixtral-8x7b-32768": "openai/gpt-oss-20b",
     } if env_name == "GROQ_MODELS" else {}
     normalized = []
