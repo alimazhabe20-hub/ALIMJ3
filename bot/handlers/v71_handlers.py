@@ -3,7 +3,7 @@ import asyncio, re, secrets
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bot.logger import logger
-from bot.services.downloader import is_url, probe, download, cleanup, user_message
+from bot.services.downloader import is_url, normalize_user_url, probe, download, cleanup, user_message
 from bot.services.v71_platform import (
     SUPPORTED_LANGS, detect_language, personalize, self_test, set_workspace,
     get_workspace, save_branch, list_branches, schedule_ai,
@@ -30,6 +30,7 @@ async def downloader_entry_v71(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(ux_text(lang, "download_title") + "\n\n" + ux_text(lang, "intro"))
 
 async def _start_probe(update, context, url: str):
+    url = normalize_user_url(url)
     if not is_url(url):
         await update.message.reply_text(ux_text(_dl_lang(update), "invalid"))
         return
@@ -65,6 +66,7 @@ async def handle_downloader_url_v71(update: Update, context: ContextTypes.DEFAUL
     waiting = context.user_data.get("waiting_for")
     if waiting != "downloader_url_v71":
         return False
+    text = normalize_user_url(text)
     if not is_url(text):
         await update.message.reply_text(ux_text(_dl_lang(update), "invalid"))
         return True
