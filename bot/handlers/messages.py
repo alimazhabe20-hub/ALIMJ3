@@ -517,12 +517,11 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.debug("%s: %s", __name__, _exc)
 async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    # Automatic reactions run in the background so Telegram/API latency can
-    # never delay the AI response or any normal button/message handling.
+    # Queue automatic reactions locally; all Telegram network I/O runs in a
+    # dedicated single worker and never competes with the AI response path.
     try:
-        from bot.services.auto_reactions import maybe_auto_react
-        from bot.utils.task_manager import spawn
-        spawn(maybe_auto_react(update, context), name=f"auto-reaction-{update.effective_chat.id}-{update.message.message_id}")
+        from bot.services.auto_reactions import enqueue_auto_reaction
+        enqueue_auto_reaction(update)
     except Exception as reaction_exc:
         logger.debug("auto reaction hook skipped: %s", reaction_exc)
     user_id = update.effective_user.id
