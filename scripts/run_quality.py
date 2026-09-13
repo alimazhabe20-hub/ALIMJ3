@@ -11,13 +11,9 @@ def run(tool: str, args: list[str]) -> int:
     return subprocess.call([executable, *args])
 
 def main() -> int:
-    # Ruff is advisory for this legacy codebase: it must be reported in CI but
-    # should not block a release when the actual test/compile gates are green.
-    ruff_code = run("ruff", ["check", "bot", "tests"])
-    if ruff_code:
-        print("WARNING: ruff reported issues; continuing because Ruff is advisory in CI.")
-
-    # Type checking remains a real quality gate.
+    code = run("ruff", ["check", "bot", "tests"])
+    if code:
+        return code
     return run("mypy", ["bot/database_core.py", "bot/database_migrations.py", "bot/features/market/finance_core.py"])
 
 if __name__ == "__main__":
