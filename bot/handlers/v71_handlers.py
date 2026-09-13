@@ -8,7 +8,7 @@ from bot.services.v71_platform import (
     SUPPORTED_LANGS, detect_language, personalize, self_test, set_workspace,
     get_workspace, save_branch, list_branches, schedule_ai,
 )
-from bot.services.v72_platform import format_options, record_download, update_download, normalize_download_mode, detect_language
+from bot.services.v72_platform import format_options, record_download, update_download, normalize_download_mode
 
 async def downloader_entry_v71(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = " ".join(context.args or []).strip() if getattr(context, "args", None) else ""
