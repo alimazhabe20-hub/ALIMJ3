@@ -195,7 +195,7 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
                 except Exception: pass
             return True
     # Market Intelligence: تحلیل چندتایم‌فریمی با داده زنده، فقط وقتی درخواست تحلیل روشن است.
-    market_match = re.search(r"(?:تحلیل|آنالیز|analyze|analysis)\s+(?:ارز|رمزارز|crypto)?\s*([A-Za-z]{2,12}|بیت\s*کوین|اتریوم|تتر|سولانا|ریپل|دوج\s*کوین|بایننس|کاردانو)\b?", text, re.I)
+    market_match = re.search(r"(?:تحلیل|آنالیز|analyze|analysis)\s+(?:ارز|رمزارز|crypto)?\s*([A-Za-z]{2,12}|بیت\s*کوین|اتریوم|تتر|سولانا|ریپل|دوج\s*کوین|بایننس|کاردانو)\b", text, re.I)
     if market_match:
         symbol = re.sub(r"\s+", "", market_match.group(1).lower())
         symbol = {"بیتکوین":"btc","بیت کوین":"btc","اتریوم":"eth","تتر":"usdt","سولانا":"sol","ریپل":"xrp","دوجکوین":"doge","بایننس":"bnb","کاردانو":"ada"}.get(symbol, symbol)
