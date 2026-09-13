@@ -5,7 +5,7 @@ from telegram.ext import ContextTypes
 from bot.config import config
 from bot.logger import logger
 from bot.database import get_user, save_user, get_user_language
-from bot.utils.texts import TEXTS
+from bot.utils.texts import TEXTS, set_current_language
 
 # تاریخچه زمان پیام‌ها برای هر کاربر
 _user_hits = defaultdict(list)
@@ -163,6 +163,11 @@ async def check_and_rate_limit(update: Update, context: ContextTypes.DEFAULT_TYP
         return False
 
     await ensure_user_registered(update, context)
+    # Keep all reply keyboards and UI text in sync with the saved user language.
+    try:
+        set_current_language(get_user_language(update.effective_user.id))
+    except Exception:
+        set_current_language("fa")
 
     # Force-join is enforced for every user-facing update, including /start.
     # This prevents the entry-point from becoming a bypass around the channel lock.

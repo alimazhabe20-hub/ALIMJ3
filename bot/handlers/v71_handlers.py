@@ -8,7 +8,16 @@ from bot.services.v71_platform import (
     SUPPORTED_LANGS, detect_language, personalize, self_test, set_workspace,
     get_workspace, save_branch, list_branches, schedule_ai,
 )
-from bot.services.v72_platform import format_options, record_download, update_download, normalize_download_mode
+from bot.services.v72_platform import format_options, record_download, update_download, normalize_download_mode, ux_text
+
+def _dl_lang(update):
+    try:
+        from bot.database import get_user_language
+        lang = get_user_language(update.effective_user.id) if update.effective_user else "fa"
+        return lang if lang in {"fa", "en", "ar"} else "fa"
+    except Exception:
+        return "fa"
+
 
 async def downloader_entry_v71(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = " ".join(context.args or []).strip() if getattr(context, "args", None) else ""
@@ -17,38 +26,38 @@ async def downloader_entry_v71(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     context.user_data["waiting_for"] = "downloader_url_v71"
     from bot.services.v72_platform import ux_text
-    lang_code = (getattr(update.effective_user, "language_code", "") or "").lower() if update.effective_user else ""
-    lang = lang_code if lang_code in {"fa", "en", "ar"} else detect_language(getattr(update.effective_user, "first_name", "") or "") if update.effective_user else "fa"
-    await update.message.reply_text(
-        ux_text(lang, "download_title") + "\n\n" if lang != "fa" else "📥 دانلودر فایل حرفه‌ای\n\n"
-        "لینک عمومی را بفرستید. YouTube، Instagram، TikTok، Facebook و بسیاری از سایت‌های دیگر، "
-        "به‌علاوه لینک مستقیم فایل پشتیبانی می‌شود.\n\n"
-        "کیفیت/فرمت بعد از بررسی لینک انتخاب می‌شود. سقف ارسال مستقیم ۴۸MB است.\n"
-        "⚠️ CAPTCHA، ورود اجباری، محتوای خصوصی، DRM و مسدودی سایت دور زده نمی‌شود."
-    )
+    lang = _dl_lang(update)
+    await update.message.reply_text(ux_text(lang, "download_title") + "\n\n" + ux_text(lang, "intro"))
 
 async def _start_probe(update, context, url: str):
     if not is_url(url):
-        await update.message.reply_text("❌ لینک معتبر http/https ارسال کنید.")
+        await update.message.reply_text(ux_text(_dl_lang(update), "invalid"))
         return
-    notice = await update.message.reply_text("🔎 در حال بررسی لینک و کیفیت‌های قابل دریافت…")
+    from bot.services.v72_platform import ux_text
+    lang = _dl_lang(update)
+    notice = await update.message.reply_text(ux_text(lang, "checking"))
     try:
         info = await probe(url)
         token = secrets.token_urlsafe(9)
         context.user_data[f"dl:{token}"] = {"url": url, "info": info}
         title = str(info.get("title") or "فایل")[:100]
+        labels = {
+            "fa": {"best":"🎬 بهترین کیفیت","1080p":"📺 تا 1080p","720p":"📺 تا 720p","480p":"📺 تا 480p","audio":"🎵 فقط صدا (MP3)","direct":"📦 دریافت مستقیم","cancel":"❌ لغو"},
+            "en": {"best":"🎬 Best quality","1080p":"📺 Up to 1080p","720p":"📺 Up to 720p","480p":"📺 Up to 480p","audio":"🎵 Audio only (MP3)","direct":"📦 Direct download","cancel":"❌ Cancel"},
+            "ar": {"best":"🎬 أفضل جودة","1080p":"📺 حتى 1080p","720p":"📺 حتى 720p","480p":"📺 حتى 480p","audio":"🎵 صوت فقط (MP3)","direct":"📦 تنزيل مباشر","cancel":"❌ إلغاء"},
+        }[lang]
         rows = [
-            [InlineKeyboardButton("🎬 بهترین کیفیت", callback_data=f"dl:q:{token}:best"), InlineKeyboardButton("📺 تا 1080p", callback_data=f"dl:q:{token}:1080p")],
-            [InlineKeyboardButton("📺 تا 720p", callback_data=f"dl:q:{token}:720p"), InlineKeyboardButton("📺 تا 480p", callback_data=f"dl:q:{token}:480p")],
-            [InlineKeyboardButton("🎵 فقط صدا (MP3)", callback_data=f"dl:q:{token}:audio")],
-            [InlineKeyboardButton("❌ لغو", callback_data=f"dl:cancel:{token}")],
+            [InlineKeyboardButton(labels["best"], callback_data=f"dl:q:{token}:best"), InlineKeyboardButton(labels["1080p"], callback_data=f"dl:q:{token}:1080p")],
+            [InlineKeyboardButton(labels["720p"], callback_data=f"dl:q:{token}:720p"), InlineKeyboardButton(labels["480p"], callback_data=f"dl:q:{token}:480p")],
+            [InlineKeyboardButton(labels["audio"], callback_data=f"dl:q:{token}:audio")],
+            [InlineKeyboardButton(labels["cancel"], callback_data=f"dl:cancel:{token}")],
         ]
         if not info.get("supported"):
-            rows = [[InlineKeyboardButton("📦 دریافت مستقیم", callback_data=f"dl:q:{token}:best")],[InlineKeyboardButton("❌ لغو", callback_data=f"dl:cancel:{token}")]]
-        await notice.edit_text(f"📥 لینک آماده است\n\n📄 {title}\n\nفرمت/کیفیت را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(rows))
+            rows = [[InlineKeyboardButton(labels["direct"], callback_data=f"dl:q:{token}:best")],[InlineKeyboardButton(labels["cancel"], callback_data=f"dl:cancel:{token}")]]
+        await notice.edit_text(f"{ux_text(lang, 'prepared')}\n\n📄 {title}\n\n{ux_text(lang, 'choose')}", reply_markup=InlineKeyboardMarkup(rows))
     except Exception:
         logger.exception("downloader probe failed")
-        await notice.edit_text("⚠️ بررسی لینک ناموفق بود. دوباره امتحان کنید.")
+        await notice.edit_text(ux_text(lang, "probe_failed"))
     finally:
         context.user_data.pop("waiting_for", None)
 
@@ -57,7 +66,7 @@ async def handle_downloader_url_v71(update: Update, context: ContextTypes.DEFAUL
     if waiting != "downloader_url_v71":
         return False
     if not is_url(text):
-        await update.message.reply_text("❌ لینک معتبر http/https بفرستید.")
+        await update.message.reply_text(ux_text(_dl_lang(update), "invalid"))
         return True
     context.user_data.pop("waiting_for", None)
     await _start_probe(update, context, text)
@@ -67,21 +76,21 @@ async def download_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     q = update.callback_query
     if data.startswith("dl:cancel:"):
         token=data.split(":",2)[2]; context.user_data.pop(f"dl:{token}",None)
-        await q.answer("لغو شد")
-        try: await q.edit_message_text("❌ دانلود لغو شد.")
+        await q.answer(ux_text(_dl_lang(update), "cancelled"))
+        try: await q.edit_message_text(ux_text(_dl_lang(update), "cancelled"))
         except Exception: pass
         return True
     m=re.fullmatch(r"dl:q:([^:]+):(best|1080p|720p|480p|audio)",data or "")
     if not m: return False
     token,mode=m.groups(); payload=context.user_data.pop(f"dl:{token}",None)
-    await q.answer("دانلود شروع شد")
+    await q.answer(ux_text(_dl_lang(update), "downloading"))
     if not payload:
-        try: await q.edit_message_text("⚠️ این درخواست منقضی شده است. لینک را دوباره بفرستید.")
+        try: await q.edit_message_text(ux_text(_dl_lang(update), "expired"))
         except Exception: pass
         return True
     url=payload["url"]; notice=None; result=None; job_id=None
     try:
-        notice=await q.edit_message_text("⏬ در حال دانلود…")
+        notice=await q.edit_message_text(ux_text(_dl_lang(update), "downloading"))
         job_id=record_download(update.effective_user.id, url, mode)
         last=[0.0]
         async def progress(p):
@@ -100,7 +109,7 @@ async def download_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         result=await download(url,mode=normalize_download_mode(mode),user_id=update.effective_user.id,progress_cb=progress_thread)
         if job_id: update_download(job_id, status="completed", progress=100)
         if notice:
-            try: await notice.edit_text(f"✅ آماده شد\n📄 {result['title']}\n📦 {result['size']/1024/1024:.1f}MB\n\nدر حال ارسال…")
+            try: await notice.edit_text(f"{ux_text(_dl_lang(update), 'ready')}\n📄 {result['title']}\n📦 {result['size']/1024/1024:.1f}MB\n\n{ux_text(_dl_lang(update), 'sending')}")
             except Exception: pass
         with open(result["path"],"rb") as fh:
             await q.message.reply_document(document=fh, filename=result["title"][:120], caption="📥 دانلودر فایل • روز زیبا")

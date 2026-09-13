@@ -53,6 +53,7 @@ from datetime import datetime, timedelta
 import pytz
 from bot.config import config
 from bot.logger import logger
+from bot.utils.texts import canonical_ui_text, set_current_language, get_text_for_language
 from bot.services.ai_extras import (
     store_answer, get_last_answer, get_ai_result_keyboard, parse_chart_request, make_chart_image,
     web_search, parse_natural_reminder, enhance_ocr_prompt,
@@ -477,6 +478,9 @@ async def _ask_ai_with_typing(update, context, user_id, text):
                 return None
             enriched = text + build_ai_context(user_id, text)
             result = await HEAVY_QUEUE.run(lambda: _ask_ai_stream_and_send(update, context, user_id, enriched))
+            if not result or not result[0]:
+                context.user_data["_ai_already_sent"] = True
+                return None
             context.user_data["_ai_already_sent"] = True
             return result
         except Exception as stream_error:
@@ -516,7 +520,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
 async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
+    text = canonical_ui_text(update.message.text.strip())
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name or "کاربر"
     # V70 downloader: handle a URL immediately after the downloader button, before generic AI/menu routing.
@@ -615,9 +619,12 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
                 if handled:
                     return
-                answer, provider = await _ask_ai_with_typing(
+                ai_result = await _ask_ai_with_typing(
                     update, context, user_id, ask_text
                 )
+                if not ai_result:
+                    return
+                answer, provider = ai_result
                 if context.user_data is not None:
                     context.user_data["last_ai_answer"] = answer
                 if not (context.user_data or {}).get("_ai_already_sent"):
@@ -642,9 +649,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                         )
             except Exception as exc:
                 logger.error("AI request failed: %s", exc, exc_info=True)
-                await update.message.reply_text(
-                    "⚠️ فعلاً سرویس هوش مصنوعی پاسخ نداد. چند ثانیه بعد دوباره امتحان کنید."
-                )
+                await update.message.reply_text(get_text(user_id, "ai_unavailable"))
             return
     if waiting:
         if _is_back(text) or _is_back_more(text):
@@ -1188,11 +1193,11 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if _is_back(text):
         await _send_main(update, context, await build_message(user_id, first_name, city), user_id); return
     if text.startswith("فارسی") or text == "فارسی 🇮🇷":
-        update_user_field(user_id, "language", "fa"); await _send_main(update, context, await build_message(user_id, first_name, city), user_id); return
+        update_user_field(user_id, "language", "fa"); set_current_language("fa"); await _send_main(update, context, await build_message(user_id, first_name, city), user_id); return
     if text.startswith("English") or text == "English 🇬🇧":
-        update_user_field(user_id, "language", "en"); await _send_main(update, context, await build_message(user_id, first_name, city), user_id); return
+        update_user_field(user_id, "language", "en"); set_current_language("en"); await _send_main(update, context, await build_message(user_id, first_name, city), user_id); return
     if "العربية" in text or "العربيه" in text:
-        update_user_field(user_id, "language", "ar"); await _send_main(update, context, await build_message(user_id, first_name, city), user_id); return
+        update_user_field(user_id, "language", "ar"); set_current_language("ar"); await _send_main(update, context, await build_message(user_id, first_name, city), user_id); return
     if text in ALL_CITIES:
         update_user_field(user_id, "city", text); update_user_field(user_id, "country", CITY_COUNTRY.get(text, "Iran"))
         await _send_main(update, context, f"✅ شهر → **{text}**\n\n" + await build_message(user_id, first_name, text), user_id); return

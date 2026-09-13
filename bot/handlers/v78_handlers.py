@@ -5,9 +5,8 @@ from telegram.ext import ContextTypes
 
 def _lang(update: Update) -> str:
     try:
-        from bot.database import get_user
-        row = get_user(update.effective_user.id) if update.effective_user else None
-        value = (row.get("language") if isinstance(row, dict) else getattr(row, "language", None)) or "fa"
+        from bot.database import get_user_language
+        value = get_user_language(update.effective_user.id) if update.effective_user else "fa"
         return value if value in {"fa", "en", "ar"} else "fa"
     except Exception:
         return "fa"
