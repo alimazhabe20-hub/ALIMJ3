@@ -1356,6 +1356,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(parts) < 3:
             return
         action, symbol = parts[1], parts[2]
+        # ICT تایم‌فریم را از callback چهارم می‌گیرد: cx:ict:BTC:4h
+        ict_interval = parts[3].lower() if len(parts) >= 4 else "1h"
+        if ict_interval not in {"15m", "1h", "4h", "1d"}:
+            ict_interval = "1h"
         context.user_data["crypto_symbol"] = symbol
         try:
             from bot.features.market.finance import (
@@ -1591,9 +1595,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if action == "ict":
-                # ICT باید دقیقاً روی همان پیام فعلی اجرا شود؛ هیچ پیام جدیدی ساخته نشود.
-                # اگر پیام فعلی عکس/نمودار باشد، فقط caption همان پیام ویرایش می‌شود؛
-                # عکس دوباره ارسال یا به یک پیام متنی جدید «نچسبانده» نمی‌شود.
+                # ICT همیشه همان پیام را به‌روزرسانی می‌کند. با تغییر تایم‌فریم،
+                # هم تحلیل و هم تصویر نمودار همان پیام عوض می‌شوند.
                 try:
                     from bot.features.market.finance_ict import analyze_ict
                 except Exception as imp_exc:
@@ -1608,7 +1611,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
 
                 try:
-                    report = await analyze_ict(symbol, interval="1h")
+                    report = await analyze_ict(symbol, interval=ict_interval)
                 except Exception as exc:
                     report = f"❌ خطا در تحلیل ICT: {exc}"
 
@@ -1620,20 +1623,50 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if len(report) > 950:
                     report = report[:950].rsplit("\n", 1)[0].rstrip() + "\n…"
 
-                menu = get_crypto_analysis_keyboard(symbol)
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                # نمودار نیز دقیقاً مطابق تایم‌فریم ICT ساخته می‌شود.
+                chart_days = {"15m": 3, "1h": 7, "4h": 30, "1d": 90}[ict_interval]
+                try:
+                    png, _ = await get_crypto_chart(symbol, chart_days)
+                except Exception as chart_exc:
+                    png = None
+                    logger.warning("ICT chart generation failed for %s %s: %s", symbol, ict_interval, chart_exc)
+
+                menu = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("15M" if ict_interval != "15m" else "✅ 15M", callback_data=f"cx:ict:{symbol}:15m"),
+                        InlineKeyboardButton("1H" if ict_interval != "1h" else "✅ 1H", callback_data=f"cx:ict:{symbol}:1h"),
+                        InlineKeyboardButton("4H" if ict_interval != "4h" else "✅ 4H", callback_data=f"cx:ict:{symbol}:4h"),
+                        InlineKeyboardButton("1D" if ict_interval != "1d" else "✅ 1D", callback_data=f"cx:ict:{symbol}:1d"),
+                    ],
+                    [InlineKeyboardButton("🔙 بازگشت به تحلیل", callback_data=f"cx:ref:{symbol}")],
+                ])
                 msg = query.message
                 try:
                     if msg.photo:
-                        # همان عکس باقی می‌ماند؛ فقط متن زیر آن (caption) ویرایش می‌شود.
-                        await msg.edit_caption(
-                            caption="📐 <b>تحلیل ICT — " + html.escape(symbol.upper()) + " | 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + html.escape(report),
-                            parse_mode="HTML",
-                            reply_markup=menu,
-                        )
+                        # همان پیام حفظ می‌شود؛ با تغییر تایم‌فریم خود عکس و caption با هم عوض می‌شوند.
+                        if png:
+                            bio = BytesIO(png)
+                            bio.name = f"{symbol}_{ict_interval}_ict.png"
+                            await context.bot.edit_message_media(
+                                chat_id=msg.chat_id,
+                                message_id=msg.message_id,
+                                media=InputMediaPhoto(
+                                    media=bio,
+                                    caption="📐 <b>تحلیل ICT — " + html.escape(symbol.upper()) + " | " + ict_interval.upper() + "</b>\n━━━━━━━━━━━━━━━━━━━━\n" + html.escape(report),
+                                    parse_mode="HTML",
+                                ),
+                                reply_markup=menu,
+                            )
+                        else:
+                            await msg.edit_caption(
+                                caption="📐 <b>تحلیل ICT — " + html.escape(symbol.upper()) + " | " + ict_interval.upper() + "</b>\n━━━━━━━━━━━━━━━━━━━━\n" + html.escape(report),
+                                parse_mode="HTML",
+                                reply_markup=menu,
+                            )
                     else:
-                        # اگر پیام قبلی متنی بود، همان پیام متنی را ویرایش کن.
                         await msg.edit_text(
-                            "📐 <b>تحلیل ICT — " + html.escape(symbol.upper()) + " | 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + html.escape(report),
+                            "📐 <b>تحلیل ICT — " + html.escape(symbol.upper()) + " | " + ict_interval.upper() + "</b>\n━━━━━━━━━━━━━━━━━━━━\n" + html.escape(report),
                             parse_mode="HTML",
                             reply_markup=menu,
                         )
