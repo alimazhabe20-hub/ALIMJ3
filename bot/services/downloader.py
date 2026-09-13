@@ -97,34 +97,28 @@ def _normalize_media_url(url: str) -> str:
     return url
 
 
-def normalize_user_url(text: str) -> str:
-    """Extract and normalize the first public HTTP(S) URL from Telegram text."""
-    value = (text or "").strip()
-    value = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", value)
-    # Accept a URL pasted alone or embedded in a short sentence / angle brackets.
-    match = re.search(r"https?://[^\s<>\"'`]+", value, re.I)
+def normalize_input_url(text: str) -> str:
+    """Extract and clean the first HTTP(S) URL from Telegram text."""
+    raw = (text or "").replace("\u200b", "").replace("\ufeff", "").strip()
+    if not raw:
+        return ""
+    # Telegram users often paste a URL wrapped in <>, quotes, or with
+    # punctuation immediately after it. Keep the URL itself unchanged.
+    match = re.search(r"https?://[^\s<>\"'`]+", raw, re.I)
     if not match:
         return ""
-    value = match.group(0).strip("<>[](){}\"'`")
-    # Telegram punctuation frequently sticks to the end of pasted URLs.
-    value = re.sub(r"[.,!?;:]+$", "", value)
-    return value
+    url = match.group(0).rstrip(".,;:!?)]}>")
+    return url
 
 
 def is_url(text: str) -> bool:
-    value = normalize_user_url(text)
-    if not value or any(ch.isspace() for ch in value):
+    url = normalize_input_url(text)
+    if not url:
         return False
     try:
-        parsed = urlparse(value)
-        return (
-            parsed.scheme.lower() in {"http", "https"}
-            and bool(parsed.netloc)
-            and bool(parsed.hostname)
-            and not parsed.username
-            and not parsed.password
-        )
-    except ValueError:
+        p = urlparse(url)
+        return p.scheme.lower() in {"http", "https"} and bool(p.netloc)
+    except Exception:
         return False
 
 
