@@ -503,39 +503,52 @@ def _is_back(text):
 def _is_back_more(text):
     return "بازگشت به بیشتر" in text
 
-def _is_bot_keyboard_button(text: str) -> bool:
-    """تشخیص دکمه‌های Reply Keyboard بدون تغییر خود دکمه‌ها.
+# All current ReplyKeyboard button labels are registered here so a button
+# can never be consumed as ordinary input while another feature is waiting
+# for text. This list mirrors keyboard_factory.py and intentionally does not
+# alter any button label or layout.
+_BOT_REPLY_BUTTONS = frozenset({
+    "🏙 انتخاب شهر", "📅 تقویم", "🌍 زبان", "➕ بیشتر", "🤖 دستیار هوشمند",
+    "📅 تاریخ و سن", "🕌 مذهبی", "💰 بازار", "🌤 هوا و مکان", "🛠 ابزارها",
+    "🎮 سرگرمی", "🎨 فونت", "👤 پروفایل", "📥 دانلودر فایل", "🔙 بازگشت",
+    "🔄 مبدل تاریخ", "🎂 محاسبه سن", "🎉 روزشمار تولد", "♈ برج و حیوان",
+    "🌙 سن قمری", "📆 اختلاف تاریخ", "👥 اختلاف سن", "📅 تقویم ماه",
+    "🔍 مناسبت‌یاب", "🌸 شمارش نوروز", "🌍 ساعت جهانی", "⏳ شمارش‌معکوس",
+    "🔙 بازگشت به بیشتر", "🕋 قبله‌نما", "📿 اذکار روز", "📖 آیه و حدیث",
+    "🕌 مناسبت مذهبی", "🙏 استخاره", "🔔 تنظیم اذان", "🔙 بازگشت به مذهبی",
+    "💵 قیمت کامل بازار", "💎 ۲۰ ارز برتر کریپتو", "🔄 تبدیل ارز / کریپتو",
+    "📈 سود و ضرر", "🗓 تقویم اقتصادی", "📊 نمودار و تحلیل ارز دیجیتال",
+    "🥇 تحلیل طلا", "🟢 🔄 بروزرسانی تحلیل طلا",
+    "🌤 پیش‌بینی هوا", "🌫 کیفیت هوا", "📍 لوکیشن من",
+    "🔢 ماشین‌حساب", "🔐 پسورد تصادفی", "📝 شمارش متن", "🗺 فاصله جهانی",
+    "📖 فال حافظ", "😂 جوک روز", "🧠 دانستنی روز", "💪 چالش امروز",
+    "💖 جمله انگیزشی", "🔙 بازگشت به سرگرمی", "🎲 جوک تصادفی", "😄 عمومی",
+    "🤣 ترکی", "😂 رشتی", "😏 قزوینی", "👨 مردان", "👩 زنان",
+    "🤑 اصفهانی", "🔞 سکسی", "🎭 متفرقه", "💀 زشت",
+    "👤 پروفایل من", "📊 آمار من", "🎂 ذخیره تاریخ تولد", "⚙️ تنظیمات هوشمند",
+    "🔙 بازگشت به پروفایل", "✍️ پاسخ کوتاه", "📚 پاسخ کامل", "⚖️ پاسخ متعادل",
+    "💵 ارز USD", "💶 ارز EUR", "🇮🇷 ارز IRR", "🔄 بررسی بروزرسانی",
+    "🧹 پاک‌سازی تنظیمات", "🇮🇷 ایران", "🇮🇶 عراق", "فارسی 🇮🇷", "English 🇬🇧",
+    "العربية 🇸🇦", "🇬🇧 فونت انگلیسی", "🇮🇷 فونت فارسی", "🌈 همه فونت‌ها",
+    "📋 لیست فونت‌ها", "🔙 بازگشت فونت", "🔔 اعلان‌ها: روشن", "🔕 اعلان‌ها: خاموش",
+    "🔄 همه روشن", "⏹ همه خاموش", "🙏 استخاره بگیر",
+})
 
-    این بررسی فقط برای جلوگیری از این است که یک دکمه‌ی ربات، به‌عنوان
-    ورودیِ یک قابلیتِ در حال انتظار (مثل لینک دانلود یا تاریخ) مصرف شود.
-    بعد از تشخیص، پیام به مسیریابی عادی دکمه‌ها برمی‌گردد.
+def _is_bot_reply_button(text: str) -> bool:
+    """Return True only for a known reply-keyboard button.
+
+    Dynamic azan toggle buttons are covered separately because their prefix
+    changes between ✅/❌. Exact matching avoids treating normal user text
+    that merely starts with an emoji as a menu command.
     """
-    t = (text or "").strip()
-    if not t:
-        return False
-    exact = {
-        "➕ بیشتر", "بیشتر", "🏠 منوی اصلی", "📅 تقویم", "تقویم",
-        "🌍 زبان", "زبان", "📥 دانلودر فایل", "🤖 دستیار هوشمند",
-        "📅 تاریخ و سن", "🕌 مذهبی", "💰 بازار", "🌤 هوا و مکان",
-        "🛠 ابزارها", "🎮 سرگرمی", "🎨 فونت", "فونت", "👤 پروفایل",
-        "🏙 انتخاب شهر", "انتخاب شهر", "🔙 بازگشت", "بازگشت",
-        "🔙 بازگشت به بیشتر", "بازگشت به بیشتر", "🔙 بازگشت به منو",
-        "🔙 بازگشت فونت", "🔙 بازگشت به مذهبی", "🙏 استخاره بگیر",
-        "📋 لیست فونت‌ها", "📋 لیست همه فونت‌ها", "🇬🇧 فونت انگلیسی",
-        "🇮🇷 فونت فارسی", "🌈 همه فونت‌ها", "📊 نمودار و تحلیل ارز دیجیتال",
-        "🪙 نمودار و تحلیل طلا", "📈 قیمت ارزها", "💵 تبدیل ارز", "💎 قیمت طلا",
-    }
-    if t in exact or _is_back(t) or _is_back_more(t):
+    value = (text or "").strip()
+    if value in _BOT_REPLY_BUTTONS:
         return True
-    # دکمه‌های ربات معمولاً با یکی از این نشانه‌ها شروع می‌شوند.
-    # ورودی متنی عادی (URL، تاریخ، سؤال و...) دست‌نخورده باقی می‌ماند.
-    return t.startswith((
-        "➕", "🏠", "📅", "🕌", "💰", "🌤", "🛠", "🎮", "🎨", "👤",
-        "🏙", "🌍", "🔙", "💵", "💎", "🔄", "📈", "📐", "🔢", "🔐",
-        "📝", "🗺", "⏰", "📒", "📖", "😂", "🧠", "💪", "💖", "🕋",
-        "📿", "🙏", "🔔", "🌫", "📍", "🇬🇧", "🇮🇷", "🌈", "📋", "🤖", "🧹",
-        "🪙", "📊", "🎯", "⚙️", "🔕", "🔊", "🌐", "📥",
-    ))
+    if value.startswith(("✅ اذان ", "❌ اذان ")):
+        return value[0:2] in ("✅ ", "❌ ") and value[2:] in (
+            "اذان صبح", "اذان ظهر", "اذان عصر", "اذان مغرب", "اذان عشاء"
+        )
+    return False
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -553,9 +566,11 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = update.message.text.strip()
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name or "کاربر"
-    # هر دکمه‌ی ربات باید قبل از پردازش ورودیِ در حال انتظار آزاد شود.
-    # این کار فقط state موقت را پاک می‌کند و خودِ دکمه‌ها/چیدمانشان را تغییر نمی‌دهد.
-    if context.user_data.get("waiting_for") == "downloader_url_v71" and _is_bot_keyboard_button(text):
+    # A reply-keyboard button must always win over a pending text-input mode.
+    # This is the central fix for all features (not only the downloader):
+    # pressing any existing bot button first cancels the old waiting state,
+    # then normal menu routing below handles that button as usual.
+    if context.user_data.get("waiting_for") and _is_bot_reply_button(text):
         context.user_data.pop("waiting_for", None)
 
     # V70 downloader: handle a URL immediately after the downloader button, before generic AI/menu routing.
@@ -690,9 +705,17 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             context.user_data.pop("waiting_for", None)
             await update.message.reply_text("➕ منوی بیشتر:", reply_markup=get_more_keyboard())
             return
-        # اگر کاربر هر دکمه‌ی ربات را زد، waiting را رها کن و خودِ دکمه را
-        # به مسیریابی عادی بسپار؛ بنابراین هیچ دکمه‌ای توسط یک قابلیت قبلی مصرف نمی‌شود.
-        if _is_bot_keyboard_button(text):
+        # اگر کاربر دکمه منو زد، waiting را رها کن و ادامه بده
+        menu_starts = (
+            "➕", "🏠", "📅", "🕌", "💰", "🌤", "🛠", "🎮", "🎨", "👤",
+            "🏙", "🌍", "🔙", "💵", "💎", "🔄", "📈", "📐", "🔢", "🔐",
+            "📝", "🗺", "⏰", "📒", "📖", "😂", "🧠", "💪", "💖", "🕋",
+            "📿", "🙏", "🔔", "🌫", "📍", "🇬🇧", "🇮🇷", "🌈", "📋", "🤖", "🧹",
+        )
+        if text.startswith(menu_starts) or text in (
+            "بیشتر", "بازار", "مذهبی", "ابزارها", "سرگرمی", "فونت", "پروفایل",
+            "تاریخ و سن", "هوا و مکان", "انتخاب شهر", "تقویم", "زبان",
+        ):
             context.user_data.pop("waiting_for", None)
             waiting = None
         else:
