@@ -11,7 +11,7 @@ from bot.database import init_db, backup_db, _user_count, DB_PATH
 from bot.handlers.commands import (
     start, help_command, city_command, language_command,
     calendar_command, stats_command, broadcast_command,
-    backup_command, restore_document_handler, diagnostics_command, knowledge_command, agent_command,
+    backup_command, restore_document_handler, diagnostics_command, aitest_command, knowledge_command, agent_command,
     memory_command, automation_command, plugins_command,
 )
 from bot.handlers.callbacks import button_handler
@@ -366,6 +366,7 @@ def main():
     app.add_handler(CommandHandler("calendar", calendar_command))
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("diagnostics", diagnostics_command))
+    app.add_handler(CommandHandler("aitest", aitest_command))
     app.add_handler(CommandHandler("knowledge", knowledge_command))
     app.add_handler(CommandHandler("memory", memory_command))
     app.add_handler(CommandHandler("automation", automation_command))
