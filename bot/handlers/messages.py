@@ -461,31 +461,41 @@ async def _send_ai_voice(update_or_msg, text: str, user_id: int, reply_markup=No
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
 async def _ask_ai_with_typing(update, context, user_id, text):
-    """AI request with stable chunked output and safe fallback semantics."""
+    """Fast AI request while preserving the visible «در حال نوشتن...» notice."""
     import asyncio
     stop_event = asyncio.Event()
     chat_id = update.effective_chat.id
-    # فقط _ask_ai_stream_and_send یک پیام «✍️ در حال نوشتن...» می‌فرستد.
-    # اینجا فقط ChatAction.TYPING برای وضعیت تایپ تلگرام فعال می‌شود تا
-    # پیام وضعیت دوبار روی صفحه ایجاد نشود.
-    from bot.utils.task_manager import spawn
-    task = spawn(_keep_typing(context.bot, chat_id, stop_event), name=f"typing-{chat_id}")
+    notice = None
     try:
         if not AI_LIMITER.allow(user_id):
             await update.message.reply_text(platform_t(user_id, "limit"))
             return None
-        enriched = text + build_ai_context(user_id, text)
-        # Fast path: use the canonical AI request directly. The old stream
-        # facade called the same provider and then re-chunked the final
-        # answer, adding overhead without reducing provider latency.
-        context.user_data["_ai_already_sent"] = False
-        return await HEAVY_QUEUE.run(lambda: ask_ai(user_id, enriched))
-    finally:
-        stop_event.set()
+
+        # Keep the user's visible status message, but do not put it on the AI
+        # critical path beyond this single immediate Telegram send.
         try:
-            await task
+            notice = await update.message.reply_text("✍️ در حال نوشتن...")
         except Exception as _exc:
-            logger.debug("%s: %s", __name__, _exc)
+            logger.debug("AI typing notice failed: %s", _exc)
+
+        from bot.utils.task_manager import spawn
+        task = spawn(_keep_typing(context.bot, chat_id, stop_event), name=f"typing-{chat_id}")
+        try:
+            enriched = text + build_ai_context(user_id, text)
+            context.user_data["_ai_already_sent"] = False
+            return await HEAVY_QUEUE.run(lambda: ask_ai(user_id, enriched))
+        finally:
+            stop_event.set()
+            try:
+                await task
+            except Exception as _exc:
+                logger.debug("%s: %s", __name__, _exc)
+    finally:
+        if notice is not None:
+            try:
+                await notice.delete()
+            except Exception as _exc:
+                logger.debug("AI typing notice cleanup failed: %s", _exc)
 async def _send_main(update, context, text, user_id):
     context.user_data.pop("waiting_for", None)
     await update.message.reply_text("🏠 منوی اصلی", reply_markup=get_main_keyboard(user_id))
