@@ -1582,6 +1582,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _edit_photo_caption(png, out)
                 return
 
+            if action == "ict":
+                try:
+                    from bot.features.market.finance_ict import analyze_ict
+                except Exception as imp_exc:
+                    await query.message.reply_text(f"❌ ماژول ICT در دسترس نیست: {imp_exc}")
+                    return
+                # بازه پیش‌فرض 1h؛ کاربر از منوی نمودار می‌تواند تایم‌فریم ببیند
+                try:
+                    await query.message.reply_text("⏳ در حال تحلیل ICT...")
+                except Exception:
+                    pass
+                try:
+                    report = await analyze_ict(symbol, interval="1h")
+                except Exception as exc:
+                    report = f"❌ خطا در تحلیل ICT: {exc}"
+                if len(report) > 4000:
+                    report = report[:3980] + "\n…"
+                # HTML escape not needed for plain report; send as plain text
+                menu = get_crypto_analysis_keyboard(symbol)
+                try:
+                    await query.message.reply_text(report, reply_markup=menu)
+                except Exception:
+                    await query.message.reply_text(report)
+                return
+
             if action == "pa":
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     txt = await analyze_gold("1h")
