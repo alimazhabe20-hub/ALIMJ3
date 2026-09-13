@@ -79,6 +79,8 @@ def get_more_keyboard():
             [KeyboardButton("💰 بازار"), KeyboardButton("🌤 هوا و مکان")],
             [KeyboardButton("🛠 ابزارها"), KeyboardButton("🎮 سرگرمی")],
             [KeyboardButton("🎨 فونت"), KeyboardButton("👤 پروفایل")],
+            [KeyboardButton("📥 دانلودر فایل")],
+            [KeyboardButton("🔄 بررسی بروزرسانی")],
             [KeyboardButton("🔙 بازگشت")],
         ],
         resize_keyboard=True,

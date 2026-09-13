@@ -17,6 +17,16 @@ from bot.handlers.commands import (
 from bot.handlers.callbacks import button_handler
 from bot.handlers.messages import text_handler, media_ai_handler, voice_ai_handler, lens_command
 from bot.scheduler import setup_scheduler
+from bot.handlers.platform_handlers import features_command, watchlist_command, alerts_command, memory_v65_command, platform_health_command
+from bot.handlers.v70_handlers import v70_command, v70_selftest_command, v70_memory_command
+from bot.handlers.v71_handlers import downloader_entry_v71, handle_downloader_url_v71, download_callback, v71_command, v71_selftest_command, workspace_command, branch_command, schedule_ai_command, personalize_command
+from bot.handlers.v72_handlers import v72_test_command
+from bot.handlers.v73_handlers import v73_test_command
+from bot.handlers.v74_handlers import v74_test_command
+from bot.handlers.v75_handlers import v75_test_command, v75_memory_command
+from bot.handlers.v76_handlers import v76_test_command, v76_status_command
+from bot.handlers.v77_handlers import v77_test_command, v77_status_command
+from bot.handlers.v78_handlers import update_center_command
 from bot.db_persist import notify_admins_if_empty, shutdown_backup
 import threading
 import signal
@@ -57,13 +67,16 @@ def health():
     # Never expose filesystem paths, admin IDs, or internal database details publicly.
     from bot.release import APP_NAME, VERSION, RELEASE_CHANNEL
     deployment_id = getattr(config, "DEPLOYMENT_ID", "")
+    try:
+        from bot.services.v61_v65_platform import health_snapshot
+        platform = health_snapshot()
+    except Exception:
+        platform = {"database": "unknown"}
     return {
-        "status": "ok",
-        "app": APP_NAME,
-        "version": VERSION,
+        "status": "ok", "app": APP_NAME, "version": VERSION,
         "channel": RELEASE_CHANNEL,
         "deployment": deployment_id[:12] if deployment_id else "unknown",
-        "time": str(datetime.now()),
+        "time": str(datetime.now()), "platform": platform,
     }
 
 
@@ -278,6 +291,40 @@ def startup_self_check() -> None:
     checks.append(("database:init_db", callable(init_db)))
     checks.append(("database:backup_db", callable(backup_db)))
 
+    from bot.services import v70_platform as v70_module
+    from bot.services import v71_platform as v71_module
+    checks.append(("v71:init_v71_tables", callable(getattr(v71_module, "init_v71_tables", None))))
+    checks.append(("v71:self_test", callable(getattr(v71_module, "self_test", None))))
+    from bot.services import v72_platform as v72_module
+    checks.append(("v72:init_v72_tables", callable(getattr(v72_module, "init_v72_tables", None))))
+    checks.append(("v72:qa_snapshot", callable(getattr(v72_module, "qa_snapshot", None))))
+    checks.append(("v72:market_intelligence", callable(getattr(v72_module, "market_intelligence", None))))
+    from bot.services import v73_platform as v73_module
+    checks.append(("v73:init_v73_tables", callable(getattr(v73_module, "init_v73_tables", None))))
+    checks.append(("v73:qa_snapshot", callable(getattr(v73_module, "qa_snapshot", None))))
+    checks.append(("v73:agent", callable(getattr(v73_module, "run_production_agent", None))))
+    from bot.services import v75_platform as v75_module
+    checks.append(("v75:init_v75_tables", callable(getattr(v75_module, "init_v75_tables", None))))
+    from bot.services import v76_platform as v76_module
+    checks.append(("v76:init_v76_tables", callable(getattr(v76_module, "init_v76_tables", None))))
+    checks.append(("v76:agent4", callable(getattr(v76_module, "run_agent_4", None))))
+    checks.append(("v76:release_gate", callable(getattr(v76_module, "release_gate", None))))
+    checks.append(("v76:self_test", callable(getattr(v76_module, "self_test", None))))
+    from bot.services import v77_platform as v77_module
+    checks.append(("v77:init_v77_tables", callable(getattr(v77_module, "init_v77_tables", None))))
+    checks.append(("v77:agent5", callable(getattr(v77_module, "run_agent_5", None))))
+    checks.append(("v77:release_gate", callable(getattr(v77_module, "release_gate", None))))
+    checks.append(("v77:self_test", callable(getattr(v77_module, "self_test", None))))
+    checks.append(("v77:document_intelligence", callable(getattr(v77_module, "extract_document", None))))
+    checks.append(("v75:agent", callable(getattr(v75_module, "run_agent_3", None))))
+    checks.append(("v75:workflow", callable(getattr(v75_module, "execute_workflow", None))))
+    checks.append(("v75:qa", callable(getattr(v75_module, "qa_snapshot", None))))
+    checks.append(("v70:init_v70_tables", callable(getattr(v70_module, "init_v70_tables", None))))
+    checks.append(("v70:self_test", callable(getattr(v70_module, "self_test", None))))
+    from bot.services import downloader as downloader_module
+    checks.append(("downloader:download", callable(getattr(downloader_module, "download", None))))
+    checks.append(("downloader:probe", callable(getattr(downloader_module, "probe", None))))
+
     failed = [name for name, ok in checks if not ok]
     if failed:
         raise RuntimeError("Startup self-check failed: " + ", ".join(failed))
@@ -324,6 +371,33 @@ def main():
     app.add_handler(CommandHandler("automation", automation_command))
     app.add_handler(CommandHandler("agent", agent_command))
     app.add_handler(CommandHandler("plugins", plugins_command))
+    # V61-V65 platform commands
+    app.add_handler(CommandHandler("features", features_command))
+    app.add_handler(CommandHandler("watchlist", watchlist_command))
+    app.add_handler(CommandHandler("alerts", alerts_command))
+    app.add_handler(CommandHandler("memory2", memory_v65_command))
+    app.add_handler(CommandHandler("v65health", platform_health_command))
+    app.add_handler(CommandHandler("v70", v70_command))
+    app.add_handler(CommandHandler("download", downloader_entry_v71))
+    app.add_handler(CommandHandler("v71", v71_command))
+    app.add_handler(CommandHandler("v71test", v71_selftest_command))
+    app.add_handler(CommandHandler("v72test", v72_test_command))
+    app.add_handler(CommandHandler("v73test", v73_test_command))
+    app.add_handler(CommandHandler("v74test", v74_test_command))
+    app.add_handler(CommandHandler("v75test", v75_test_command))
+    app.add_handler(CommandHandler("v76test", v76_test_command))
+    app.add_handler(CommandHandler("v76status", v76_status_command))
+    app.add_handler(CommandHandler("v77test", v77_test_command))
+    app.add_handler(CommandHandler("v77status", v77_status_command))
+    app.add_handler(CommandHandler("update", update_center_command))
+    app.add_handler(CommandHandler("updates", update_center_command))
+    app.add_handler(CommandHandler("memory4", v75_memory_command))
+    app.add_handler(CommandHandler("workspace", workspace_command))
+    app.add_handler(CommandHandler("branch", branch_command))
+    app.add_handler(CommandHandler("scheduleai", schedule_ai_command))
+    app.add_handler(CommandHandler("personalize", personalize_command))
+    app.add_handler(CommandHandler("v70test", v70_selftest_command))
+    app.add_handler(CommandHandler("memory3", v70_memory_command))
     app.add_handler(CommandHandler("broadcast", broadcast_command))
     app.add_handler(CommandHandler("backup", backup_command))
     app.add_handler(MessageHandler(filters.Document.ALL, restore_document_handler), group=0)
@@ -337,6 +411,19 @@ def main():
     )
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_error_handler(error_handler)
+    try:
+        from bot.api.public import api as v65_api
+        from bot.web.admin import admin as v65_admin
+        flask_app.register_blueprint(v65_api)
+        flask_app.register_blueprint(v65_admin)
+        from bot.web.v74_admin import v74_admin
+        flask_app.register_blueprint(v74_admin)
+        from bot.web.v77_admin import v77_admin
+        flask_app.register_blueprint(v77_admin)
+        from bot.web.v78_admin import v78_admin
+        flask_app.register_blueprint(v78_admin)
+    except Exception as web_exc:
+        logger.warning("V65 web/API registration skipped: %s", web_exc)
     setup_scheduler(app)
 
     threading.Thread(target=run_flask, daemon=True).start()

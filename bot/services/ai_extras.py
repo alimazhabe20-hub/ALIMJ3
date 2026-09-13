@@ -248,8 +248,9 @@ async def web_search(query: str, max_results: int = 5) -> str:
             return f"نتیجه‌ای برای «{query}» پیدا نشد."
         return f"نتایج جستجو برای «{query}»:\n\n" + "\n\n".join(results)
     except Exception as e:
-        logger.warning("web_search failed: %s", e)
-        return f"جستجوی وب ناموفق بود: {e}"
+        # جزئیات فنی فقط در لاگ بماند؛ به کاربر نشت نکند.
+        logger.warning("web_search failed: %s", e, exc_info=True)
+        return "⚠️ جستجوی وب فعلاً در دسترس نیست. چند ثانیه بعد دوباره امتحان کنید."
 
 
 # ── یادآوری زبان طبیعی ─────────────────────────────────────────────────────

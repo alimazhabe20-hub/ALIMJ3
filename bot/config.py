@@ -61,6 +61,7 @@ class Config:
     GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     METRICS_TOKEN = os.getenv("METRICS_TOKEN", "").strip()
+    ADMIN_PANEL_TOKEN = os.getenv("ADMIN_PANEL_TOKEN", "").strip()
     RESTORE_MAX_BYTES = int(os.getenv("RESTORE_MAX_BYTES", str(256 * 1024 * 1024)))
 
     # تعداد بکاپ‌هایی که نگه داشته می‌شوند
@@ -72,6 +73,10 @@ class Config:
     RELEASE_VERSION = os.getenv("RELEASE_VERSION", "").strip()
     DEPLOYMENT_ID = os.getenv("DEPLOYMENT_ID", os.getenv("RENDER_GIT_COMMIT", "")).strip()
     STARTUP_CHECK = os.getenv("STARTUP_CHECK", "true").strip().lower() not in {"0", "false", "no", "off"}
+    # V78 Update Center (read-only remote release manifest).
+    UPDATE_MANIFEST_URL = os.getenv("UPDATE_MANIFEST_URL", "").strip()
+    UPDATE_CHECK_TTL = max(60, int(os.getenv("UPDATE_CHECK_TTL", "1800")))
+    UPDATE_CHECK_TIMEOUT = max(3.0, min(30.0, float(os.getenv("UPDATE_CHECK_TIMEOUT", "10"))))
 
 
 config = Config()

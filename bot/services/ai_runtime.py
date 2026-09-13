@@ -20,15 +20,6 @@ GEMINI_SAFETY_SETTINGS = [
     {"category": "HARM_CATEGORY_CIVIC_INTEGRITY", "threshold": "BLOCK_NONE"},
 ]
 
-# خاموش کردن فیلترهای ایمنی Gemini برای اجازه به محتوای بزرگسال/صریح
-GEMINI_SAFETY_SETTINGS = [
-    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_CIVIC_INTEGRITY", "threshold": "BLOCK_NONE"},
-]
-
 MAX_INPUT = int(os.getenv("AI_MAX_INPUT", "6000"))
 # سقف خروجی بالاتر تا جواب‌ها کامل و مفصل باشند
 MAX_OUTPUT = int(os.getenv("AI_MAX_OUTPUT", "8192"))

@@ -241,6 +241,80 @@ async def periodic_telegram_backup(context):
         logger.error("telegram periodic backup failed: %s", e, exc_info=True)
 
 
+
+async def check_v65_price_alerts(context):
+    """Check persisted crypto price alerts without exposing internal errors."""
+    try:
+        from bot.services.v61_v65_platform import check_price_alerts
+        from bot.features.market.finance_core import resolve_coin_id, _crypto_simple
+        async def fetch(symbol):
+            cid = await resolve_coin_id(symbol)
+            if not cid: raise ValueError("unknown symbol")
+            data = await _crypto_simple([cid])
+            row = data.get(cid) or {}
+            return float(row["usd"])
+        hits = await check_price_alerts(fetch)
+        from bot.services.v71_platform import notification_claim
+        for uid, aid, symbol, target, value in hits:
+            try:
+                dedupe=f"price:{aid}:{value:.8g}"
+                if not notification_claim(uid, "price_alert", f"{symbol}:{value}", dedupe, ttl_seconds=300):
+                    continue
+                await context.bot.send_message(chat_id=uid, text=f"🔔 هشدار قیمت\n\n{symbol}: ${value:,.6g}\nهدف: {target:,.6g}")
+            except Exception as exc:
+                logger.debug("price alert delivery failed: %s", exc)
+    except Exception as exc:
+        logger.debug("v65 price alerts failed: %s", exc)
+
+
+async def v70_due_jobs(app):
+    try:
+        from bot.services.v70_platform import due_jobs, mark_job
+        for jid, uid, prompt, run_at, repeat in due_jobs():
+            try:
+                await app.bot.send_message(uid, f"🤖 وظیفه زمان‌بندی‌شده:\n{prompt[:3800]}")
+                mark_job(jid, repeat)
+            except Exception as exc:
+                logger.warning("V70 scheduled job %s failed: %s", jid, type(exc).__name__)
+    except Exception as exc:
+        logger.warning("V70 job runner failed: %s", type(exc).__name__)
+
+
+async def v71_due_jobs(context):
+    """Run due AI tasks exactly once per scheduler pass; delivery stays bounded."""
+    try:
+        from bot.services.v71_platform import due_ai_jobs, complete_ai_job
+        from bot.services.ai_service import ask_ai
+        rows=due_ai_jobs(50)
+        for jid, uid, prompt, run_at, repeat in rows:
+            try:
+                answer, _provider = await ask_ai(uid, prompt)
+                await context.bot.send_message(chat_id=uid, text=f"🤖 نتیجه وظیفه زمان‌بندی‌شده:\n\n{answer[:3800]}")
+                complete_ai_job(jid, int(repeat or 0))
+            except Exception as exc:
+                logger.warning("V71 scheduled AI job %s failed: %s", jid, type(exc).__name__)
+    except Exception as exc:
+        logger.warning("V71 scheduled job runner failed: %s", type(exc).__name__)
+
+
+async def check_update_center(context):
+    """Periodic read-only release check; alerts admins only for a new release."""
+    try:
+        from bot.services.update_center import check_for_updates, maybe_notify_admins
+        result = await asyncio.to_thread(check_for_updates, force=True)
+        loop = asyncio.get_running_loop()
+        await asyncio.to_thread(
+            maybe_notify_admins,
+            result,
+            lambda admin_id, text: asyncio.run_coroutine_threadsafe(
+                context.bot.send_message(chat_id=admin_id, text=text),
+                loop,
+            ).result(timeout=15),
+        )
+    except Exception as exc:
+        logger.debug("update center periodic check failed: %s", exc)
+
+
 def setup_scheduler(app):
     job_queue = app.job_queue
     if not job_queue:
@@ -286,6 +360,8 @@ def setup_scheduler(app):
         first=25,
         name="economic_calendar_alerts",
     )
+    job_queue.run_repeating(check_v65_price_alerts, interval=60, first=40, name="v65_price_alerts")
+    job_queue.run_repeating(v71_due_jobs, interval=30, first=45, name="v71_scheduled_ai")
     # بکاپ پرتکرار: local + Cloudflare R2 (+ GitHub fallback). فاصله از env قابل تنظیم است (پیش‌فرض ۳۰ دقیقه).
     job_queue.run_repeating(
         periodic_backup,
@@ -300,6 +376,13 @@ def setup_scheduler(app):
         first=300,
         name="db_backup_telegram",
     )
+    if getattr(config, "UPDATE_MANIFEST_URL", ""):
+        job_queue.run_repeating(
+            check_update_center,
+            interval=max(3600, int(getattr(config, "UPDATE_CHECK_TTL", 1800)) * 12),
+            first=600,
+            name="update_center_check",
+        )
     # Opt-in proactive digest; disabled for users by default.
     from bot.automation import send_daily_digests
     digest_hour = max(0, min(23, int(getattr(config, "AUTOMATION_DIGEST_HOUR", 8))))

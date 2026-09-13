@@ -4,7 +4,9 @@ Generic registry/execution machinery lives in tool_runtime.py. This facade
 re-exports the historical public functions so existing imports are stable.
 """
 from __future__ import annotations
+
 import asyncio
+import json
 from typing import Any, List
 
 from bot.services.tool_runtime import (
@@ -953,3 +955,149 @@ class _ToolDefsProxy(list):
 
 
 TOOL_DEFINITIONS = _ToolDefsProxy()
+
+# V73: production agent / security / diagnostics tools. These are read-only unless explicitly approved.
+async def _run_agent_v73(goal: str = "", user_id: int = 0) -> str:
+    from bot.services.v73_platform import run_production_agent
+    return await run_production_agent(goal, user_id=user_id)
+
+register_tool(
+    name="run_agent_v73",
+    description="Agent حرفه‌ای محدود با برنامه‌ریزی چندابزاری، بودجه اجرا، جلوگیری از تکرار، تعمیر امن و ثبت trace. عملیات نوشتنی بدون تأیید اجرا نمی‌شوند.",
+    parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
+    handler=_run_agent_v73,
+    keywords=[r"agent حرفه.?ای", r"عامل هوشمند", r"چند.?ابزاری", r"autonomous agent", r"tool architecture"],
+)
+
+def _v73_health() -> str:
+    from bot.services.v73_platform import health_snapshot, performance_snapshot
+    return json.dumps({"health": health_snapshot(), "performance": performance_snapshot()}, ensure_ascii=False)[:4500]
+
+register_tool(name="v73_health", description="گزارش سلامت، circuit protection و performance داخلی بدون اطلاعات محرمانه.", parameters={"type":"object","properties":{}}, handler=_v73_health, keywords=[r"سلامت سیستم", r"performance", r"self healing", r"خود.?ترمیم"])
+
+
+async def _run_agent_v74(goal: str = "", user_id: int = 0) -> str:
+    from bot.services.v74_platform import run_agent_2
+    return await run_agent_2(goal, user_id=user_id)
+
+register_tool(
+    name="run_agent_v74",
+    description="Agent 2.0 محدود و امن برای برنامه‌ریزی پویا، انتخاب ابزار، توقف هوشمند و repair کنترل‌شده.",
+    parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
+    handler=_run_agent_v74, keywords=[r"agent 2", r"عامل هوشمند", r"اجرای چندمرحله", r"برنامه.?ریزی هوشمند"]
+)
+
+def _v74_system_status() -> str:
+    from bot.services.v74_platform import observability_snapshot
+    import json
+    return json.dumps(observability_snapshot(), ensure_ascii=False)[:12000]
+
+register_tool(
+    name="v74_system_status",
+    description="گزارش امن سلامت، ابزارها، عملکرد، providerها، persistence و runtime نسخه V74.",
+    parameters={"type":"object","properties":{}}, handler=_v74_system_status,
+    keywords=[r"سلامت v74", r"وضعیت v74", r"observability", r"reliability"]
+)
+
+# V75 Intelligence & Automation tools — bounded/read-only by default.
+async def _run_agent_v75(goal: str = "", user_id: int = 0) -> str:
+    from bot.services.v75_platform import run_agent_3
+    return json.dumps(await run_agent_3(goal, user_id=user_id), ensure_ascii=False)[:12000]
+
+register_tool(
+    name="run_agent_v75",
+    description="Agent 3.0 محدود با بودجه اجرا، جلوگیری از تکرار، امنیت و اجرای ابزارهای تخصصی موجود.",
+    parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
+    handler=_run_agent_v75, keywords=[r"agent 3",r"agent 3.0",r"عامل.*پیشرفته",r"برنامه.?ریزی چندمرحله"]
+)
+
+async def _multi_agent_v75(goal: str = "", user_id: int = 0) -> str:
+    from bot.services.v75_platform import run_multi_agent
+    return json.dumps(await run_multi_agent(goal, user_id=user_id), ensure_ascii=False)[:12000]
+
+register_tool(
+    name="multi_agent_v75",
+    description="هماهنگی محدود چند متخصص برای پژوهش، بازار، اقتصاد و ابزارهای عمومی؛ بدون حلقه مستقل و بی‌نهایت.",
+    parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
+    handler=_multi_agent_v75, keywords=[r"multi.?agent",r"چند عامل",r"چند متخصص"]
+)
+
+def _v75_status() -> str:
+    from bot.services.v75_platform import dashboard
+    return json.dumps(dashboard(), ensure_ascii=False)[:12000]
+
+register_tool(name="v75_system_status", description="گزارش امن وضعیت V75 شامل امنیت، workflow، alert، memory و performance.", parameters={"type":"object","properties":{}}, handler=_v75_status, keywords=[r"سلامت v75",r"وضعیت v75",r"داشبورد v75"])
+
+def _v75_security(text: str = "") -> str:
+    from bot.services.v75_platform import security_scan
+    return json.dumps(security_scan(text), ensure_ascii=False)
+
+register_tool(name="v75_security_scan", description="اسکن امن متن برای prompt injection، افشای secret و الگوهای command خطرناک.", parameters={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=_v75_security, keywords=[r"security scan",r"اسکن امنیتی",r"prompt injection"])
+
+def _v75_news_score(title: str = "", content: str = "") -> str:
+    from bot.services.v75_platform import score_news
+    return json.dumps(score_news(title, content), ensure_ascii=False)
+
+register_tool(name="v75_news_score", description="امتیازدهی اولیه sentiment و impact خبر بدون ادعای صحت منبع.", parameters={"type":"object","properties":{"title":{"type":"string"},"content":{"type":"string"}},"required":["title"]}, handler=_v75_news_score, keywords=[r"تحلیل خبر",r"sentiment خبر",r"impact خبر"])
+
+# V76 Adaptive Core tools
+async def _run_agent_v76(goal: str = "", user_id: int = 0) -> str:
+    from bot.services.v76_platform import run_agent_4
+    return json.dumps(await run_agent_4(goal,user_id=user_id),ensure_ascii=False)[:12000]
+
+register_tool(name="run_agent_v76", description="Agent 4.0 محدود با Intent، برنامه‌ریزی، Verify و بودجه اجرای امن.", parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]}, handler=_run_agent_v76, keywords=[r"agent 4",r"عامل 4",r"برنامه.?ریزی پیشرفته",r"adaptive agent"])
+
+def _v76_status() -> str:
+    from bot.services.v76_platform import system_snapshot
+    return json.dumps(system_snapshot(),ensure_ascii=False)[:12000]
+
+register_tool(name="v76_system_status", description="وضعیت امن هسته Adaptive V76، امنیت، Agent، Job، Cache و Provider Mesh.", parameters={"type":"object","properties":{}}, handler=_v76_status, keywords=[r"سلامت v76",r"وضعیت v76",r"adaptive core"])
+
+
+# V77 Ultimate platform tools ------------------------------------------------
+async def _run_agent_v77(goal: str = "", user_id: int = 0) -> str:
+    from bot.services.v77_platform import run_agent_5
+    result = await run_agent_5(str(goal or ""), user_id=int(user_id or 0))
+    return json.dumps(result, ensure_ascii=False)[:12000]
+
+
+def _v77_status() -> str:
+    from bot.services.v77_platform import system_snapshot
+    return json.dumps(system_snapshot("."), ensure_ascii=False)[:12000]
+
+
+def _v77_market(closes: list[float] | None = None) -> str:
+    from bot.services.v77_platform import market_intelligence_3
+    return json.dumps(market_intelligence_3(closes or []), ensure_ascii=False)
+
+
+def _v77_security(text: str = "") -> str:
+    from bot.services.v77_platform import security_scan
+    return json.dumps(security_scan(text), ensure_ascii=False)
+
+try:
+    register_tool(
+        name="run_agent_v77",
+        description="Agent 5.0 با برنامه‌ریزی وابسته، اجرای محدود، Verify و Retry امن.",
+        parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
+        handler=_run_agent_v77,
+        keywords=[r"agent 5",r"عامل 5",r"برنامه.?ریزی چندمرحله.?ای"]
+    )
+    register_tool(
+        name="v77_system_status",
+        description="وضعیت امن هسته V77 Ultimate.",
+        parameters={"type":"object","properties":{}}, handler=_v77_status,
+        keywords=[r"سلامت v77",r"وضعیت v77",r"ultimate status"]
+    )
+    register_tool(
+        name="v77_market_intelligence",
+        description="تحلیل پیشرفته روند، EMA، RSI، مومنتوم و نوسان.",
+        parameters={"type":"object","properties":{"closes":{"type":"array","items":{"type":"number"}}}}, handler=_v77_market
+    )
+    register_tool(
+        name="v77_security_scan",
+        description="اسکن امنیتی ورودی بدون افشای جزئیات داخلی.",
+        parameters={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=_v77_security
+    )
+except Exception:
+    pass

@@ -82,6 +82,29 @@ def init_db() -> None:
     conn.commit()
     conn.close()
     init_extra_tables()
+    # V61-V65 platform tables: memory, watchlist, price alerts, metrics.
+    try:
+        from bot.services.v61_v65_platform import init_platform_tables
+        init_platform_tables()
+    except Exception as platform_exc:
+        logger.error("platform table initialization failed: %s", platform_exc)
+    try:
+        from bot.services.v70_platform import init_v70_tables
+        init_v70_tables()
+        from bot.services.v71_platform import init_v71_tables
+        init_v71_tables()
+        from bot.services.v73_platform import init_v73_tables
+        init_v73_tables()
+        from bot.services.v74_platform import init_v74_tables
+        init_v74_tables()
+        from bot.services.v75_platform import init_v75_tables
+        init_v75_tables()
+        from bot.services.v76_platform import init_v76_tables
+        init_v76_tables()
+        from bot.services.v77_platform import init_v77_tables
+        init_v77_tables()
+    except Exception as v70_exc:
+        logger.error("V70/V71/V73 table initialization failed: %s", v70_exc)
     # V36: ثبت و کنترل نسخه schema؛ هیچ داده‌ای حذف یا بازنویسی نمی‌شود.
     conn = get_db_connection()
     try:
