@@ -28,24 +28,6 @@ def _legacy_ai_context():
     from bot.services import ai_service
     return ai_service.SYSTEM_PROMPT, ai_service._messages
 
-
-def _prompt_needs_tools(prompt: str) -> bool:
-    """Only enable tool/function calling when the request can actually use it.
-
-    Simple chat such as «سلام» should use a plain completion path. This avoids
-    provider/model combinations rejecting an unnecessary tools payload.
-    """
-    text = (prompt or "").strip()
-    if len(text) <= 260:
-        markers = (
-            "قیمت", "بازار", "کریپتو", "رمزارز", "طلا", "هوا", "آب و هوا",
-            "خرید", "لینک", "جستجو", "یادآوری", "اذان", "تقویم", "تحلیل",
-            "weather", "price", "market", "crypto", "bitcoin", "ethereum",
-            "search", "buy", "remind",
-        )
-        return any(m in text.lower() for m in markers)
-    return True
-
 async def _post_json(url: str, *, headers=None, json=None, params=None) -> tuple[int, dict]:
     """POST with shared connection pool and bounded transient retries."""
     client = _get_http()
@@ -157,8 +139,6 @@ async def _gemini(
     keys = _next_keys("gemini")
     if not keys:
         raise RuntimeError("هیچ کلید Gemini تنظیم نشده")
-
-    use_tools = use_tools and _prompt_needs_tools(prompt)
 
     from bot.services.ai_tools import get_tool_definitions, execute_tool, parse_tool_arguments
     from bot.services.tool_runtime import select_capability_tool
@@ -361,7 +341,6 @@ async def _openai_compatible(
         raise RuntimeError(f"هیچ کلید {name} تنظیم نشده")
 
     errors = []
-    use_tools = use_tools and _prompt_needs_tools(prompt)
     for key in keys:
         # Keep tool capability local to this key/attempt; one incompatible endpoint
         # must not disable tools for every fallback provider key.
@@ -382,10 +361,12 @@ async def _openai_compatible(
 
         try:
             for _round in range(total_rounds):
+                # Cap tokens: some free-tier models reject very high max_tokens.
+                safe_max = min(int(MAX_OUTPUT), 4096)
                 payload = {
                     "model": model,
                     "messages": messages,
-                    "max_tokens": MAX_OUTPUT,
+                    "max_tokens": safe_max,
                     "temperature": 0.6,
                 }
                 if tools_enabled and _round < max_tool_rounds:
@@ -418,6 +399,9 @@ async def _openai_compatible(
                             "tool_calls", "tool call",
                             "function calling", "function_call",
                             "function calls", "unsupported parameter",
+                            "invalid schema", "json schema", "tools is not supported",
+                            "does not support tools", "too many tools", "max tools",
+                            "context_length", "maximum context", "payload too large",
                         )
                     ):
                         tools_enabled = False
@@ -499,7 +483,7 @@ async def _openai_compatible(
     raise RuntimeError(f"همه کلیدهای {name} تمام/خطا: " + " | ".join(errors[:5]))
 
 
-async def _groq(user_id: int, prompt: str, model: str) -> str:
+async def _groq(user_id: int, prompt: str, model: str, *, use_tools: bool = True) -> str:
     return await _openai_compatible(
         "Groq",
         "groq",
@@ -508,10 +492,11 @@ async def _groq(user_id: int, prompt: str, model: str) -> str:
         url=os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
         + "/chat/completions",
         model=model,
+        use_tools=use_tools,
     )
 
 
-async def _cerebras(user_id: int, prompt: str, model: str) -> str:
+async def _cerebras(user_id: int, prompt: str, model: str, *, use_tools: bool = True) -> str:
     return await _openai_compatible(
         "Cerebras",
         "cerebras",
@@ -519,10 +504,11 @@ async def _cerebras(user_id: int, prompt: str, model: str) -> str:
         prompt,
         url="https://api.cerebras.ai/v1/chat/completions",
         model=model,
+        use_tools=use_tools,
     )
 
 
-async def _openrouter(user_id: int, prompt: str, model: str) -> str:
+async def _openrouter(user_id: int, prompt: str, model: str, *, use_tools: bool = True) -> str:
     return await _openai_compatible(
         "OpenRouter",
         "openrouter",
@@ -531,6 +517,7 @@ async def _openrouter(user_id: int, prompt: str, model: str) -> str:
         url="https://openrouter.ai/api/v1/chat/completions",
         model=model,
         extra_headers={"X-Title": "Rooze Ziba"},
+        use_tools=use_tools,
     )
 
 
@@ -577,18 +564,78 @@ async def _cloudflare(user_id: int, prompt: str, model: str) -> str:
     raise RuntimeError("همه توکن‌های Cloudflare تمام/خطا: " + " | ".join(errors[:5]))
 
 
-async def _call_provider(provider: str, user_id: int, prompt: str, model: str) -> str:
-    if provider == "gemini":
-        return await _gemini(user_id, prompt, model)
-    if provider == "groq":
-        return await _groq(user_id, prompt, model)
-    if provider == "cerebras":
-        return await _cerebras(user_id, prompt, model)
-    if provider == "cloudflare":
-        return await _cloudflare(user_id, prompt, model)
-    if provider == "openrouter":
-        return await _openrouter(user_id, prompt, model)
-    raise RuntimeError(f"Unknown AI provider: {provider}")
+def _looks_simple_prompt(prompt: str) -> bool:
+    """Greetings and very short chat should never carry the full 60+ tool schema.
+
+    Sending the entire tool registry with a one-word hello is a common cause of
+    empty answers / HTTP 400 / timeouts across free-tier models.
+    """
+    import re
+    text = (prompt or "").strip()
+    # Strip runtime context blocks injected by the bot itself.
+    text = re.sub(r"\[ROOZE_ZIBA_RUNTIME\][\s\S]*$", "", text).strip()
+    text = re.sub(r"\[SHOPPING MODE\][\s\S]*$", "", text).strip()
+    if not text:
+        return True
+    if len(text) <= 40:
+        simple = re.compile(
+            r"^(?:سلام|درود|hi|hello|hey|سلام علیکم|صبح بخیر|عصر بخیر|شب بخیر|"
+            r"خوبی\??|چطوری\??|چه خبر\??|ممنون|مرسی|thanks|thank you|"
+            r"ok|باشه|آها|هه+|؟+|\.+)$",
+            re.I,
+        )
+        if simple.match(text):
+            return True
+    return False
+
+
+async def _call_provider(
+    provider: str,
+    user_id: int,
+    prompt: str,
+    model: str,
+    *,
+    use_tools: bool | None = None,
+) -> str:
+    """Dispatch to a provider. Auto-disable tools for simple prompts and retry
+    once without tools when the first attempt fails for tool/schema reasons.
+    """
+    if use_tools is None:
+        use_tools = not _looks_simple_prompt(prompt)
+
+    async def _once(with_tools: bool) -> str:
+        if provider == "gemini":
+            return await _gemini(user_id, prompt, model, use_tools=with_tools)
+        if provider == "groq":
+            return await _groq(user_id, prompt, model, use_tools=with_tools)
+        if provider == "cerebras":
+            return await _cerebras(user_id, prompt, model, use_tools=with_tools)
+        if provider == "cloudflare":
+            # Cloudflare Workers AI path has no tool calling; ignore flag.
+            return await _cloudflare(user_id, prompt, model)
+        if provider == "openrouter":
+            return await _openrouter(user_id, prompt, model, use_tools=with_tools)
+        raise RuntimeError(f"Unknown AI provider: {provider}")
+
+    try:
+        return await _once(use_tools)
+    except Exception as first:
+        msg = str(first).lower()
+        tool_related = any(
+            x in msg
+            for x in (
+                "tool", "function", "schema", "empty answer", "empty response",
+                "پاسخ خالی", "internal tool artifact", "functioncall",
+                "function_call", "tool_choice", "max tokens", "context_length",
+            )
+        )
+        if use_tools and tool_related:
+            logger.warning(
+                "Provider %s/%s failed with tools (%s); retrying without tools",
+                provider, model, str(first)[:180],
+            )
+            return await _once(False)
+        raise
 
 
 

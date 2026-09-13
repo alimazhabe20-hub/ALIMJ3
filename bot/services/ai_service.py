@@ -612,25 +612,26 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
             if item not in ordered:
                 ordered.append(item)
 
+        deferred_cooldown: list = []
         for provider, model in ordered:
             key = (provider, model)
             if key in tried:
                 continue
-            # Automatic routing skips providers in circuit-open cooldown; an explicit
-            # user selection is never silently bypassed.
+            # Prefer healthy providers first; do NOT permanently skip cooled ones.
+            # After healthy attempts fail we still try cooled providers so a bad
+            # tool-schema spike cannot silence the whole bot.
             if not selected and not _provider_available(provider):
-                logger.info("Skipping AI provider %s while circuit is cooling down", provider)
+                deferred_cooldown.append((provider, model))
                 continue
             tried.add(key)
             started = time.monotonic()
             try:
                 answer = await _call_provider(provider, user_id, prompt, model)
+                if not (answer or "").strip():
+                    raise RuntimeError("empty answer")
                 _record_provider(provider, ok=True, latency=time.monotonic() - started)
                 record_metric("ai_provider", provider, ok=True, latency=time.monotonic() - started, model=model)
                 _save_turn(user_id, original_prompt, answer)
-                # انتخاب خودکار را در DB ذخیره نکن؛ وگرنه اولین Provider موفق
-                # عملاً Routing تطبیقی درخواست‌های بعدی را قفل می‌کرد.
-                # انتخاب دستی کاربر همچنان در _USER_SELECTION/DB حفظ می‌شود.
                 return answer, f"{provider} / {model}"
             except Exception as exc:
                 _record_provider(provider, ok=False, latency=time.monotonic() - started)
@@ -638,11 +639,33 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
                 msg = str(exc).replace("\n", " ")[:500]
                 errors.append(f"{provider}/{model}: {msg}")
                 logger.warning("AI provider/model failed: %s", msg)
-                # تأخیر خیلی کم بین تلاش‌ها برای سرعت بیشتر
+                await asyncio.sleep(0.05)
+
+        # Second pass: providers that were in circuit cooldown
+        for provider, model in deferred_cooldown:
+            key = (provider, model)
+            if key in tried:
+                continue
+            tried.add(key)
+            started = time.monotonic()
+            try:
+                answer = await _call_provider(provider, user_id, prompt, model)
+                if not (answer or "").strip():
+                    raise RuntimeError("empty answer")
+                _record_provider(provider, ok=True, latency=time.monotonic() - started)
+                record_metric("ai_provider", provider, ok=True, latency=time.monotonic() - started, model=model)
+                _save_turn(user_id, original_prompt, answer)
+                return answer, f"{provider} / {model}"
+            except Exception as exc:
+                _record_provider(provider, ok=False, latency=time.monotonic() - started)
+                msg = str(exc).replace("\n", " ")[:500]
+                errors.append(f"{provider}/{model}: {msg}")
+                logger.warning("AI cooldown-provider failed: %s", msg)
                 await asyncio.sleep(0.05)
 
     logger.error("AI request failed across all providers: %s", " | ".join(errors[:8]))
-    raise RuntimeError("AI_UNAVAILABLE")
+    detail = errors[0] if errors else "no providers"
+    raise RuntimeError(f"AI_UNAVAILABLE: {detail[:200]}")
 
 
 # ── استریم واقعی از API (SSE) ───────────────────────────────────────────────
@@ -826,13 +849,9 @@ async def ask_ai_stream(user_id: int, prompt: str):
         for provider, model in ordered:
             try:
                 answer = await _call_provider(provider, user_id, original, model)
-                if not answer:
+                if not (answer or "").strip():
                     raise RuntimeError("empty answer")
                 _save_turn(user_id, original, answer)
-                # Automatic routing must remain automatic. Persisting the first
-                # successful provider here could lock the user to a provider
-                # that later becomes unavailable. Manual selections are already
-                # persisted by set_selected_model().
 
                 # Emit bounded chunks so Telegram still appears to stream.
                 chunk_size = max(80, int(os.getenv("AI_STREAM_CHUNK", "180")))
@@ -848,5 +867,6 @@ async def ask_ai_stream(user_id: int, prompt: str):
                 await asyncio.sleep(0.05)
 
     logger.error("AI streaming facade failed across all providers: %s", " | ".join(errors[:8]))
-    raise RuntimeError("AI_UNAVAILABLE")
+    detail = errors[0] if errors else "no providers"
+    raise RuntimeError(f"AI_UNAVAILABLE: {detail[:200]}")
 
