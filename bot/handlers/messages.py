@@ -1032,7 +1032,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data["waiting_for"] = "profit"; track_usage(user_id, "profit")
         await update.message.reply_text("📈 `1000 1200` یا `1000 1200 5`", reply_markup=get_market_keyboard()); return
     if text in ("📐 تحلیل ICT", "تحلیل ICT", "ICT", "ict"):
-        from bot.handlers.market_handlers import _h_ict
         await _h_ict(update, context, text, user_id)
         return
     if text in (
