@@ -220,7 +220,7 @@ def enqueue_auto_reaction(update) -> bool:
     category, emoji, confidence = result
     user_id = int(message.from_user.id)
     now = time.monotonic()
-    cooldown = max(0.0, float(getattr(config, "AUTO_REACTIONS_COOLDOWN", 0.10)))
+    cooldown = max(0.0, float(getattr(config, "AUTO_REACTIONS_COOLDOWN", 0.0)))
     if now - _last_by_user.get(user_id, 0.0) < cooldown:
         return False
     key = (int(chat.id), int(message.message_id))
