@@ -98,12 +98,15 @@ def _normalize_media_url(url: str) -> str:
 
 
 def normalize_user_url(text: str) -> str:
-    """Normalize a URL copied from Telegram without changing its target."""
+    """Extract and normalize the first public HTTP(S) URL from Telegram text."""
     value = (text or "").strip()
-    # Telegram users may paste links wrapped in punctuation or containing
-    # zero-width characters introduced by Persian/Arabic text/copy-paste.
     value = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", value)
-    value = value.strip(" \t\r\n<>[](){}\"'`")
+    # Accept a URL pasted alone or embedded in a short sentence / angle brackets.
+    match = re.search(r"https?://[^\s<>\"'`]+", value, re.I)
+    if not match:
+        return ""
+    value = match.group(0).strip("<>[](){}\"'`")
+    # Telegram punctuation frequently sticks to the end of pasted URLs.
     value = re.sub(r"[.,!?;:]+$", "", value)
     return value
 
@@ -113,13 +116,13 @@ def is_url(text: str) -> bool:
     if not value or any(ch.isspace() for ch in value):
         return False
     try:
-        p = urlparse(value)
+        parsed = urlparse(value)
         return (
-            p.scheme.lower() in {"http", "https"}
-            and bool(p.netloc)
-            and not p.username
-            and not p.password
-            and bool(p.hostname)
+            parsed.scheme.lower() in {"http", "https"}
+            and bool(parsed.netloc)
+            and bool(parsed.hostname)
+            and not parsed.username
+            and not parsed.password
         )
     except ValueError:
         return False
