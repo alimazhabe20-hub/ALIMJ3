@@ -1,6 +1,7 @@
 """Reliable automatic Telegram reactions for incoming user messages."""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -38,6 +39,9 @@ _recent_messages: deque[tuple[int, int]] = deque(maxlen=4096)
 _recent_set: set[tuple[int, int]] = set()
 _last_by_user: dict[int, float] = {}
 _available_cache: dict[int, tuple[float, Optional[set[str]]]] = {}
+_queue: Optional[asyncio.Queue] = None
+_worker_task: Optional[asyncio.Task] = None
+_client: Optional[httpx.AsyncClient] = None
 
 
 def _enabled() -> bool:
@@ -87,13 +91,21 @@ def _mark_seen(key: tuple[int, int]) -> bool:
     return True
 
 
-async def _api(token: str, method: str, data: dict, timeout: float) -> tuple[bool, dict]:
+async def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(timeout=httpx.Timeout(
+            float(getattr(config, "AUTO_REACTIONS_TIMEOUT", 3.0)),
+            connect=2.0,
+        ), limits=httpx.Limits(max_connections=4, max_keepalive_connections=2))
+    return _client
+
+
+async def _api(token: str, method: str, data: dict) -> tuple[bool, dict]:
     url = f"https://api.telegram.org/bot{token}/{method}"
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            # Bot API accepts standard form encoding; this also avoids clients/proxies
-            # mishandling a nested JSON field when json= is used.
-            response = await client.post(url, data=data)
+        client = await _get_client()
+        response = await client.post(url, data=data)
         try:
             payload = response.json()
         except Exception:
@@ -103,23 +115,20 @@ async def _api(token: str, method: str, data: dict, timeout: float) -> tuple[boo
         return False, {"ok": False, "description": str(exc)}
 
 
-async def _available_reactions(token: str, chat_id: int | str, timeout: float) -> Optional[set[str]]:
-    """Return explicitly allowed emoji reactions, or None when Telegram says unrestricted."""
+async def _available_reactions(token: str, chat_id: int | str) -> Optional[set[str]]:
     try:
         cid = int(chat_id)
     except (TypeError, ValueError):
         return None
     now = time.monotonic()
     cached = _available_cache.get(cid)
-    ttl = float(getattr(config, "AUTO_REACTIONS_CHAT_CACHE_TTL", 600.0))
+    ttl = float(getattr(config, "AUTO_REACTIONS_CHAT_CACHE_TTL", 900.0))
     if cached and now - cached[0] < ttl:
         return cached[1]
-    ok, payload = await _api(token, "getChat", {"chat_id": chat_id}, timeout)
+    ok, payload = await _api(token, "getChat", {"chat_id": chat_id})
     if not ok:
-        # Failure to inspect chat settings must not disable reactions entirely.
         return None
-    chat = payload.get("result") or {}
-    raw = chat.get("available_reactions")
+    raw = (payload.get("result") or {}).get("available_reactions")
     if raw is None:
         allowed = None
     else:
@@ -129,43 +138,35 @@ async def _available_reactions(token: str, chat_id: int | str, timeout: float) -
 
 
 async def _set_reaction(token: str, chat_id: int | str, message_id: int, emoji: str) -> bool:
-    timeout = float(getattr(config, "AUTO_REACTIONS_TIMEOUT", 5.0))
-    allowed = await _available_reactions(token, chat_id, timeout)
-    if allowed is not None and emoji not in allowed:
-        # Pick a semantically neutral reaction that Telegram explicitly permits.
-        for fallback in ("❤️", "👍", "🔥", "👏", "😂"):
-            if fallback in allowed:
-                emoji = fallback
-                break
-        else:
-            logger.info("auto reaction skipped: no compatible emoji reaction allowed in chat=%s", chat_id)
-            return False
-
     reaction_json = json.dumps([{"type": "emoji", "emoji": emoji}], ensure_ascii=False)
     ok, payload = await _api(token, "setMessageReaction", {
         "chat_id": chat_id,
         "message_id": message_id,
         "reaction": reaction_json,
         "is_big": "true" if bool(getattr(config, "AUTO_REACTIONS_BIG", False)) else "false",
-    }, timeout)
+    })
     if ok:
         return True
 
     description = str(payload.get("description", "unknown Telegram error"))
-    # If a cached allowed list became stale, refresh once and retry with the same
-    # semantic emoji or a currently allowed fallback.
+    # Only pay the extra getChat request when Telegram actually rejects the emoji.
     if "REACTION_INVALID" in description or "reaction" in description.lower():
-        _available_cache.pop(int(chat_id), None) if str(chat_id).lstrip("-").isdigit() else None
-        allowed = await _available_reactions(token, chat_id, timeout)
+        try:
+            _available_cache.pop(int(chat_id), None)
+        except (TypeError, ValueError):
+            pass
+        allowed = await _available_reactions(token, chat_id)
         if allowed is not None:
-            candidate = emoji if emoji in allowed else next((x for x in ("❤️", "👍", "🔥", "👏", "😂") if x in allowed), None)
+            candidate = emoji if emoji in allowed else next(
+                (x for x in ("❤️", "👍", "🔥", "👏", "😂") if x in allowed), None
+            )
             if candidate:
                 ok2, payload2 = await _api(token, "setMessageReaction", {
                     "chat_id": chat_id,
                     "message_id": message_id,
                     "reaction": json.dumps([{"type": "emoji", "emoji": candidate}], ensure_ascii=False),
                     "is_big": "false",
-                }, timeout)
+                })
                 if ok2:
                     return True
                 description = str(payload2.get("description", description))
@@ -173,7 +174,36 @@ async def _set_reaction(token: str, chat_id: int | str, message_id: int, emoji: 
     return False
 
 
-async def maybe_auto_react(update, context=None) -> bool:
+async def _worker() -> None:
+    while True:
+        item = await _queue.get()
+        try:
+            chat_id, message_id, emoji, user_id, category, confidence = item
+            token = (getattr(config, "BOT_TOKEN", "") or "").strip()
+            if token and await _set_reaction(token, chat_id, message_id, emoji):
+                logger.info("auto reaction applied user=%s chat=%s message=%s category=%s emoji=%s confidence=%.2f", user_id, chat_id, message_id, category, emoji, confidence)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.debug("auto reaction worker error: %s", exc)
+        finally:
+            _queue.task_done()
+
+
+def _ensure_worker() -> None:
+    global _queue, _worker_task
+    if _queue is None:
+        _queue = asyncio.Queue(maxsize=256)
+    if _worker_task is None or _worker_task.done():
+        _worker_task = asyncio.create_task(_worker(), name="auto-reaction-worker")
+
+
+def enqueue_auto_reaction(update) -> bool:
+    """Fast, non-blocking hook used by the message handler.
+
+    Classification and queueing are local-only; all Telegram I/O happens in a
+    single background worker so the AI/message path never waits for reactions.
+    """
     if not _enabled() or not update or not getattr(update, "message", None):
         return False
     message = update.message
@@ -190,17 +220,23 @@ async def maybe_auto_react(update, context=None) -> bool:
     category, emoji, confidence = result
     user_id = int(message.from_user.id)
     now = time.monotonic()
-    cooldown = max(0.0, float(getattr(config, "AUTO_REACTIONS_COOLDOWN", 0.25)))
+    cooldown = max(0.0, float(getattr(config, "AUTO_REACTIONS_COOLDOWN", 0.10)))
     if now - _last_by_user.get(user_id, 0.0) < cooldown:
         return False
     key = (int(chat.id), int(message.message_id))
     if not _mark_seen(key):
         return False
-    token = (getattr(config, "BOT_TOKEN", "") or "").strip()
-    if not token:
+    if not (getattr(config, "BOT_TOKEN", "") or "").strip():
         return False
-    ok = await _set_reaction(token, chat.id, message.message_id, emoji)
-    if ok:
-        _last_by_user[user_id] = now
-        logger.info("auto reaction applied user=%s chat=%s message=%s category=%s emoji=%s confidence=%.2f", user_id, chat.id, message.message_id, category, emoji, confidence)
-    return ok
+    _ensure_worker()
+    try:
+        _queue.put_nowait((chat.id, message.message_id, emoji, user_id, category, confidence))
+    except asyncio.QueueFull:
+        return False
+    _last_by_user[user_id] = now
+    return True
+
+
+async def maybe_auto_react(update, context=None) -> bool:
+    """Backward-compatible async entry point; it only queues work."""
+    return enqueue_auto_reaction(update)
