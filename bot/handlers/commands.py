@@ -228,6 +228,22 @@ async def diagnostics_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("\n".join(lines)[-3900:])
 
 
+async def aitest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin-only: probe each AI provider with a real minimal request."""
+    user_id = update.effective_user.id if update.effective_user else 0
+    if user_id not in config.ADMIN_IDS:
+        await update.message.reply_text("⛔ فقط ادمین")
+        return
+    await update.message.reply_text("⏳ در حال تست کلیدهای AI...")
+    try:
+        from bot.services.ai_service import diagnose_ai_keys
+        report = await diagnose_ai_keys()
+        await update.message.reply_text(report[:4000])
+    except Exception as exc:
+        await update.message.reply_text(f"❌ diagnose failed: {exc}")
+
+
+
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_and_rate_limit(update, context):
         return

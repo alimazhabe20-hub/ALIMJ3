@@ -615,9 +615,12 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
                 if handled:
                     return
-                answer, provider = await _ask_ai_with_typing(
+                result = await _ask_ai_with_typing(
                     update, context, user_id, ask_text
                 )
+                if not result:
+                    return
+                answer, provider = result
                 if context.user_data is not None:
                     context.user_data["last_ai_answer"] = answer
                 if not (context.user_data or {}).get("_ai_already_sent"):
@@ -643,10 +646,17 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             except Exception as exc:
                 logger.error("AI request failed: %s", exc, exc_info=True)
                 msg = str(exc)
-                if "هیچ سرویس AI" in msg or "تنظیم نشده" in msg:
-                    text = "⚠️ هیچ کلید AI تنظیم نشده است. کلیدها را در .env بررسی کنید."
+                if "INVALID_API_KEY" in msg:
+                    text = (
+                        "🔑 کلید API نامعتبر یا منقضی است.\n"
+                        "ربات وجود کلید را می‌بیند، ولی سرور AI آن را رد می‌کند.\n"
+                        "در .env این‌ها را با کلید واقعی عوض کنید:\n"
+                        "GROQ_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY"
+                    )
+                elif "هیچ سرویس AI" in msg or "تنظیم نشده" in msg:
+                    text = "⚠️ هیچ کلید AI در محیط اجرا تنظیم نشده است."
                 elif "queue full" in msg.lower():
-                    text = "⏳ صف درخواست‌ها پر است. چند ثانیه بعد دوباره بفرستید."
+                    text = "⏳ صف شلوغ است. چند ثانیه بعد دوباره بفرستید."
                 else:
                     text = "⚠️ فعلاً سرویس هوش مصنوعی پاسخ نداد. چند ثانیه بعد دوباره امتحان کنید."
                 await update.message.reply_text(text)
