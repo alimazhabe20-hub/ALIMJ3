@@ -1,0 +1,11 @@
+{
+  "version": "78.0.0",
+  "severity": "normal",
+  "release_date": "2026-09-13",
+  "title": "ALIMJ3 V78.0.0",
+  "notes": "Current stable release.",
+  "min_supported_version": "78.0.0",
+  "package_url": "https://example.com/ALIMJ3-v78.0.0.zip",
+  "sha256": "",
+  "changelog_url": "https://example.com/changelog"
+}

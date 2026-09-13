@@ -14,3 +14,11 @@ edge-tts
 matplotlib
 Pillow
 pytest
+
+yt-dlp>=2025.08.27
+
+ruff>=0.9.0,<1.0
+openpyxl>=3.1,<4
+
+reportlab>=4.0,<5
+python-docx>=1.1,<2

@@ -1,9 +1,9 @@
-# ALIMJ3 V78.0.0 — Ultimate Final Release
+# ALIMJ3 V77.0.0 — Ultimate Final Release
 
-Version: `78.0.0`
+Version: `77.0.0`
 
 ## Scope
-V78 is the V77 platform plus the production-safe Update Center. It keeps the bot free for all users and supports Persian, English and Arabic only. Automatic long-conversation summarization is intentionally excluded.
+V77 is the consolidated final platform expansion built on V76. It keeps the bot free for all users and supports Persian, English and Arabic only. Automatic long-conversation summarization is intentionally excluded.
 
 ## Included
 - Agent 5.0 with dependency-aware planning, bounded retries, verification and execution budgets.
@@ -25,7 +25,7 @@ V78 is the V77 platform plus the production-safe Update Center. It keeps the bot
 - Web research source ranking and evidence checks.
 - Admin health/self-healing snapshots.
 - Event-driven and workflow safety primitives.
-- Existing V61-V77 features remain preserved.
+- Existing V61-V76 features remain preserved.
 
 ## Operator commands
 - `/v77test` — full V77 self-test (admin only).

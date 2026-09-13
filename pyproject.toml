@@ -1,7 +1,7 @@
 [project]
 name = "rooze-ziba"
-version = "58.0.0"
-description = "Production-grade Persian Telegram assistant with AI, tools, memory, and agents"
+version = "78.0.0"
+description = "Production-grade multilingual Telegram assistant with AI, tools, memory, and agents"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
