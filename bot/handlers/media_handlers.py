@@ -92,7 +92,14 @@ async def media_ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ):
                 images.append((data, mime or "image/jpeg"))
             else:
-                file_text = _extract_text_from_bytes(data, filename, mime)
+                try:
+                    from bot.services.v72_platform import extract_document, store_document, document_context
+                    rich_doc = extract_document(data, filename, mime)
+                    store_document(user_id, rich_doc)
+                    file_text = document_context(rich_doc)
+                except ValueError as doc_exc:
+                    logger.warning("V72 document extraction rejected: %s", doc_exc)
+                    file_text = _extract_text_from_bytes(data, filename, mime)
                 if not file_text.strip():
                     await msg.reply_text(
                         "❌ نتوانستم متن این فایل را بخوانم.\n"

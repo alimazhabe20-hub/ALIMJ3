@@ -59,6 +59,8 @@ from bot.services.ai_extras import (
     get_last_answer_id, build_continue_prompt,
 )
 from bot.services.visual_search import visual_search, looks_like_visual_search
+from bot.handlers.v71_handlers import handle_downloader_url_v71
+from bot.services.v61_v65_platform import AI_LIMITER, HEAVY_QUEUE, build_ai_context, auto_capture_memory, classify_intent, t as platform_t
 from bot.services.ai_service import (
     ask_ai, ask_ai_media, clear_history, enabled_providers,
     _extract_text_from_bytes, generate_or_edit_image,
@@ -107,6 +109,32 @@ def _apply_voice_chat_flags(context, text: str) -> str | None:
             "برای خاموش کردن بگو: «قطع ویس» یا «فقط متن»."
         )
     return None
+def _extract_link_search_query(text: str, last_answer: str | None) -> str:
+    """از درخواست «لینکش بفرست» و پاسخ قبلی، عبارت مناسب جستجو را استخراج می‌کند."""
+    normalized = (text or "").strip().replace("‌", " ")
+    if not re.search(r"(?:لینک|لینکش|لینک\s*خرید|آدرس|لینک\s*بفرست)", normalized, re.I):
+        return ""
+    answer = (last_answer or "").strip()
+    if not answer:
+        return ""
+    # اول عبارت داخل گیومه فارسی/انگلیسی؛ معمولاً همان عبارت خرید است.
+    patterns = [
+        r"«([^»]{3,120})»",
+        r"[\"']([^\"']{3,120})[\"']",
+    ]
+    for pattern in patterns:
+        matches = re.findall(pattern, answer)
+        if matches:
+            candidate = matches[-1].strip()
+            if not re.search(r"^(لینک|آدرس|این|محصول|برند)", candidate, re.I):
+                return candidate
+    # اگر نقل‌قول نبود، از خطوطی که عبارت جستجو را معرفی می‌کنند استفاده کن.
+    m = re.search(r"(?:عبارت|سرچ|جستجو)\s*(?:«([^»]+)»|[:：]\s*(.+))", answer, re.I)
+    if m:
+        return (m.group(1) or m.group(2) or "").strip()[:160]
+    return ""
+
+
 async def _handle_special_ai_intents(update, context, user_id, text: str) -> bool:
     """نمودار، جستجو، یادآوری، موسیقی — True اگر کامل هندل شد."""
     import re
@@ -134,17 +162,79 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
             f"⏰ یادآوری ثبت شد.\nموضوع: {body}\nزمان: {when.strftime('%Y-%m-%d %H:%M')}\nتکرار: {repeat_label}",
         )
         return True
+    # درخواست لینک را قبل از AI عمومی هندل کن تا پاسخ‌هایی مثل «دسترسی مستقیم ندارم» تولید نشود.
+    link_query = _extract_link_search_query(text, get_last_answer(user_id))
+    if link_query:
+        notice = await update.message.reply_text("🔎 در حال پیدا کردن لینک...")
+        try:
+            result = await web_search(link_query, max_results=5)
+            await update.message.reply_text(result)
+        finally:
+            try:
+                await notice.delete()
+            except Exception as _exc:
+                logger.debug("link-search notice delete failed: %s", _exc)
+        return True
     # Weather/Crypto عمدی اینجا مستقیم پاسخ داده نمی‌شوند.
     # V41.1: اجازه بده Capability Router + Function Calling ابزار واقعی را اجرا کند
     # و خود AI نتیجه را به زبان طبیعی برای کاربر بنویسد؛ خروجی خام ابزار کپی نشود.
+    # جستجوی فروشگاهی مستقیم: لینک واقعی را از ماژول خرید می‌گیریم، نه پاسخ حدسی AI.
+    if classify_intent(text) == "product_search" and not classify_intent(text) == "crypto_price":
+        q = re.sub(r"(?:لینک|خرید|قیمت|فروشگاه|محصول|buy|price|shop|link)", " ", text, flags=re.I).strip(" :،,")
+        if len(q) >= 2:
+            notice = await update.message.reply_text("🔎 در حال پیدا کردن فروشگاه‌ها و لینک‌های واقعی...")
+            try:
+                from bot.features.market.shopping import search_shopping
+                result = await search_shopping(q, max_results=8, user_id=user_id)
+                await update.message.reply_text(result)
+            except Exception:
+                logger.exception("product search failed for user=%s", user_id)
+                await update.message.reply_text("⚠️ جستجوی خرید فعلاً در دسترس نیست. چند ثانیه بعد دوباره امتحان کنید.")
+            finally:
+                try: await notice.delete()
+                except Exception: pass
+            return True
+    # Market Intelligence: تحلیل چندتایم‌فریمی با داده زنده، فقط وقتی درخواست تحلیل روشن است.
+    market_match = re.search(r"(?:تحلیل|آنالیز|analyze|analysis)\s+(?:ارز|رمزارز|crypto)?\s*([A-Za-z]{2,12}|بیت\s*کوین|اتریوم|تتر|سولانا|ریپل|دوج\s*کوین|بایننس|کاردانو)\b?", text, re.I)
+    if market_match:
+        symbol = re.sub(r"\s+", "", market_match.group(1).lower())
+        symbol = {"بیتکوین":"btc","بیت کوین":"btc","اتریوم":"eth","تتر":"usdt","سولانا":"sol","ریپل":"xrp","دوجکوین":"doge","بایننس":"bnb","کاردانو":"ada"}.get(symbol, symbol)
+        # جلوگیری از تداخل با کلمات عمومی انگلیسی
+        if symbol not in {"this", "that", "with", "from", "for", "the", "your"}:
+            notice = await update.message.reply_text("📊 در حال تحلیل چندتایم‌فریمی با داده زنده…")
+            try:
+                from bot.services.v72_platform import market_intelligence, market_summary
+                data = await market_intelligence(symbol)
+                await update.message.reply_text(market_summary(data))
+            except Exception:
+                logger.exception("market intelligence failed for user=%s", user_id)
+                await update.message.reply_text("⚠️ تحلیل بازار فعلاً در دسترس نیست. چند لحظه بعد دوباره امتحان کنید.")
+            finally:
+                try: await notice.delete()
+                except Exception: pass
+            return True
     # جستجوی وب
     m = re.match(r"^(جستجو|سرچ|search)\s*[:：]?\s*(.+)$", text, re.I | re.S)
     if m or re.search(r"\b(در\s*اینترنت|تو\s*وب)\s*جستجو", text, re.I):
         q = m.group(2).strip() if m else re.sub(r".*جستجو\s*[:：]?", "", text, flags=re.I).strip()
         notice = await update.message.reply_text("🔎 در حال جستجو...")
         try:
-            result = await web_search(q)
-            await update.message.reply_text(result)
+            try:
+                from bot.services.v72_platform import web_intelligence_search
+                intel = await web_intelligence_search(q, max_results=5)
+                sources = intel.get("sources") or []
+                if sources:
+                    lines = [f"🔎 نتایج هوشمند برای «{q}»:"]
+                    for src in sources:
+                        title = (src.get("title") or src.get("domain") or "منبع")[:160]
+                        lines.append(f"• {title}\n  {src.get('url','')}")
+                    result = "\n\n".join(lines)
+                else:
+                    result = intel.get("raw") or "نتیجه‌ای پیدا نشد."
+            except Exception:
+                logger.exception("web intelligence failed for user=%s", user_id)
+                result = await web_search(q)
+            await update.message.reply_text(result[:4000])
         finally:
             try:
                 await notice.delete()
@@ -161,8 +251,9 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
             bio = BytesIO(png)
             bio.name = "chart.png"
             await update.message.reply_photo(photo=bio, caption=title)
-        except Exception as e:
-            await update.message.reply_text(f"⚠️ نمودار: {e}")
+        except Exception:
+            logger.exception("chart generation failed for user=%s", user_id)
+            await update.message.reply_text("⚠️ ساخت نمودار ناموفق بود. لطفاً دوباره تلاش کنید.")
         finally:
             try:
                 await notice.delete()
@@ -177,8 +268,9 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
             bio = BytesIO(audio)
             bio.name = "music.mp3"
             await update.message.reply_audio(audio=bio, caption="🎵")
-        except Exception as e:
-            await update.message.reply_text(f"⚠️ ساخت موسیقی در دسترس نبود:\n{e}")
+        except Exception:
+            logger.exception("music generation failed for user=%s", user_id)
+            await update.message.reply_text("⚠️ ساخت موسیقی فعلاً در دسترس نیست. لطفاً بعداً دوباره تلاش کنید.")
         finally:
             try:
                 await notice.delete()
@@ -380,13 +472,18 @@ async def _ask_ai_with_typing(update, context, user_id, text):
     task = spawn(_keep_typing(context.bot, chat_id, stop_event), name=f"typing-{chat_id}")
     try:
         try:
-            result = await _ask_ai_stream_and_send(update, context, user_id, text)
+            if not AI_LIMITER.allow(user_id):
+                await update.message.reply_text(platform_t(user_id, "limit"))
+                return None
+            enriched = text + build_ai_context(user_id, text)
+            result = await HEAVY_QUEUE.run(lambda: _ask_ai_stream_and_send(update, context, user_id, enriched))
             context.user_data["_ai_already_sent"] = True
             return result
         except Exception as stream_error:
             logger.warning("AI chunked stream failed, using canonical fallback: %s", stream_error)
             context.user_data["_ai_already_sent"] = False
-            return await ask_ai(user_id, text)
+            enriched = text + build_ai_context(user_id, text)
+            return await HEAVY_QUEUE.run(lambda: ask_ai(user_id, enriched))
     finally:
         stop_event.set()
         try:
@@ -422,7 +519,12 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = update.message.text.strip()
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name or "کاربر"
+    # V70 downloader: handle a URL immediately after the downloader button, before generic AI/menu routing.
+    if await handle_downloader_url_v71(update, context, text):
+        return
     city = get_user_city(user_id)
+    try: auto_capture_memory(user_id, text)
+    except Exception: pass
     waiting = context.user_data.get("waiting_for")
     # AI chat mode
     if context.user_data.get("ai_mode"):
@@ -536,11 +638,12 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                         )
                     except Exception as ve:
                         await update.message.reply_text(
-                            f"⚠️ متن آماده شد ولی ویس ساخته نشد: {ve}"
+                            "⚠️ متن آماده شد ولی ویس ساخته نشد. لطفاً دوباره امتحان کنید."
                         )
             except Exception as exc:
+                logger.error("AI request failed: %s", exc, exc_info=True)
                 await update.message.reply_text(
-                    "❌ فعلاً هیچ‌کدام از سرویس‌های AI پاسخ ندادند.\n\n" + str(exc)[:3000]
+                    "⚠️ فعلاً سرویس هوش مصنوعی پاسخ نداد. چند ثانیه بعد دوباره امتحان کنید."
                 )
             return
     if waiting:
@@ -596,6 +699,12 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("🌍 زبان:", reply_markup=get_language_keyboard()); return
     if text in ("➕ بیشتر", "بیشتر"):
         await update.message.reply_text("➕ بخش را انتخاب کنید:", reply_markup=get_more_keyboard()); return
+    if text == "📥 دانلودر فایل":
+        from bot.handlers.v71_handlers import downloader_entry_v71
+        await downloader_entry_v71(update, context); return
+    if text == "🔄 بررسی بروزرسانی":
+        from bot.handlers.v78_handlers import update_center_command
+        await update_center_command(update, context); return
     if text == "🤖 دستیار هوشمند":
         providers = enabled_providers()
         context.user_data["ai_mode"] = True
@@ -1149,7 +1258,8 @@ async def lens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = await visual_search(data, caption="lens")
         await update.message.reply_text(result[:4000])
     except Exception as exc:
-        await update.message.reply_text(f"❌ تحلیل تصویر انجام نشد:\n{str(exc)[:2000]}")
+        logger.error("image analysis failed: %s", exc, exc_info=True)
+        await update.message.reply_text("⚠️ تحلیل تصویر فعلاً در دسترس نیست. چند ثانیه بعد دوباره امتحان کنید.")
     finally:
         try:
             await notice.delete()

@@ -10,8 +10,6 @@ import hashlib
 import html
 import re
 import time
-import threading
-from difflib import SequenceMatcher
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -39,23 +37,6 @@ _cache: list[dict[str, Any]] = []
 _cache_expires = 0.0
 _cache_fetched_at = 0.0
 _cache_lock: asyncio.Lock | None = None
-
-# درخواست‌ها را به‌صورت مودبانه و کم‌دفعات انجام می‌دهیم تا فشار غیرضروری
-# روی منابع عمومی ایجاد نشود. این بخش برای دورزدن سیستم ضدبات نیست.
-_REQUEST_GAP = 1.5
-_request_lock = threading.Lock()
-_last_request_by_host: dict[str, float] = {}
-
-def _polite_get(url: str, **kwargs):
-    """HTTP GET با فاصله‌ی حداقلی بین درخواست‌ها به هر میزبان."""
-    host = re.sub(r"^https?://([^/]+).*$", r"\1", url.lower())
-    with _request_lock:
-        now = time.monotonic()
-        wait = _REQUEST_GAP - (now - _last_request_by_host.get(host, 0.0))
-        if wait > 0:
-            time.sleep(wait)
-        _last_request_by_host[host] = time.monotonic()
-    return requests.get(url, **kwargs)
 
 CURRENCY_NAMES = {
     "USD": "دلار آمریکا", "EUR": "یورو", "GBP": "پوند انگلیس", "JPY": "ین ژاپن",
@@ -357,7 +338,6 @@ FF_HTML_URLS = (
     "https://mds-wss.forexfactory.com/calendar?week=this",
     "https://calendar.forexfactory.com/calendar?week=next",
     "https://www.forexfactory.com/calendar?week=next",
-    "https://mds-wss.forexfactory.com/calendar?week=next",
 )
 
 FF_DAILY_HTML_HOSTS = (
@@ -391,7 +371,7 @@ def _ff_cell_text(row, field: str) -> str:
 
 
 def _parse_ff_html(url: str) -> list[dict[str, Any]]:
-    r = _polite_get(url, timeout=18, headers={
+    r = requests.get(url, timeout=18, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
@@ -494,19 +474,6 @@ def _ff_date_key(text: str) -> str:
 
 def _title_key(text: str) -> str:
     t = re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
-    # Forex Factory و feed اصلی بعضی خبرها را با نام کامل و بعضی را
-    # با مخفف می‌فرستند. این aliasها فقط برای تطبیق همان رویداد هستند.
-    aliases = {
-        "trade bal": "trade balance",
-        "goods trade bal": "goods trade balance",
-        "const out": "construction output",
-        "ind prod": "industrial production",
-        "mfg prod": "manufacturing production",
-        "svc idx": "index of services",
-        "bsi mfg": "bsi manufacturing index",
-    }
-    for short, full in aliases.items():
-        t = re.sub(rf"\b{re.escape(short)}\b", full, t)
     return re.sub(r"\s+", " ", t)
 
 
@@ -527,22 +494,11 @@ def _merge_ff_html_values(events: list[dict[str, Any]], rows: list[dict[str, Any
         key = (date_key, e["country"], _title_key(e["title"]))
         candidates = lookup.get(key, [])
         if not candidates:
-            # Some FF rows use abbreviations while the feed uses full names.
-            # Try a conservative fuzzy match only within the same London date/currency.
+            # Some FF rows include a country prefix or a trailing revision marker.
             ek = _title_key(e["title"])
-            best_score = 0.0
-            best_vals = None
             for (dk, cur, tk), vals in lookup.items():
-                if dk != date_key or cur != e["country"]:
-                    continue
-                score = SequenceMatcher(None, ek, tk).ratio()
-                if ek in tk or tk in ek:
-                    score = max(score, 0.90)
-                if score > best_score:
-                    best_score = score
-                    best_vals = vals
-            if best_score >= 0.68 and best_vals:
-                candidates.extend(best_vals)
+                if dk == date_key and cur == e["country"] and (ek == tk or ek in tk or tk in ek):
+                    candidates.extend(vals)
         if not candidates:
             continue
         r = candidates[0]
@@ -552,6 +508,18 @@ def _merge_ff_html_values(events: list[dict[str, Any]], rows: list[dict[str, Any
             value = (r.get(field) or "").strip()
             if value:
                 e[field] = value
+
+
+def _refresh_ff_html_values(events: list[dict[str, Any]]) -> None:
+    all_rows: list[dict[str, Any]] = []
+    for url in FF_HTML_URLS:
+        try:
+            all_rows.extend(_parse_ff_html(url))
+        except Exception as exc:
+            logger.debug("Forex Factory HTML enrichment failed for %s: %s", url, exc)
+    if all_rows:
+        _merge_ff_html_values(events, all_rows)
+
 
 
 BIQUOTE_URL = "https://biquote.io/api/calendar"
@@ -582,7 +550,7 @@ def _biquote_importance(value: str) -> str:
 
 
 def _fetch_biquote(day_from: str, day_to: str) -> list[dict[str, Any]]:
-    r = _polite_get(
+    r = requests.get(
         BIQUOTE_URL,
         params={"from": day_from, "to": day_to},
         timeout=18,
@@ -777,7 +745,7 @@ def _refresh_biquote_values(events: list[dict[str, Any]]) -> None:
     _merge_biquote_values(events, rows)
 
 def _fetch_json(url: str) -> list[dict[str, Any]]:
-    r = _polite_get(url, timeout=18, headers={
+    r = requests.get(url, timeout=18, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "application/json,text/html,*/*",
         "Accept-Language": "en-US,en;q=0.9",

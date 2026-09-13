@@ -19,6 +19,7 @@ from bot.api.calendar import get_today_tehran
 from bot.handlers.middleware import check_and_rate_limit
 from bot.config import config
 from bot.logger import logger
+from bot.handlers.v71_handlers import download_callback
 import jdatetime
 import asyncio
 import html
@@ -93,6 +94,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
     user_id = update.effective_user.id
+
+    # V71 downloader callbacks are handled before domain-specific callback routers.
+    if data and data.startswith("dl:"):
+        try:
+            if await download_callback(update, context, data):
+                return
+        except Exception:
+            logger.exception("downloader callback crashed")
+            await _safe_answer(query, "دانلود فعلاً در دسترس نیست.", show_alert=True)
+            return
 
     # ───────────────── تقویم اقتصادی بازار ─────────────────
     if data and data.startswith("ec:"):
@@ -437,13 +448,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     answer, provider = await ask_ai(user_id, prompt)
                 except Exception as ai_err:
                     logger.error("ec analyze ask_ai failed: %s", ai_err, exc_info=True)
-                    msg = str(ai_err).strip() or "سرویس AI پاسخ نداد"
-                    if len(msg) > 280:
-                        msg = msg[:280] + "…"
                     await query.message.reply_text(
-                        "⚠️ تحلیل این خبر الان ممکن نیست.\n"
-                        f"{msg}\n\n"
-                        "اگر کلید AI تنظیم است، چند ثانیه بعد دوباره امتحان کنید."
+                        "⚠️ تحلیل این خبر الان ممکن نیست.\n\n"
+                        "چند ثانیه بعد دوباره امتحان کنید."
                     )
                     return
                 from html import escape
@@ -582,7 +589,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as ai_err:
                         logger.error("ec analyze failed: %s", ai_err, exc_info=True)
                         await (query.message or update.effective_message).reply_text(
-                            "⚠️ تحلیل ناموفق بود:\n" + str(ai_err)[:350]
+                            "⚠️ تحلیل هوشمند فعلاً در دسترس نیست. چند ثانیه بعد دوباره امتحان کنید."
                         )
                         return
 
@@ -715,7 +722,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     logger.error("ec analyze outer: %s", err, exc_info=True)
                     try:
                         await (query.message or update.effective_message).reply_text(
-                            "⚠️ خطا در تحلیل:\n" + str(err)[:400]
+                            "⚠️ تحلیل هوشمند فعلاً در دسترس نیست. چند ثانیه بعد دوباره امتحان کنید."
                         )
                     except Exception:
                         pass
@@ -771,7 +778,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         answer, _ = await ask_ai(user_id, prompt)
                     except Exception as ai_err:
                         await msg_target.reply_text(
-                            "⚠️ خلاصه سخنرانی الان ممکن نیست.\n" + str(ai_err)[:300]
+                            "⚠️ خلاصه سخنرانی فعلاً در دسترس نیست. چند ثانیه بعد دوباره امتحان کنید."
                         )
                         return
                     detail = event_detail(e, tz_name)
@@ -799,7 +806,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     logger.error("ec speech summary failed: %s", err, exc_info=True)
                     try:
                         await (query.message or update.effective_message).reply_text(
-                            "⚠️ خطا در خلاصه سخنرانی:\n" + str(err)[:300]
+                            "⚠️ خلاصه سخنرانی فعلاً در دسترس نیست. چند ثانیه بعد دوباره امتحان کنید."
                         )
                     except Exception:
                         pass
@@ -832,14 +839,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
             try:
-                msg = str(e).strip() or "خطای ناشناخته"
-                if len(msg) > 300:
-                    msg = msg[:300] + "…"
-                if "AI" in msg or "api" in msg.lower() or "key" in msg.lower() or "مدل" in msg or "سرویس" in msg:
-                    user_msg = f"⚠️ تحلیل هوشمند الان در دسترس نیست.\n{msg}"
-                else:
-                    user_msg = f"⚠️ موقتاً مشکلی در تقویم اقتصادی پیش آمد.\n{msg}"
-                await query.message.reply_text(user_msg)
+                await query.message.reply_text(
+                    "⚠️ موقتاً مشکلی در تقویم اقتصادی پیش آمد. چند ثانیه بعد دوباره امتحان کنید."
+                )
             except Exception:
                 pass
             return
@@ -953,7 +955,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error("ai_continue failed: %s", e, exc_info=True)
             try:
                 await query.message.reply_text(
-                    f"⚠️ ادامه پاسخ ممکن نشد: {str(e)[:200]}",
+                    "⚠️ ادامه پاسخ فعلاً ممکن نیست. لطفاً دوباره امتحان کنید.",
                 )
             except Exception:
                 pass
@@ -987,8 +989,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await notice.delete()
             except Exception as _exc:
                 logger.debug("%s: %s", __name__, _exc)
-        except Exception as e:
-            await query.message.reply_text(f"⚠️ ویس ساخته نشد: {e}")
+        except Exception:
+            logger.exception("callback TTS failed for user=%s", user_id)
+            await query.message.reply_text("⚠️ ساخت ویس ناموفق بود. لطفاً دوباره تلاش کنید.")
         return
 
     if data.startswith("ai_quick:"):
@@ -1016,8 +1019,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 txt = "دکمه نامعتبر."
             await query.message.reply_text(txt)
-        except Exception as e:
-            await query.message.reply_text(f"⚠️ {e}")
+        except Exception:
+            logger.exception("quick callback failed for user=%s kind=%s", user_id, kind)
+            await query.message.reply_text("⚠️ اجرای این گزینه فعلاً ناموفق بود. لطفاً دوباره تلاش کنید.")
         return
 
     # ───────────────── بروزرسانی منوی اصلی ─────────────────
@@ -1178,7 +1182,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             chat_id=cid,
                             text=(
                                 "⚠️ بروزرسانی موقتاً ناموفق بود.\n"
-                                f"کد خطا: {type(e).__name__}: {str(e)[:120]}\n"
                                 "چند ثانیه بعد دوباره بزنید یا /start بفرستید."
                             ),
                         )
@@ -1276,8 +1279,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_message(
                         chat_id=chat_id,
                         text=(
-                            "⚠️ موقتاً مشکلی پیش آمد. دستور /start را بفرستید.\n"
-                            f"کد خطا: {type(e).__name__}"
+                            "⚠️ موقتاً مشکلی پیش آمد. دستور /start را بفرستید."
                         ),
                     )
             except Exception as _exc:
@@ -1662,9 +1664,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             else:
                 await _edit_text("❌ گزینه ناشناخته")
-        except Exception as e:
+        except Exception:
+            logger.exception("market callback failed for user=%s action=%s", user_id, action)
             try:
-                await query.message.reply_text(f"⚠️ خطا: {e}")
+                await query.message.reply_text("⚠️ اجرای تحلیل ناموفق بود. لطفاً دوباره تلاش کنید.")
             except Exception as _exc:
                 logger.debug("%s: %s", __name__, _exc)
         return
