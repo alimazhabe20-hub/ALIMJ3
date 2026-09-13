@@ -1,5 +1,5 @@
 python-telegram-bot[job-queue]==20.3
-requests==2.32.3
+requests
 jdatetime
 hijri-converter
 apscheduler
@@ -14,11 +14,8 @@ edge-tts
 matplotlib
 Pillow
 pytest
-
-yt-dlp>=2025.08.27
-
-ruff>=0.9.0,<1.0
-openpyxl>=3.1,<4
-
-reportlab>=4.0,<5
-python-docx>=1.1,<2
+yt-dlp
+ruff
+openpyxl
+reportlab
+python-docx
