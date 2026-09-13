@@ -354,9 +354,34 @@ def _tool_reminder(
     )
     return f"یادآوری ثبت شد: {text} در {remind_at}"
 
+
+async def _tool_ict_analysis(symbol: str = "btc", interval: str = "1h", user_id: int = 0) -> str:
+    from bot.features.market.finance_ict import analyze_ict
+    return await analyze_ict(symbol or "btc", interval=interval or "1h")
+
+
 def _register_builtin_tools() -> None:
     if "get_weather" in _REGISTRY:
         return
+
+    try:
+        register_tool(
+            name="ict_analysis",
+            description="تحلیل بازار به روش ICT: ساختار BOS/CHoCH، FVG، Order Block، نقدینگی، Premium/Discount و Killzone. برای بیت‌کوین و سایر ارزها.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "نماد مثل btc یا eth"},
+                    "interval": {"type": "string", "description": "تایم‌فریم 15m یا 1h یا 4h یا 1d"},
+                },
+                "required": ["symbol"],
+            },
+            handler=_tool_ict_analysis,
+            keywords=[r"ICT|آی\s*سی\s*تی|اوردر\s*بلاک|order\s*block|fair\s*value\s*gap|FVG|نقدینگی\s*بازار|BOS|CHOCH"],
+        )
+    except Exception:
+        pass
+
 
     register_tool(
         name="get_weather",
