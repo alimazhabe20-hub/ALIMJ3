@@ -1591,28 +1591,54 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if action == "ict":
+                # ICT باید دقیقاً روی همان پیام فعلی اجرا شود؛ هیچ پیام جدیدی ساخته نشود.
+                # اگر پیام فعلی عکس/نمودار باشد، فقط caption همان پیام ویرایش می‌شود؛
+                # عکس دوباره ارسال یا به یک پیام متنی جدید «نچسبانده» نمی‌شود.
                 try:
                     from bot.features.market.finance_ict import analyze_ict
                 except Exception as imp_exc:
-                    await query.message.reply_text(f"❌ ماژول ICT در دسترس نیست: {imp_exc}")
+                    report = f"❌ ماژول ICT در دسترس نیست: {imp_exc}"
+                    try:
+                        if query.message.photo:
+                            await query.message.edit_caption(caption=report[:1000], reply_markup=get_crypto_analysis_keyboard(symbol))
+                        else:
+                            await query.message.edit_text(report[:4000], reply_markup=get_crypto_analysis_keyboard(symbol))
+                    except Exception:
+                        pass
                     return
-                # بازه پیش‌فرض 1h؛ کاربر از منوی نمودار می‌تواند تایم‌فریم ببیند
-                try:
-                    await query.message.reply_text("⏳ در حال تحلیل ICT...")
-                except Exception:
-                    pass
+
                 try:
                     report = await analyze_ict(symbol, interval="1h")
                 except Exception as exc:
                     report = f"❌ خطا در تحلیل ICT: {exc}"
-                if len(report) > 4000:
-                    report = report[:3980] + "\n…"
-                # HTML escape not needed for plain report; send as plain text
+
+                # Caption تلگرام حداکثر 1024 کاراکتر است؛ برای حفظ «همان پیام»
+                # خروجی ICT را تمیز و کوتاه می‌کنیم و هرگز پیام دوم نمی‌فرستیم.
+                report = re.sub(r"\*{1,2}", "", str(report or "")).strip()
+                if not report:
+                    report = "⚠️ داده کافی برای تحلیل ICT در دسترس نیست."
+                if len(report) > 950:
+                    report = report[:950].rsplit("\n", 1)[0].rstrip() + "\n…"
+
                 menu = get_crypto_analysis_keyboard(symbol)
+                msg = query.message
                 try:
-                    await query.message.reply_text(report, reply_markup=menu)
-                except Exception:
-                    await query.message.reply_text(report)
+                    if msg.photo:
+                        # همان عکس باقی می‌ماند؛ فقط متن زیر آن (caption) ویرایش می‌شود.
+                        await msg.edit_caption(
+                            caption="📐 <b>تحلیل ICT — " + html.escape(symbol.upper()) + " | 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + html.escape(report),
+                            parse_mode="HTML",
+                            reply_markup=menu,
+                        )
+                    else:
+                        # اگر پیام قبلی متنی بود، همان پیام متنی را ویرایش کن.
+                        await msg.edit_text(
+                            "📐 <b>تحلیل ICT — " + html.escape(symbol.upper()) + " | 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + html.escape(report),
+                            parse_mode="HTML",
+                            reply_markup=menu,
+                        )
+                except Exception as edit_exc:
+                    logger.warning("ICT same-message edit failed for %s: %s", symbol, edit_exc)
                 return
 
             if action == "pa":
