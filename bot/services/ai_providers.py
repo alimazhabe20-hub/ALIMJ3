@@ -406,6 +406,15 @@ async def _openai_compatible(
                             url, headers=headers, json=payload
                         )
                     if status >= 400:
+                        err_blob = str(data).lower()
+                        if status == 404 or "does not exist" in err_blob or "model_not_found" in err_blob:
+                            raise RuntimeError(
+                                f"{name} MODEL_NOT_FOUND {model}: {str(data)[:300]}"
+                            )
+                        if status == 402 or "payment required" in err_blob:
+                            raise RuntimeError(
+                                f"{name} PAYMENT_REQUIRED: {str(data)[:300]}"
+                            )
                         if _is_quota_error(status, data):
                             daily = (
                                 "daily" in str(data).lower()

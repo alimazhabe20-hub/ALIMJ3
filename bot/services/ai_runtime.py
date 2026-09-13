@@ -106,8 +106,8 @@ _DEFAULT_ORDER = [
     x.strip().lower()
     for x in os.getenv(
         "AI_DEFAULT_ORDER",
-        # groq اول چون مدل‌های instant خیلی سریع‌اند
-        "groq,gemini,cerebras,cloudflare,openrouter",
+        # gemini + openrouter first (verified working on diagnose); groq models vary by account
+        "gemini,openrouter,groq,cerebras,cloudflare",
     ).split(",")
     if x.strip()
 ]
@@ -434,8 +434,11 @@ def _env_models(env_name: str, default: List[str]) -> List[str]:
     # Keep user configuration, but automatically replace model IDs that the
     # provider has retired so one stale Render env var cannot disable the AI.
     replacements = {
+        # Many Groq accounts no longer expose llama-3.1-8b-instant
         "llama-3.1-8b-instant": "openai/gpt-oss-20b",
-        "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+        "llama3-8b-8192": "openai/gpt-oss-20b",
+        "llama3-70b-8192": "openai/gpt-oss-120b",
+        "mixtral-8x7b-32768": "openai/gpt-oss-20b",
     } if env_name == "GROQ_MODELS" else {}
     normalized = []
     for value in values:
@@ -466,10 +469,10 @@ def available_model_options() -> List[Tuple[str, str, str]]:
         for model in _env_models(
             "GROQ_MODELS",
             [
-                "llama-3.1-8b-instant",
+                # llama-3.1-8b-instant is 404 on many accounts — prefer gpt-oss
                 "openai/gpt-oss-20b",
-                "llama-3.3-70b-versatile",
                 "openai/gpt-oss-120b",
+                "llama-3.3-70b-versatile",
             ],
         ):
             items.append(("groq", "Groq • " + model, model))

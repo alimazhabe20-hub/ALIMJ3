@@ -555,10 +555,11 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
         from bot.services.ai_runtime import reset_provider_circuits
         if _looks_simple_prompt(prompt):
             reset_provider_circuits()
-            # Prefer fast Groq models first for short chat
+            # Prefer providers that typically work on free keys (gemini, openrouter)
+            rank = {"gemini": 0, "openrouter": 1, "groq": 2, "cerebras": 3, "cloudflare": 4}
             options = sorted(
                 options,
-                key=lambda x: (0 if x[0] == "groq" else 1, options.index(x)),
+                key=lambda x: (rank.get(x[0], 9), options.index(x)),
             )
     except Exception:
         pass
@@ -826,7 +827,8 @@ async def ask_ai_stream(user_id: int, prompt: str):
         from bot.services.ai_runtime import reset_provider_circuits
         if _looks_simple_prompt(prompt):
             reset_provider_circuits()
-            options = sorted(options, key=lambda x: (0 if x[0] == "groq" else 1, options.index(x)))
+            rank = {"gemini": 0, "openrouter": 1, "groq": 2, "cerebras": 3, "cloudflare": 4}
+            options = sorted(options, key=lambda x: (rank.get(x[0], 9), options.index(x)))
     except Exception:
         pass
 
