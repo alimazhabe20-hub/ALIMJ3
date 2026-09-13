@@ -80,7 +80,7 @@ class Config:
     # Automatic Telegram reactions
     AUTO_REACTIONS_ENABLED = os.getenv("AUTO_REACTIONS_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
     AUTO_REACTIONS_MIN_CONFIDENCE = max(0.0, min(1.0, float(os.getenv("AUTO_REACTIONS_MIN_CONFIDENCE", "0.80"))))
-    AUTO_REACTIONS_COOLDOWN = max(0.0, float(os.getenv("AUTO_REACTIONS_COOLDOWN", "3")))
+    AUTO_REACTIONS_COOLDOWN = max(0.0, float(os.getenv("AUTO_REACTIONS_COOLDOWN", "0.25")))
     AUTO_REACTIONS_SCOPE = os.getenv("AUTO_REACTIONS_SCOPE", "private,group,supergroup").strip()
     AUTO_REACTIONS_MAX_TEXT_LENGTH = max(40, int(os.getenv("AUTO_REACTIONS_MAX_TEXT_LENGTH", "1200")))
     AUTO_REACTIONS_BIG = os.getenv("AUTO_REACTIONS_BIG", "false").strip().lower() in {"1", "true", "yes", "on"}
