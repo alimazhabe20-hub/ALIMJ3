@@ -564,24 +564,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ]
                     prompt = (
                         "نقش: تحلیل‌گر اقتصاد کلان.\n"
-                        "قوانین سخت:\n"
-                        "- فقط فارسی\n"
-                        "- عدد جعلی نساز\n"
-                        "- فارکس جفت‌ارز ننویس\n"
-                        "- هیچ جمله یا تیتر ناتمام نگذار\n"
-                        "- هر تیتر فقط یک‌بار بیاید\n"
-                        "دقیقاً این ۸ بخش را به ترتیب و کامل بنویس "
-                        "(اگر اثر ضعیف است بنویس «اثر مستقیم کم»):\n"
-                        "معنی خبر:\n"
-                        "کریپتو:\n"
-                        "دلار/DXY:\n"
-                        "طلا:\n"
-                        "سهام:\n"
-                        "اوراق و بازدهی:\n"
-                        "سناریوی Actual در برابر Forecast:\n"
-                        "جمع‌بندی:\n"
-                        "هر بخش حداکثر ۲ جمله کامل. حتماً تا جمع‌بندی را تمام کن.\n\n"
-                        "داده:\n" + ctx
+                        "قوانین سخت: فقط فارسی؛ عدد جعلی نساز؛ فارکس جفت‌ارز ننویس؛ هیچ جمله یا تیتر ناتمام نگذار.\n"
+                        "دقیقاً این ۸ بخش را به ترتیب و کامل بنویس و هر بخش حداکثر ۲ جمله کامل باشد.\n"
+                        "معنی خبر: توضیح خبر و مقایسه Actual/Forecast/Previous.\n"
+                        "کریپتو: اثر احتمالی بر BTC/ETH و آلت‌کوین‌ها.\n"
+                        "دلار/DXY: اثر احتمالی بر دلار و شاخص DXY.\n"
+                        "طلا: اثر احتمالی بر طلا.\n"
+                        "سهام: اثر احتمالی بر سهام.\n"
+                        "اوراق و بازدهی: اثر احتمالی بر اوراق و بازدهی خزانه‌داری.\n"
+                        "سناریوی Actual در برابر Forecast: اگر Actual منتشر نشده، سناریوی بالاتر/مطابق/پایین‌تر از Forecast را کوتاه توضیح بده.\n"
+                        "جمع‌بندی: سناریوی پایه، مهم‌ترین ریسک و نکته کلیدی.\n"
+                        "حتماً پاسخ را تا «جمع‌بندی» تمام کن؛ پاسخ کوتاه اما کامل باشد.\n\n"
+                        "داده: "+ ctx
                     )
 
                     try:
@@ -595,46 +589,60 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                     answer = (answer or "").strip() or "تحلیل در دسترس نیست."
 
+                    # مدل‌ها گاهی به‌دلیل سقف خروجی وسط یک بخش متوقف می‌شوند.
+                    # قبل از ارسال، پاسخ را بررسی و حداکثر دو بار از همان نقطه تکمیل می‌کنیم.
+                    section_aliases = {
+                        "معنی خبر": ("معنی خبر",),
+                        "کریپتو": ("کریپتو", "رمزارز", "ارز دیجیتال"),
+                        "دلار": ("دلار/DXY", "دلار", "DXY"),
+                        "طلا": ("طلا",),
+                        "سهام": ("سهام",),
+                        "اوراق": ("اوراق و بازدهی", "اوراق"),
+                        "سناریو": ("سناریوی Actual", "سناریو"),
+                        "جمع‌بندی": ("جمع‌بندی", "جمع بندی"),
+                    }
+
                     def _missing_sections(text: str) -> list[str]:
-                        return [s for s in required_sections if s not in text]
+                        low = (text or "").replace("**", "").lower()
+                        return [name for name, aliases in section_aliases.items()
+                                if not any(a.lower() in low for a in aliases)]
 
                     def _looks_cut(text: str) -> bool:
                         t = (text or "").strip()
                         if not t:
                             return True
-                        if t[-1] not in ".!?…۔؟":
-                            # جمله ناتمام یا قطع‌شده
-                            if len(t) > 80:
-                                return True
-                        if t.endswith(("،", ":", "؛", "-", "—", "…")):
+                        if t.endswith(("،", ":", "؛", "-", "—")):
                             return True
-                        return False
+                        return len(t) > 80 and t[-1] not in ".!?…۔؟"
 
-                    # اگر بخش‌ها ناقص است یا متن قطع شده، یکبار ادامه بخواه
-                    missing = _missing_sections(answer)
-                    if missing or _looks_cut(answer):
+                    for repair_round in range(2):
+                        missing = _missing_sections(answer)
+                        if not missing and not _looks_cut(answer):
+                            break
+                        missing_text = "، ".join(missing) if missing else "ادامه جمله/بخش ناتمام"
+                        cont_prompt = (
+                            "پاسخ زیر ناقص یا قطع شده است. فقط ادامه لازم را بنویس و هیچ بخش قبلی را تکرار نکن.\n"
+                            f"بخش‌های ناقص: {missing_text}.\n"
+                            "از دقیقاً همان نقطه ادامه بده و در پایان حتماً «جمع‌بندی:» را کامل کن. "
+                            "اگر بخش‌های اصلی قبلاً آمده‌اند، دوباره آن‌ها را ننویس. حداکثر ۲ جمله برای هر بخش.\n\n"
+                            "--- انتهای پاسخ قبلی ---\n" + answer[-1200:] +
+                            "\n--- داده اصلی ---\n" + ctx
+                        )
                         try:
-                            cont_prompt = (
-                                "پاسخ قبلی ناقص بود. از همان‌جا که قطع شده ادامه بده و "
-                                "هیچ بخشی از متن قبلی را تکرار نکن.\n"
-                                "اگر تیتری جا مانده فقط همان‌ها را کامل بنویس:\n"
-                                + "\n".join(f"- {m}" for m in (missing or required_sections[-4:]))
-                                + "\nحتماً با «جمع‌بندی:» تمام کن.\n\n"
-                                "--- انتهای پاسخ قبلی ---\n"
-                                + answer[-700:]
-                                + "\n--- ادامه از اینجا ---\n\n"
-                                "داده:\n" + ctx
-                            )
                             cont, _ = await ask_ai(user_id, cont_prompt)
                             cont = (cont or "").strip()
-                            if cont:
-                                # جلوگیری از تکرار تیتر اول اگر مدل دوباره از اول شروع کرد
-                                if cont.startswith(answer[:40]):
-                                    answer = cont
-                                else:
-                                    answer = (answer.rstrip() + "\n" + cont).strip()
+                            if not cont:
+                                continue
+                            # اگر مدل دوباره از اول جواب داد، فقط قسمت بعد از اولین بخش جدید را نگه می‌داریم.
+                            if cont.startswith(answer[:50]):
+                                cont = cont[len(answer[:50]):].lstrip(" \n")
+                            answer = (answer.rstrip() + "\n" + cont).strip()
                         except Exception as cont_err:
-                            logger.debug("ec analyze continue failed: %s", cont_err)
+                            logger.warning("ec analyze continuation round %s failed: %s", repair_round + 1, cont_err)
+                            break
+
+                    # Markdown ستاره‌ای مدل را به خروجی تمیز HTML تبدیل می‌کنیم.
+                    answer = answer.replace("**", "")
 
                     from html import escape as _esc
 
