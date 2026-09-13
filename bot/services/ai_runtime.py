@@ -196,6 +196,13 @@ def _provider_available(provider: str, *, explicit: bool = False) -> bool:
         logger.info("AI provider %s entering half-open recovery probe", provider)
     return True
 
+def reset_provider_circuits() -> None:
+    for h in _PROVIDER_HEALTH.values():
+        h["consecutive_fail"] = 0.0
+        h["cooldown_until"] = 0.0
+        h["probe_inflight"] = 0.0
+
+
 def _record_provider(provider: str, *, ok: bool, latency: float) -> None:
     h = _PROVIDER_HEALTH[provider]
     now = time.time()
@@ -263,16 +270,15 @@ def _split_keys(*env_names: str) -> List[str]:
 
 def _provider_keys(provider: str) -> List[str]:
     if provider == "gemini":
-        return _split_keys("GEMINI_API_KEY", "GEMINI_API_KEYS")
+        return _split_keys("GEMINI_API_KEY", "GEMINI_API_KEYS", "GOOGLE_API_KEY", "GOOGLE_AI_API_KEY")
     if provider == "groq":
-        return _split_keys("GROQ_API_KEY", "GROQ_API_KEYS")
+        return _split_keys("GROQ_API_KEY", "GROQ_API_KEYS", "GROQ_KEY")
     if provider == "cerebras":
-        return _split_keys("CEREBRAS_API_KEY", "CEREBRAS_API_KEYS")
+        return _split_keys("CEREBRAS_API_KEY", "CEREBRAS_API_KEYS", "CEREBRAS_KEY")
     if provider == "openrouter":
-        return _split_keys("OPENROUTER_API_KEY", "OPENROUTER_API_KEYS")
+        return _split_keys("OPENROUTER_API_KEY", "OPENROUTER_API_KEYS", "OPENROUTER_KEY")
     if provider == "cloudflare":
-        # برای کلودفلر توکن‌ها؛ اکانت معمولاً یکی است
-        return _split_keys("CLOUDFLARE_AUTH_TOKEN", "CLOUDFLARE_AUTH_TOKENS")
+        return _split_keys("CLOUDFLARE_AUTH_TOKEN", "CLOUDFLARE_AUTH_TOKENS", "CLOUDFLARE_API_TOKEN", "CF_API_TOKEN")
     return []
 
 
@@ -425,7 +431,18 @@ def clear_selected_model(user_id: int) -> None:
 def _env_models(env_name: str, default: List[str]) -> List[str]:
     raw = os.getenv(env_name, "")
     values = [x.strip() for x in raw.split(",") if x.strip()]
-    return values or default
+    # Keep user configuration, but automatically replace model IDs that the
+    # provider has retired so one stale Render env var cannot disable the AI.
+    replacements = {
+        "llama-3.1-8b-instant": "openai/gpt-oss-20b",
+        "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+    } if env_name == "GROQ_MODELS" else {}
+    normalized = []
+    for value in values:
+        value = replacements.get(value, value)
+        if value not in normalized:
+            normalized.append(value)
+    return normalized or default
 
 
 def available_model_options() -> List[Tuple[str, str, str]]:
@@ -437,7 +454,7 @@ def available_model_options() -> List[Tuple[str, str, str]]:
         # مدل‌های پایدار جدید؛ Lite برای سرعت، 3.6 برای کیفیت
         for model in _env_models(
             "GEMINI_MODELS",
-            ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite"],
+            ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"],
         ):
             label = "Gemini • " + model.replace("gemini-", "Gemini ")
             items.append(("gemini", label, model))
@@ -446,27 +463,15 @@ def available_model_options() -> List[Tuple[str, str, str]]:
     if _provider_keys("groq"):
         items = []
         # instant اول = خیلی سریع
-        groq_migration = {
-            "llama-3.1-8b-instant": "openai/gpt-oss-20b",
-            "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
-            "qwen/qwen3-32b": "openai/gpt-oss-120b",
-            "meta-llama/llama-4-scout-17b-16e-instruct": "openai/gpt-oss-120b",
-        }
-        configured = _env_models(
+        for model in _env_models(
             "GROQ_MODELS",
             [
+                "llama-3.1-8b-instant",
                 "openai/gpt-oss-20b",
+                "llama-3.3-70b-versatile",
                 "openai/gpt-oss-120b",
-                "qwen/qwen3.6-27b",
-                "qwen/qwen3.8-27b",
             ],
-        )
-        seen_models = set()
-        for model in configured:
-            model = groq_migration.get(model.lower(), model)
-            if model in seen_models:
-                continue
-            seen_models.add(model)
+        ):
             items.append(("groq", "Groq • " + model, model))
         raw["groq"] = items
 

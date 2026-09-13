@@ -361,12 +361,10 @@ async def _openai_compatible(
 
         try:
             for _round in range(total_rounds):
-                # Cap tokens: some free-tier models reject very high max_tokens.
-                safe_max = min(int(MAX_OUTPUT), 4096)
                 payload = {
                     "model": model,
                     "messages": messages,
-                    "max_tokens": safe_max,
+                    "max_tokens": min(int(MAX_OUTPUT), 4096),
                     "temperature": 0.6,
                 }
                 if tools_enabled and _round < max_tool_rounds:
@@ -399,9 +397,6 @@ async def _openai_compatible(
                             "tool_calls", "tool call",
                             "function calling", "function_call",
                             "function calls", "unsupported parameter",
-                            "invalid schema", "json schema", "tools is not supported",
-                            "does not support tools", "too many tools", "max tools",
-                            "context_length", "maximum context", "payload too large",
                         )
                     ):
                         tools_enabled = False
@@ -485,39 +480,25 @@ async def _openai_compatible(
 
 async def _groq(user_id: int, prompt: str, model: str, *, use_tools: bool = True) -> str:
     return await _openai_compatible(
-        "Groq",
-        "groq",
-        user_id,
-        prompt,
-        url=os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
-        + "/chat/completions",
-        model=model,
-        use_tools=use_tools,
+        "Groq", "groq", user_id, prompt,
+        url=os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/") + "/chat/completions",
+        model=model, use_tools=use_tools,
     )
 
 
 async def _cerebras(user_id: int, prompt: str, model: str, *, use_tools: bool = True) -> str:
     return await _openai_compatible(
-        "Cerebras",
-        "cerebras",
-        user_id,
-        prompt,
+        "Cerebras", "cerebras", user_id, prompt,
         url="https://api.cerebras.ai/v1/chat/completions",
-        model=model,
-        use_tools=use_tools,
+        model=model, use_tools=use_tools,
     )
 
 
 async def _openrouter(user_id: int, prompt: str, model: str, *, use_tools: bool = True) -> str:
     return await _openai_compatible(
-        "OpenRouter",
-        "openrouter",
-        user_id,
-        prompt,
+        "OpenRouter", "openrouter", user_id, prompt,
         url="https://openrouter.ai/api/v1/chat/completions",
-        model=model,
-        extra_headers={"X-Title": "Rooze Ziba"},
-        use_tools=use_tools,
+        model=model, extra_headers={"X-Title": "Rooze Ziba"}, use_tools=use_tools,
     )
 
 
@@ -565,28 +546,89 @@ async def _cloudflare(user_id: int, prompt: str, model: str) -> str:
 
 
 def _looks_simple_prompt(prompt: str) -> bool:
-    """Greetings and very short chat should never carry the full 60+ tool schema.
-
-    Sending the entire tool registry with a one-word hello is a common cause of
-    empty answers / HTTP 400 / timeouts across free-tier models.
-    """
     import re
     text = (prompt or "").strip()
-    # Strip runtime context blocks injected by the bot itself.
     text = re.sub(r"\[ROOZE_ZIBA_RUNTIME\][\s\S]*$", "", text).strip()
     text = re.sub(r"\[SHOPPING MODE\][\s\S]*$", "", text).strip()
     if not text:
         return True
-    if len(text) <= 40:
-        simple = re.compile(
-            r"^(?:سلام|درود|hi|hello|hey|سلام علیکم|صبح بخیر|عصر بخیر|شب بخیر|"
-            r"خوبی\??|چطوری\??|چه خبر\??|ممنون|مرسی|thanks|thank you|"
-            r"ok|باشه|آها|هه+|؟+|\.+)$",
-            re.I,
-        )
-        if simple.match(text):
-            return True
-    return False
+    if len(text) > 100:
+        return False
+    return bool(re.match(
+        r"^(?:سلام|درود|hi+|hello|hey|سلام\s*علیکم|صبح بخیر|عصر بخیر|شب بخیر|"
+        r"خوبی\??|چطوری\??|چه خبر\??|ممنون|مرسی|thanks|thank you|"
+        r"ok|باشه|آها|هه+|؟+|\.+|test|تست)$",
+        text, re.I,
+    ))
+
+
+def _is_invalid_key_error(msg: str) -> bool:
+    s = (msg or "").lower()
+    return any(x in s for x in (
+        "invalid api key", "api key not valid", "api_key_invalid",
+        "incorrect api key", "invalid x-api-key", "authentication failed",
+        "401", "unauthorized", "permission_denied", "api key expired",
+    ))
+
+
+async def _emergency_plain_completion(provider: str, prompt: str, model: str) -> str:
+    """Minimal chat call: no tools, no history, no big system prompt."""
+    from bot.services.ai_runtime import _next_keys, _get_http, MAX_OUTPUT
+    import re
+
+    keys = _next_keys(provider)
+    if not keys:
+        raise RuntimeError(f"no keys for {provider}")
+    key = keys[0]
+    user_text = (prompt or "").strip()
+    user_text = re.split(r"\[ROOZE_ZIBA_RUNTIME\]", user_text, 1)[0].strip() or "سلام"
+
+    if provider == "gemini":
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": user_text}]}],
+            "generationConfig": {"maxOutputTokens": 512},
+        }
+        r = await _get_http().post(url, params={"key": key}, json=payload, timeout=25.0)
+        data = r.json() if r.content else {}
+        if r.status_code >= 400:
+            raise RuntimeError(f"gemini emergency HTTP {r.status_code}: {str(data)[:400]}")
+        parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+        text = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+        if not text:
+            raise RuntimeError("gemini emergency empty")
+        return text
+
+    endpoints = {
+        "groq": os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/") + "/chat/completions",
+        "cerebras": "https://api.cerebras.ai/v1/chat/completions",
+        "openrouter": "https://openrouter.ai/api/v1/chat/completions",
+    }
+    if provider not in endpoints:
+        raise RuntimeError(f"emergency unsupported: {provider}")
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    if provider == "openrouter":
+        headers["X-Title"] = "Rooze Ziba"
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "تو دستیار فارسی «روز زیبا» هستی. کوتاه و مودب جواب بده."},
+            {"role": "user", "content": user_text},
+        ],
+        "max_tokens": 512,
+        "temperature": 0.7,
+    }
+    r = await _get_http().post(endpoints[provider], headers=headers, json=payload, timeout=25.0)
+    data = r.json() if r.content else {}
+    if r.status_code >= 400:
+        raise RuntimeError(f"{provider} emergency HTTP {r.status_code}: {str(data)[:400]}")
+    content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+    if isinstance(content, list):
+        content = "".join((x.get("text") or "") if isinstance(x, dict) else str(x) for x in content)
+    content = str(content).strip()
+    if not content:
+        raise RuntimeError(f"{provider} emergency empty")
+    return content
 
 
 async def _call_provider(
@@ -597,9 +639,6 @@ async def _call_provider(
     *,
     use_tools: bool | None = None,
 ) -> str:
-    """Dispatch to a provider. Auto-disable tools for simple prompts and retry
-    once without tools when the first attempt fails for tool/schema reasons.
-    """
     if use_tools is None:
         use_tools = not _looks_simple_prompt(prompt)
 
@@ -611,31 +650,41 @@ async def _call_provider(
         if provider == "cerebras":
             return await _cerebras(user_id, prompt, model, use_tools=with_tools)
         if provider == "cloudflare":
-            # Cloudflare Workers AI path has no tool calling; ignore flag.
             return await _cloudflare(user_id, prompt, model)
         if provider == "openrouter":
             return await _openrouter(user_id, prompt, model, use_tools=with_tools)
         raise RuntimeError(f"Unknown AI provider: {provider}")
 
     try:
-        return await _once(use_tools)
+        return await _once(bool(use_tools))
     except Exception as first:
-        msg = str(first).lower()
-        tool_related = any(
-            x in msg
-            for x in (
-                "tool", "function", "schema", "empty answer", "empty response",
-                "پاسخ خالی", "internal tool artifact", "functioncall",
-                "function_call", "tool_choice", "max tokens", "context_length",
-            )
-        )
+        msg = str(first)
+        low = msg.lower()
+        if _is_invalid_key_error(msg):
+            # Surface clearly — do not keep hammering other models of same dead key pool silently
+            raise RuntimeError(f"INVALID_API_KEY:{provider}:{msg[:180]}") from first
+
+        tool_related = any(x in low for x in (
+            "tool", "function", "schema", "empty answer", "empty response",
+            "پاسخ خالی", "internal tool artifact", "tool_choice", "context_length",
+        ))
         if use_tools and tool_related:
-            logger.warning(
-                "Provider %s/%s failed with tools (%s); retrying without tools",
-                provider, model, str(first)[:180],
-            )
-            return await _once(False)
-        raise
+            logger.warning("%s/%s tools failed; retry no-tools: %s", provider, model, msg[:120])
+            try:
+                return await _once(False)
+            except Exception as second:
+                first = second
+                msg = str(second)
+
+        if provider in {"gemini", "groq", "cerebras", "openrouter"}:
+            try:
+                logger.warning("%s/%s emergency plain call after: %s", provider, model, msg[:120])
+                return await _emergency_plain_completion(provider, prompt, model)
+            except Exception as em:
+                if _is_invalid_key_error(str(em)):
+                    raise RuntimeError(f"INVALID_API_KEY:{provider}:{str(em)[:180]}") from em
+                logger.warning("emergency failed: %s", em)
+        raise first
 
 
 
