@@ -21,7 +21,7 @@ from bot.handlers.middleware import check_and_rate_limit
 from bot.handlers.feature_handlers import (
     _h_date_convert, _h_age_calc, _h_birthday, _h_zodiac, _h_lunar,
     _h_date_diff, _h_age_diff, _h_event_search, _h_countdown, _h_calc,
-    _h_profit, _h_currency, _h_crypto_full, _h_crypto_pos, _h_crypto_chart,
+    _h_profit, _h_currency, _h_crypto_full, _h_crypto_pos, _h_crypto_chart, _h_ict,
     _h_crypto_analyze, _h_economic_calendar, _h_distance, _h_birth_save, _h_count_text,
     _h_font_text, _h_font_all,
 )
@@ -615,12 +615,9 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
                 if handled:
                     return
-                result = await _ask_ai_with_typing(
+                answer, provider = await _ask_ai_with_typing(
                     update, context, user_id, ask_text
                 )
-                if not result:
-                    return
-                answer, provider = result
                 if context.user_data is not None:
                     context.user_data["last_ai_answer"] = answer
                 if not (context.user_data or {}).get("_ai_already_sent"):
@@ -645,21 +642,9 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                         )
             except Exception as exc:
                 logger.error("AI request failed: %s", exc, exc_info=True)
-                msg = str(exc)
-                if "INVALID_API_KEY" in msg:
-                    text = (
-                        "🔑 کلید API نامعتبر یا منقضی است.\n"
-                        "ربات وجود کلید را می‌بیند، ولی سرور AI آن را رد می‌کند.\n"
-                        "در .env این‌ها را با کلید واقعی عوض کنید:\n"
-                        "GROQ_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY"
-                    )
-                elif "هیچ سرویس AI" in msg or "تنظیم نشده" in msg:
-                    text = "⚠️ هیچ کلید AI در محیط اجرا تنظیم نشده است."
-                elif "queue full" in msg.lower():
-                    text = "⏳ صف شلوغ است. چند ثانیه بعد دوباره بفرستید."
-                else:
-                    text = "⚠️ فعلاً سرویس هوش مصنوعی پاسخ نداد. چند ثانیه بعد دوباره امتحان کنید."
-                await update.message.reply_text(text)
+                await update.message.reply_text(
+                    "⚠️ فعلاً سرویس هوش مصنوعی پاسخ نداد. چند ثانیه بعد دوباره امتحان کنید."
+                )
             return
     if waiting:
         if _is_back(text) or _is_back_more(text):
@@ -687,6 +672,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 "event_search": _h_event_search, "countdown": _h_countdown,
                 "calc": _h_calc,
                 "profit": _h_profit, "currency": _h_currency, "distance": _h_distance, "crypto_chart": _h_crypto_full, "crypto_analyze": _h_crypto_full, "crypto_full": _h_crypto_full, "crypto_pos": _h_crypto_pos, "crypto_alert": _h_crypto_pos,
+                "ict_analyze": _h_ict,
                 "birth_save": _h_birth_save,
                 "count_text": _h_count_text,
                 "font_text": _h_font_text, "font_all": _h_font_all,
@@ -1020,6 +1006,10 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("📈 سود و ضرر", "سود و ضرر"):
         context.user_data["waiting_for"] = "profit"; track_usage(user_id, "profit")
         await update.message.reply_text("📈 `1000 1200` یا `1000 1200 5`", reply_markup=get_market_keyboard()); return
+    if text in ("📐 تحلیل ICT", "تحلیل ICT", "ICT", "ict"):
+        from bot.handlers.market_handlers import _h_ict
+        await _h_ict(update, context, text, user_id)
+        return
     if text in (
         "📊 نمودار و تحلیل ارز دیجیتال",
         "نمودار و تحلیل ارز دیجیتال",

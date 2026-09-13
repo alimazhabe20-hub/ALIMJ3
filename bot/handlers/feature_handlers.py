@@ -10,6 +10,7 @@ from bot.handlers.date_handlers import (
 from bot.handlers.market_handlers import (
     _h_profit, _h_currency, _h_crypto_full, _h_crypto_pos,
     _h_crypto_chart, _h_crypto_analyze, _h_economic_calendar,
+    _h_ict,
 )
 from bot.handlers.tools_handlers import _h_calc, _h_distance, _h_count_text
 from bot.handlers.profile_handlers import _h_birth_save

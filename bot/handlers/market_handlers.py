@@ -167,3 +167,42 @@ async def _h_economic_calendar(u, c, t, uid):
         await u.message.reply_text(text, parse_mode="HTML", reply_markup=get_calendar_keyboard(uid, events=events))
     except Exception as e:
         await u.message.reply_text(f"⚠️ تقویم اقتصادی فعلاً در دسترس نیست.\n{e}", reply_markup=get_market_keyboard())
+
+
+async def _h_ict(u, c, t, uid):
+    """تحلیل ICT برای نماد درخواستی."""
+    from bot.features.market.finance_ict import analyze_ict
+    from bot.utils.keyboard_factory import get_market_keyboard
+    text = (t or "").strip()
+    if not text or text in ("📐 تحلیل ICT", "تحلیل ICT", "ICT", "ict"):
+        c.user_data["waiting_for"] = "ict_analyze"
+        await u.message.reply_text(
+            "📐 تحلیل به روش ICT\n\n"
+            "نماد را بفرستید، مثلاً:\n"
+            "• btc\n• eth\n• sol\n• btc 4h\n• eth 1h\n\n"
+            "تایم‌فریم اختیاری: 15m / 1h / 4h / 1d",
+            reply_markup=get_market_keyboard(),
+        )
+        return
+    parts = text.replace("،", " ").split()
+    symbol = parts[0] if parts else "btc"
+    interval = "1h"
+    for p in parts[1:]:
+        pl = p.lower()
+        if pl in ("15m", "15", "1h", "4h", "1d", "1day", "daily", "hour", "h1", "h4"):
+            interval = {
+                "15": "15m", "15m": "15m",
+                "1h": "1h", "hour": "1h", "h1": "1h",
+                "4h": "4h", "h4": "4h",
+                "1d": "1d", "1day": "1d", "daily": "1d",
+            }.get(pl, "1h")
+    c.user_data.pop("waiting_for", None)
+    await u.message.reply_text("⏳ در حال تحلیل ICT...")
+    try:
+        report = await analyze_ict(symbol, interval=interval)
+    except Exception as exc:
+        report = f"❌ خطا در تحلیل ICT: {exc}"
+    # Telegram message limit
+    if len(report) > 4000:
+        report = report[:3980] + "\n…"
+    await u.message.reply_text(report, reply_markup=get_market_keyboard())
