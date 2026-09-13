@@ -14,7 +14,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import socket
 import tempfile
 import threading
@@ -116,20 +115,16 @@ def _classify_error(exc: str) -> str:
         "captcha", "403", "forbidden", "sign in", "login required",
         "http error 401", "access denied", "rate-limit reached",
         "rate limit reached", "main webpage is locked behind the login page",
-        "login page", "please wait a few minutes", "challenge_required",
-        "checkpoint_required", "user is not logged in", "cookies are required",
     )):
         return "site_blocked"
     if any(x in s for x in ("private", "members only", "age-restricted", "authentication required")):
         return "access_restricted"
-    if any(x in s for x in ("unsupported", "no suitable", "unable to extract", "not available", "no media found", "no files")):
+    if any(x in s for x in ("unsupported", "no suitable", "unable to extract", "not available")):
         return "unsupported"
     if any(x in s for x in ("too large", "max-filesize", "maximum file size")):
         return "too_large"
     if any(x in s for x in ("name or service not known", "temporary failure in name resolution", "nodename nor servname")):
         return "dns_error"
-    if any(x in s for x in ("gallery-dl not found", "gallery_dl_missing", "no such file or directory: 'gallery-dl'")):
-        return "gallery_dl_missing"
     return "failed"
 
 
@@ -231,91 +226,6 @@ def _content_disposition_name(value: str) -> str:
     return _safe_name(m.group(1).strip() if m else "")
 
 
-
-def _prefers_gallery_dl(url: str) -> bool:
-    """Instagram and similar sites often work better with gallery-dl than yt-dlp alone."""
-    host = (urlparse(url).hostname or "").lower().rstrip(".")
-    social = (
-        "instagram.com", "cdninstagram.com",
-        "tiktok.com", "vm.tiktok.com",
-        "twitter.com", "x.com", "t.co",
-        "pinterest.com", "pin.it",
-        "reddit.com", "redd.it",
-    )
-    return any(host == h or host.endswith("." + h) for h in social)
-
-
-async def _gallery_dl(url: str, outdir: Path) -> dict:
-    """Download via gallery-dl (primary path for Instagram in insta-downloader-bot)."""
-    loop = asyncio.get_running_loop()
-
-    def work():
-        outdir.mkdir(parents=True, exist_ok=True)
-        cmd = [
-            "gallery-dl",
-            "--destination", str(outdir),
-            "--filename", "{id}.{extension}",
-            "--no-mtime",
-            url,
-        ]
-        cookie = os.getenv("DOWNLOADER_COOKIES_FILE", "").strip()
-        if cookie and Path(cookie).is_file():
-            cmd.extend(["--cookies", cookie])
-        proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
-        if proxy:
-            cmd.extend(["--proxy", proxy])
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=max(30, int(TIMEOUT) + 30),
-            )
-        except FileNotFoundError as exc:
-            raise DownloadError("gallery_dl_missing") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise DownloadError("failed") from exc
-
-        if result.returncode != 0:
-            err = (result.stderr or result.stdout or "gallery-dl failed").strip()
-            raise DownloadError(_classify_error(err))
-
-        files: list[Path] = []
-        for root, _dirs, names in os.walk(outdir):
-            for name in names:
-                # skip gallery-dl metadata sidecars
-                if name.endswith((".json", ".txt", ".sqlite")):
-                    continue
-                files.append(Path(root) / name)
-        if not files:
-            raise DownloadError("unsupported")
-
-        # Prefer the largest media file (video over tiny thumbs when multiple exist)
-        path = max(files, key=lambda p: p.stat().st_size)
-        size = path.stat().st_size
-        if size <= 0:
-            raise DownloadError("failed")
-        if size > MAX_BYTES:
-            path.unlink(missing_ok=True)
-            raise DownloadError("too_large")
-        title = _safe_name(path.stem or "instagram_media")
-        return {
-            "path": str(path),
-            "title": title,
-            "size": size,
-            "content_type": path.suffix.lstrip(".") or "bin",
-            "method": "gallery-dl",
-            "mode": "best",
-        }
-
-    try:
-        return await loop.run_in_executor(None, work)
-    except DownloadError:
-        raise
-    except Exception as exc:
-        raise DownloadError(_classify_error(str(exc))) from exc
-
-
 async def _direct(url: str, out: Path) -> dict:
     try:
         import requests
@@ -374,22 +284,9 @@ async def _direct(url: str, out: Path) -> dict:
 
 async def probe(url: str) -> dict:
     url = _preflight_redirects(url)
-    prefer_gallery = _prefers_gallery_dl(url)
-
-    # For Instagram-like hosts, if gallery-dl is installed treat as supported even
-    # when yt-dlp probe fails (matches insta-downloader-bot behaviour).
-    def _gallery_available() -> bool:
-        try:
-            subprocess.run(["gallery-dl", "--version"], capture_output=True, timeout=8)
-            return True
-        except Exception:
-            return False
-
     try:
         import yt_dlp
     except ImportError:
-        if prefer_gallery and _gallery_available():
-            return {"supported": True, "direct": False, "url": url, "title": "media", "formats": [], "engine": "gallery-dl"}
         return {"supported": False, "direct": True, "url": url, "formats": []}
     loop = asyncio.get_running_loop()
     def work():
@@ -401,12 +298,10 @@ async def probe(url: str) -> dict:
             if not f.get("format_id"):
                 continue
             formats.append({"id": str(f.get("format_id")), "ext": f.get("ext"), "height": f.get("height"), "vcodec": f.get("vcodec"), "acodec": f.get("acodec"), "filesize": f.get("filesize") or f.get("filesize_approx")})
-        return {"supported": True, "direct": False, "url": url, "title": info.get("title") or "media", "duration": info.get("duration"), "thumbnail": info.get("thumbnail"), "formats": formats[-80:], "engine": "yt-dlp"}
+        return {"supported": True, "direct": False, "url": url, "title": info.get("title") or "media", "duration": info.get("duration"), "thumbnail": info.get("thumbnail"), "formats": formats[-80:]}
     try:
         return await loop.run_in_executor(None, work)
     except Exception as exc:
-        if prefer_gallery and _gallery_available():
-            return {"supported": True, "direct": False, "url": url, "title": "instagram_media", "formats": [], "engine": "gallery-dl", "error": _classify_error(str(exc))}
         return {"supported": False, "direct": True, "url": url, "formats": [], "error": _classify_error(str(exc))}
 
 
@@ -482,11 +377,6 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
 
 
 async def download(url: str, *, mode: str = "best", user_id: int | None = None, progress_cb=None, use_cache: bool = True) -> dict:
-    """Cascade inspired by insta-downloader-bot: gallery-dl → yt-dlp → direct HTTP.
-
-    For Instagram/TikTok/X/Pinterest/Reddit, gallery-dl is tried first because it
-    is usually more reliable there than yt-dlp alone. Other hosts keep yt-dlp first.
-    """
     if mode not in {"best", "1080p", "720p", "480p", "audio"}:
         mode = "best"
     url = _normalize_media_url(url)
@@ -498,64 +388,59 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
     user_sem = _user_sem(user_id)
     async with _global_sem:
         async with user_sem:
+            # Instagram / social: exact cascade from insta-downloader-bot
+            # (gallery-dl → yt-dlp), before the generic ALIMJ3 engines.
+            try:
+                from bot.services.insta_downloader import is_social_url, download as insta_download, is_video_path
+            except Exception:
+                is_social_url = lambda _u: False  # type: ignore
+                insta_download = None
+                is_video_path = lambda _p: False  # type: ignore
+
+            if insta_download and is_social_url(url):
+                try:
+                    file_path = await insta_download(url)
+                    p = Path(file_path)
+                    size = p.stat().st_size if p.exists() else 0
+                    if size <= 0:
+                        raise DownloadError("failed")
+                    if size > MAX_BYTES:
+                        try:
+                            p.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                        raise DownloadError("too_large")
+                    result = {
+                        "path": str(p),
+                        "title": _safe_name(p.stem or "instagram_media"),
+                        "size": size,
+                        "content_type": p.suffix.lstrip(".") or "bin",
+                        "method": "insta-cascade",
+                        "mode": mode,
+                        "is_video": is_video_path(str(p)),
+                    }
+                    _cache_put(result, url, mode)
+                    return result
+                except DownloadError:
+                    raise
+                except Exception as exc:
+                    logger.warning("insta-cascade failed, falling back to generic engines: %s", exc)
+                    # fall through to generic yt-dlp / direct
+
             outdir = Path(tempfile.mkdtemp(prefix="alimj3_dl_"))
             try:
-                prefer_gallery = _prefers_gallery_dl(url)
-                errors: list[str] = []
-
-                async def try_gallery() -> dict | None:
-                    try:
-                        return await _gallery_dl(url, outdir)
-                    except DownloadError as exc:
-                        code = str(exc)
-                        if code in {"too_large", "access_restricted"}:
+                try:
+                    result = await _ytdlp(url, outdir, mode=mode, progress_cb=progress_cb)
+                except DownloadError as first:
+                    if str(first) in {"site_blocked", "rate_limited", "access_restricted", "too_large", "yt_dlp_missing"}:
+                        if str(first) == "yt_dlp_missing" and mode == "best":
+                            filename = _safe_name(Path(urlparse(url).path).name or "download.bin")
+                            result = await _direct(url, outdir / filename)
+                        else:
                             raise
-                        errors.append(f"gallery-dl:{code}")
-                        logger.info("gallery-dl failed for %s: %s", urlparse(url).hostname, code)
-                        return None
-
-                async def try_ytdlp() -> dict | None:
-                    try:
-                        return await _ytdlp(url, outdir, mode=mode, progress_cb=progress_cb)
-                    except DownloadError as exc:
-                        code = str(exc)
-                        if code in {"too_large", "access_restricted", "site_blocked", "rate_limited"}:
-                            # Still allow gallery-dl / direct for some of these when appropriate
-                            if code in {"too_large", "access_restricted"}:
-                                raise
-                            errors.append(f"yt-dlp:{code}")
-                            logger.info("yt-dlp failed for %s: %s", urlparse(url).hostname, code)
-                            return None
-                        errors.append(f"yt-dlp:{code}")
-                        logger.info("yt-dlp failed for %s: %s", urlparse(url).hostname, code)
-                        return None
-
-                async def try_direct() -> dict:
-                    filename = _safe_name(Path(urlparse(url).path).name or "download.bin")
-                    return await _direct(url, outdir / filename)
-
-                result = None
-                if prefer_gallery:
-                    # insta-downloader-bot order: gallery-dl first, then yt-dlp
-                    result = await try_gallery()
-                    if result is None:
-                        result = await try_ytdlp()
-                else:
-                    result = await try_ytdlp()
-                    if result is None:
-                        result = await try_gallery()
-
-                if result is None:
-                    try:
-                        result = await try_direct()
-                    except DownloadError as exc:
-                        errors.append(f"direct:{exc}")
-                        # Prefer the most informative prior error
-                        for code in ("site_blocked", "rate_limited", "access_restricted", "unsupported", "gallery_dl_missing", "yt_dlp_missing"):
-                            if any(code in e for e in errors):
-                                raise DownloadError(code) from exc
-                        raise DownloadError("failed") from exc
-
+                    else:
+                        filename = _safe_name(Path(urlparse(url).path).name or "download.bin")
+                        result = await _direct(url, outdir / filename)
                 _cache_put(result, url, mode)
                 return result
             except Exception:
@@ -585,11 +470,12 @@ def user_message(code: str) -> str:
         "blocked_host": "❌ این مقصد به دلایل امنیتی قابل دریافت نیست.",
         "dns_error": "❌ دامنه قابل دسترسی نیست.",
         "rate_limited": "⏳ سایت موقتاً درخواست‌ها را محدود کرده است. بعداً دوباره امتحان کنید.",
-        "site_blocked": "🚫 سایت دسترسی دانلود را مسدود کرده یا CAPTCHA/ورود لازم دارد.\nبرای اینستاگرام می‌توانید فایل کوکی (DOWNLOADER_COOKIES_FILE) تنظیم کنید. امکان دور زدن ورود اجباری وجود ندارد.",
+        "site_blocked": "🚫 سایت دسترسی دانلود را مسدود کرده یا CAPTCHA/ورود لازم دارد. امکان دور زدن محدودیت سایت در ربات وجود ندارد.",
         "access_restricted": "🔒 این محتوا خصوصی/محدود است و بدون دسترسی مجاز قابل دریافت نیست.",
-        "unsupported": "⚠️ این لینک توسط موتورهای دانلود پشتیبانی نشد.",
+        "unsupported": "⚠️ این لینک توسط موتور دانلود پشتیبانی نشد.",
         "too_large": f"📦 فایل برای ارسال مستقیم بیش از حد بزرگ است. سقف ربات {MAX_BYTES // (1024*1024)}MB است.",
         "yt_dlp_missing": "⚠️ موتور yt-dlp نصب نشده است. requirements را نصب کنید.",
-        "gallery_dl_missing": "⚠️ موتور gallery-dl نصب نشده است. دستور: pip install gallery-dl",
+        "gallery_dl_missing": "⚠️ موتور gallery-dl نصب نشده است.\nدستور: pip install -U gallery-dl",
         "failed": "❌ دانلود ناموفق بود. لینک عمومی باشد و دوباره تلاش کنید.\nبرای اینستاگرام اگر مکرر خطا می‌گیرید، کوکی مرورگر را در DOWNLOADER_COOKIES_FILE قرار دهید.",
+        "site_blocked": "🚫 سایت دسترسی دانلود را مسدود کرده یا CAPTCHA/ورود لازم دارد.\nبرای اینستاگرام فایل کوکی (DOWNLOADER_COOKIES_FILE) تنظیم کنید.",
     }.get(code, "❌ دانلود ناموفق بود.")
