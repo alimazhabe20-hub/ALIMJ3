@@ -461,41 +461,35 @@ async def _send_ai_voice(update_or_msg, text: str, user_id: int, reply_markup=No
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
 async def _ask_ai_with_typing(update, context, user_id, text):
-    """Fast AI request while preserving the visible «در حال نوشتن...» notice."""
+    """AI request with stable chunked output and safe fallback semantics."""
     import asyncio
     stop_event = asyncio.Event()
     chat_id = update.effective_chat.id
-    notice = None
+    # فقط _ask_ai_stream_and_send یک پیام «✍️ در حال نوشتن...» می‌فرستد.
+    # اینجا فقط ChatAction.TYPING برای وضعیت تایپ تلگرام فعال می‌شود تا
+    # پیام وضعیت دوبار روی صفحه ایجاد نشود.
+    from bot.utils.task_manager import spawn
+    task = spawn(_keep_typing(context.bot, chat_id, stop_event), name=f"typing-{chat_id}")
     try:
-        if not AI_LIMITER.allow(user_id):
-            await update.message.reply_text(platform_t(user_id, "limit"))
-            return None
-
-        # Keep the user's visible status message, but do not put it on the AI
-        # critical path beyond this single immediate Telegram send.
         try:
-            notice = await update.message.reply_text("✍️ در حال نوشتن...")
-        except Exception as _exc:
-            logger.debug("AI typing notice failed: %s", _exc)
-
-        from bot.utils.task_manager import spawn
-        task = spawn(_keep_typing(context.bot, chat_id, stop_event), name=f"typing-{chat_id}")
-        try:
+            if not AI_LIMITER.allow(user_id):
+                await update.message.reply_text(platform_t(user_id, "limit"))
+                return None
             enriched = text + build_ai_context(user_id, text)
+            result = await HEAVY_QUEUE.run(lambda: _ask_ai_stream_and_send(update, context, user_id, enriched))
+            context.user_data["_ai_already_sent"] = True
+            return result
+        except Exception as stream_error:
+            logger.warning("AI chunked stream failed, using canonical fallback: %s", stream_error)
             context.user_data["_ai_already_sent"] = False
+            enriched = text + build_ai_context(user_id, text)
             return await HEAVY_QUEUE.run(lambda: ask_ai(user_id, enriched))
-        finally:
-            stop_event.set()
-            try:
-                await task
-            except Exception as _exc:
-                logger.debug("%s: %s", __name__, _exc)
     finally:
-        if notice is not None:
-            try:
-                await notice.delete()
-            except Exception as _exc:
-                logger.debug("AI typing notice cleanup failed: %s", _exc)
+        stop_event.set()
+        try:
+            await task
+        except Exception as _exc:
+            logger.debug("%s: %s", __name__, _exc)
 async def _send_main(update, context, text, user_id):
     context.user_data.pop("waiting_for", None)
     await update.message.reply_text("🏠 منوی اصلی", reply_markup=get_main_keyboard(user_id))
@@ -516,26 +510,33 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await _text_handler_inner(update, context)
     except Exception as e:
-        logger.error(f"text_handler error: {e}", exc_info=True)
+        _text = getattr(getattr(update, "message", None), "text", "") or ""
+        _waiting = (getattr(context, "user_data", {}) or {}).get("waiting_for")
+        logger.error(
+            "text_handler error text=%r waiting_for=%r: %s",
+            _text[:160], _waiting, e, exc_info=True,
+        )
         try:
             await update.message.reply_text("⚠️ این بخش موقتاً در دسترس نیست. کمی بعد دوباره امتحان کنید.")
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
 async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    # Queue automatic reactions locally; all Telegram network I/O runs in a
-    # dedicated single worker and never competes with the AI response path.
-    try:
-        from bot.services.auto_reactions import enqueue_auto_reaction
-        enqueue_auto_reaction(update)
-    except Exception as reaction_exc:
-        logger.debug("auto reaction hook skipped: %s", reaction_exc)
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name or "کاربر"
     # V70 downloader: handle a URL immediately after the downloader button, before generic AI/menu routing.
     if await handle_downloader_url_v71(update, context, text):
         return
-    city = get_user_city(user_id)
+    # City lookup is used by several unrelated menus. A broken/locked SQLite
+    # connection must never prevent ordinary ReplyKeyboard buttons from routing.
+    try:
+        city = get_user_city(user_id)
+    except Exception as exc:
+        city = "قم"
+        logger.error(
+            "user city lookup failed; continuing with fallback city=%r user_id=%s: %s",
+            city, user_id, exc, exc_info=True,
+        )
     try: auto_capture_memory(user_id, text)
     except Exception: pass
     waiting = context.user_data.get("waiting_for")
@@ -671,10 +672,21 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             "📝", "🗺", "⏰", "📒", "📖", "😂", "🧠", "💪", "💖", "🕋",
             "📿", "🙏", "🔔", "🌫", "📍", "🇬🇧", "🇮🇷", "🌈", "📋", "🤖", "🧹",
         )
-        if text.startswith(menu_starts) or text in (
+        # Some important market/calendar buttons do not start with the emoji
+        # prefixes above (notably 🗓 and 🥇). Keep a small explicit allow-list so
+        # stale waiting states can never swallow a normal menu button.
+        known_menu_buttons = {
+            "🗓 تقویم اقتصادی", "📅 تقویم اقتصادی", "تقویم اقتصادی",
+            "🥇 تحلیل طلا", "تحلیل طلا",
+            "📊 نمودار و تحلیل ارز دیجیتال", "نمودار و تحلیل ارز دیجیتال",
+            "📊 نمودار قیمت کریپتو", "نمودار قیمت کریپتو", "نمودار کریپتو",
+            "🔍 تحلیل ارز دیجیتال", "تحلیل ارز دیجیتال", "تحلیل کریپتو",
+            "🧠 تحلیل هوشمند حرفه‌ای", "تحلیل هوشمند حرفه‌ای",
+            "🛒 دستیار خرید", "🛍 دستیار خرید", "دستیار خرید",
             "بیشتر", "بازار", "مذهبی", "ابزارها", "سرگرمی", "فونت", "پروفایل",
             "تاریخ و سن", "هوا و مکان", "انتخاب شهر", "تقویم", "زبان",
-        ):
+        }
+        if text.startswith(menu_starts) or text in known_menu_buttons:
             context.user_data.pop("waiting_for", None)
             waiting = None
         else:
