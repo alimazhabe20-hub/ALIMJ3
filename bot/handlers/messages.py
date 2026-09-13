@@ -642,9 +642,14 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                         )
             except Exception as exc:
                 logger.error("AI request failed: %s", exc, exc_info=True)
-                await update.message.reply_text(
-                    "⚠️ فعلاً سرویس هوش مصنوعی پاسخ نداد. چند ثانیه بعد دوباره امتحان کنید."
-                )
+                msg = str(exc)
+                if "هیچ سرویس AI" in msg or "تنظیم نشده" in msg:
+                    text = "⚠️ هیچ کلید AI تنظیم نشده است. کلیدها را در .env بررسی کنید."
+                elif "queue full" in msg.lower():
+                    text = "⏳ صف درخواست‌ها پر است. چند ثانیه بعد دوباره بفرستید."
+                else:
+                    text = "⚠️ فعلاً سرویس هوش مصنوعی پاسخ نداد. چند ثانیه بعد دوباره امتحان کنید."
+                await update.message.reply_text(text)
             return
     if waiting:
         if _is_back(text) or _is_back_more(text):
