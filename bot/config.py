@@ -77,15 +77,14 @@ class Config:
     UPDATE_MANIFEST_URL = os.getenv("UPDATE_MANIFEST_URL", "").strip()
     UPDATE_CHECK_TTL = max(60, int(os.getenv("UPDATE_CHECK_TTL", "1800")))
     UPDATE_CHECK_TIMEOUT = max(3.0, min(30.0, float(os.getenv("UPDATE_CHECK_TIMEOUT", "10"))))
-    # Automatic Telegram reactions
+    # Automatic reactions: high-confidence, rate-limited reactions to user text.
     AUTO_REACTIONS_ENABLED = os.getenv("AUTO_REACTIONS_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
     AUTO_REACTIONS_MIN_CONFIDENCE = max(0.0, min(1.0, float(os.getenv("AUTO_REACTIONS_MIN_CONFIDENCE", "0.80"))))
-    AUTO_REACTIONS_COOLDOWN = max(0.0, float(os.getenv("AUTO_REACTIONS_COOLDOWN", "0.25")))
+    AUTO_REACTIONS_COOLDOWN = max(0.0, float(os.getenv("AUTO_REACTIONS_COOLDOWN", "0")))
     AUTO_REACTIONS_SCOPE = os.getenv("AUTO_REACTIONS_SCOPE", "private,group,supergroup").strip()
     AUTO_REACTIONS_MAX_TEXT_LENGTH = max(40, int(os.getenv("AUTO_REACTIONS_MAX_TEXT_LENGTH", "1200")))
     AUTO_REACTIONS_BIG = os.getenv("AUTO_REACTIONS_BIG", "false").strip().lower() in {"1", "true", "yes", "on"}
-    AUTO_REACTIONS_TIMEOUT = max(1.0, min(10.0, float(os.getenv("AUTO_REACTIONS_TIMEOUT", "5"))))
-    AUTO_REACTIONS_CHAT_CACHE_TTL = max(30.0, float(os.getenv("AUTO_REACTIONS_CHAT_CACHE_TTL", "600")))
+    AUTO_REACTIONS_TIMEOUT = max(1.0, min(10.0, float(os.getenv("AUTO_REACTIONS_TIMEOUT", "4"))))
 
 
 config = Config()
