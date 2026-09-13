@@ -584,8 +584,7 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
                 )
 
         # ۲) Routing تطبیقی: کار ساده ابتدا به سریع‌ترین مسیر، کار پیچیده ابتدا به مدل‌های قوی‌تر.
-        # انتخاب صریح کاربر فقط اولویت است، نه قفل دائمی؛ اگر همه مدل‌های provider
-        # انتخاب‌شده شکست بخورند، به providerهای سالم دیگر fallback می‌کنیم.
+        # انتخاب صریح کاربر همیشه اولویت اول را حفظ می‌کند.
         if not selected:
             text_len = len(original_prompt)
             tool_heavy = any(x in original_prompt.lower() for x in (
@@ -608,8 +607,6 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
             )
 
         # ۳) بقیه ارائه‌دهنده‌ها (fallback)
-        # حتی وقتی provider دستی انتخاب شده، پس از شکست همه مدل‌های آن،
-        # providerهای دیگر هم باید قابل استفاده باشند تا یک سرویس خراب کل AI را نخواباند.
         for provider, _label, model in options:
             item = (provider, model)
             if item not in ordered:
@@ -621,8 +618,7 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
                 continue
             # Automatic routing skips providers in circuit-open cooldown; an explicit
             # user selection is never silently bypassed.
-            explicit_provider = bool(selected and provider == selected[0])
-            if not _provider_available(provider, explicit=explicit_provider):
+            if not selected and not _provider_available(provider):
                 logger.info("Skipping AI provider %s while circuit is cooling down", provider)
                 continue
             tried.add(key)
@@ -645,9 +641,8 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
                 # تأخیر خیلی کم بین تلاش‌ها برای سرعت بیشتر
                 await asyncio.sleep(0.05)
 
-    raise RuntimeError(
-        "فعلاً هیچ‌کدام از مدل‌های AI پاسخ ندادند.\n\n" + "\n".join(errors[:8])
-    )
+    logger.error("AI request failed across all providers: %s", " | ".join(errors[:8]))
+    raise RuntimeError("AI_UNAVAILABLE")
 
 
 # ── استریم واقعی از API (SSE) ───────────────────────────────────────────────
@@ -830,15 +825,14 @@ async def ask_ai_stream(user_id: int, prompt: str):
         errors = []
         for provider, model in ordered:
             try:
-                explicit_provider = bool(selected and provider == selected[0])
-                if not _provider_available(provider, explicit=explicit_provider):
-                    continue
                 answer = await _call_provider(provider, user_id, original, model)
                 if not answer:
                     raise RuntimeError("empty answer")
                 _save_turn(user_id, original, answer)
-                # Do not persist an automatically successful provider as a manual
-                # selection; otherwise one temporary outage could lock the user to it.
+                # Automatic routing must remain automatic. Persisting the first
+                # successful provider here could lock the user to a provider
+                # that later becomes unavailable. Manual selections are already
+                # persisted by set_selected_model().
 
                 # Emit bounded chunks so Telegram still appears to stream.
                 chunk_size = max(80, int(os.getenv("AI_STREAM_CHUNK", "180")))
@@ -853,5 +847,6 @@ async def ask_ai_stream(user_id: int, prompt: str):
                 logger.warning("stream facade provider failed: %s", msg)
                 await asyncio.sleep(0.05)
 
-    raise RuntimeError("استریم ناموفق:\n" + "\n".join(errors[:8]))
+    logger.error("AI streaming facade failed across all providers: %s", " | ".join(errors[:8]))
+    raise RuntimeError("AI_UNAVAILABLE")
 

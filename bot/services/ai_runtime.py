@@ -425,7 +425,18 @@ def clear_selected_model(user_id: int) -> None:
 def _env_models(env_name: str, default: List[str]) -> List[str]:
     raw = os.getenv(env_name, "")
     values = [x.strip() for x in raw.split(",") if x.strip()]
-    return values or default
+    # Keep user configuration, but automatically replace model IDs that the
+    # provider has retired so one stale Render env var cannot disable the AI.
+    replacements = {
+        "llama-3.1-8b-instant": "openai/gpt-oss-20b",
+        "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+    } if env_name == "GROQ_MODELS" else {}
+    normalized = []
+    for value in values:
+        value = replacements.get(value, value)
+        if value not in normalized:
+            normalized.append(value)
+    return normalized or default
 
 
 def available_model_options() -> List[Tuple[str, str, str]]:
@@ -437,7 +448,7 @@ def available_model_options() -> List[Tuple[str, str, str]]:
         # مدل‌های پایدار جدید؛ Lite برای سرعت، 3.6 برای کیفیت
         for model in _env_models(
             "GEMINI_MODELS",
-            ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite"],
+            ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"],
         ):
             label = "Gemini • " + model.replace("gemini-", "Gemini ")
             items.append(("gemini", label, model))

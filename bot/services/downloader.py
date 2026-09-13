@@ -84,6 +84,19 @@ def _validate_url(url: str) -> str:
     return url
 
 
+def _normalize_media_url(url: str) -> str:
+    """Canonicalize social-media URLs without changing their content target."""
+    p = urlparse((url or "").strip())
+    host = (p.hostname or "").lower().rstrip(".")
+    if host == "instagram.com" or host.endswith(".instagram.com"):
+        # Instagram share links commonly carry tracking tokens (utm/igsh).
+        # They are not required to identify the Reel and can make extraction
+        # less deterministic. Preserve only the path/query parameters that are
+        # not known tracking parameters.
+        return p._replace(query="").geturl()
+    return url
+
+
 def is_url(text: str) -> bool:
     return bool(re.match(r"^https?://\S+$", (text or "").strip(), re.I))
 
@@ -98,7 +111,11 @@ def _classify_error(exc: str) -> str:
     s = (exc or "").lower()
     if any(x in s for x in ("429", "too many requests", "rate limit")):
         return "rate_limited"
-    if any(x in s for x in ("captcha", "403", "forbidden", "sign in", "login required", "http error 401", "access denied")):
+    if any(x in s for x in (
+        "captcha", "403", "forbidden", "sign in", "login required",
+        "http error 401", "access denied", "rate-limit reached",
+        "rate limit reached", "main webpage is locked behind the login page",
+    )):
         return "site_blocked"
     if any(x in s for x in ("private", "members only", "age-restricted", "authentication required")):
         return "access_restricted"
@@ -112,9 +129,17 @@ def _classify_error(exc: str) -> str:
 
 
 def _preflight_redirects(url: str) -> str:
-    """Validate every HTTP redirect target before handing the URL to an extractor."""
+    """Validate redirects without turning social-media share links into login URLs."""
     import requests
-    current = _validate_url(url)
+    current = _normalize_media_url(_validate_url(url))
+    host = (urlparse(current).hostname or "").lower().rstrip(".")
+    # Instagram can redirect a HEAD request for a public Reel to its login page
+    # even when the original Reel URL is the correct extractor input. Following
+    # that redirect here makes yt-dlp receive the wrong URL. Let yt-dlp manage
+    # the Instagram session/redirects itself while still validating the original
+    # hostname for SSRF protection.
+    if host == "instagram.com" or host.endswith(".instagram.com"):
+        return current
     session = requests.Session()
     headers = {"User-Agent": UA, "Accept": "*/*"}
     for _ in range(MAX_REDIRECTS + 1):
@@ -310,9 +335,19 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
         opts = {
             "format": fmt, "outtmpl": outtmpl, "noplaylist": True, "quiet": True, "no_warnings": True,
             "retries": 3, "fragment_retries": 3, "socket_timeout": int(TIMEOUT), "max_filesize": MAX_BYTES,
-            "restrictfilenames": True, "progress_hooks": [hook], "http_headers": {"User-Agent": UA},
+            "restrictfilenames": True, "progress_hooks": [hook],
+            "http_headers": {
+                "User-Agent": UA,
+                "Accept-Language": "en-US,en;q=0.9",
+            },
             "merge_output_format": "mp4", "continuedl": True, "overwrites": False,
         }
+        parsed_host = (urlparse(url).hostname or "").lower().rstrip(".")
+        if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
+            opts["http_headers"]["Referer"] = "https://www.instagram.com/"
+            # Explicitly use Instagram's public web app ID; this is a normal
+            # extractor setting, not an authentication or CAPTCHA bypass.
+            opts["extractor_args"] = {"instagram": {"app_id": "web"}}
         if mode == "audio":
             opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
         cookie = os.getenv("DOWNLOADER_COOKIES_FILE", "").strip()
@@ -344,6 +379,7 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
 async def download(url: str, *, mode: str = "best", user_id: int | None = None, progress_cb=None, use_cache: bool = True) -> dict:
     if mode not in {"best", "1080p", "720p", "480p", "audio"}:
         mode = "best"
+    url = _normalize_media_url(url)
     url = _preflight_redirects(url)
     if use_cache:
         cached = _cache_get(url, mode)
