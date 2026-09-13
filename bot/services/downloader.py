@@ -97,8 +97,32 @@ def _normalize_media_url(url: str) -> str:
     return url
 
 
+def normalize_user_url(text: str) -> str:
+    """Normalize a URL copied from Telegram without changing its target."""
+    value = (text or "").strip()
+    # Telegram users may paste links wrapped in punctuation or containing
+    # zero-width characters introduced by Persian/Arabic text/copy-paste.
+    value = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", value)
+    value = value.strip(" \t\r\n<>[](){}\"'`")
+    value = re.sub(r"[.,!?;:]+$", "", value)
+    return value
+
+
 def is_url(text: str) -> bool:
-    return bool(re.match(r"^https?://\S+$", (text or "").strip(), re.I))
+    value = normalize_user_url(text)
+    if not value or any(ch.isspace() for ch in value):
+        return False
+    try:
+        p = urlparse(value)
+        return (
+            p.scheme.lower() in {"http", "https"}
+            and bool(p.netloc)
+            and not p.username
+            and not p.password
+            and bool(p.hostname)
+        )
+    except ValueError:
+        return False
 
 
 def _safe_name(name: str, default: str = "download.bin") -> str:
