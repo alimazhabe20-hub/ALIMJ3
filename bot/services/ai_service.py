@@ -606,7 +606,8 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
                 ),
             )
 
-        # ۳) بقیه ارائه‌دهنده‌ها (fallback)
+        # ۳) بقیه ارائه‌دهنده‌ها (fallback). حتی اگر کاربر یک provider را انتخاب کرده
+        # باشد، در صورت خرابی/قطعی آن provider پاسخ را بی‌دلیل متوقف نکن.
         for provider, _label, model in options:
             item = (provider, model)
             if item not in ordered:
