@@ -21,6 +21,7 @@ def _dl_lang(update):
 
 async def downloader_entry_v71(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = " ".join(context.args or []).strip() if getattr(context, "args", None) else ""
+    args = normalize_user_url(args)
     if args and is_url(args):
         await _start_probe(update, context, args)
         return
@@ -30,7 +31,6 @@ async def downloader_entry_v71(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(ux_text(lang, "download_title") + "\n\n" + ux_text(lang, "intro"))
 
 async def _start_probe(update, context, url: str):
-    url = normalize_user_url(url)
     if not is_url(url):
         await update.message.reply_text(ux_text(_dl_lang(update), "invalid"))
         return
