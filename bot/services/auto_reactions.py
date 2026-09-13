@@ -190,7 +190,7 @@ async def maybe_auto_react(update, context=None) -> bool:
     category, emoji, confidence = result
     user_id = int(message.from_user.id)
     now = time.monotonic()
-    cooldown = max(0.0, float(getattr(config, "AUTO_REACTIONS_COOLDOWN", 3.0)))
+    cooldown = max(0.0, float(getattr(config, "AUTO_REACTIONS_COOLDOWN", 0.25)))
     if now - _last_by_user.get(user_id, 0.0) < cooldown:
         return False
     key = (int(chat.id), int(message.message_id))
