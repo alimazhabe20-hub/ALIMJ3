@@ -97,29 +97,29 @@ def _normalize_media_url(url: str) -> str:
     return url
 
 
-def normalize_input_url(text: str) -> str:
-    """Extract and clean the first HTTP(S) URL from Telegram text."""
-    raw = (text or "").replace("\u200b", "").replace("\ufeff", "").strip()
-    if not raw:
-        return ""
-    # Telegram users often paste a URL wrapped in <>, quotes, or with
-    # punctuation immediately after it. Keep the URL itself unchanged.
-    match = re.search(r"https?://[^\s<>\"'`]+", raw, re.I)
+def extract_url(text: str) -> str | None:
+    """Extract and normalize the first HTTP(S) URL from Telegram text.
+
+    Telegram users often paste URLs wrapped in angle brackets, quotes,
+    backticks, or followed by Persian/Arabic punctuation.  The old full-string
+    regex rejected those otherwise valid links.
+    """
+    value = (text or "").replace("\u200b", "").replace("\ufeff", "").strip()
+    if not value:
+        return None
+    # Remove common invisible bidi/control marks without touching URL content.
+    value = re.sub(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]", "", value)
+    match = re.search(r"https?://[^\s<>\"'`]+", value, re.I)
     if not match:
-        return ""
-    url = match.group(0).rstrip(".,;:!?)]}>")
-    return url
+        return None
+    url = match.group(0).rstrip(".,!?;:،؛؟")
+    while url.endswith(")") and url.count(")") > url.count("("):
+        url = url[:-1]
+    return url if re.match(r"^https?://[^\s]+$", url, re.I) else None
 
 
 def is_url(text: str) -> bool:
-    url = normalize_input_url(text)
-    if not url:
-        return False
-    try:
-        p = urlparse(url)
-        return p.scheme.lower() in {"http", "https"} and bool(p.netloc)
-    except Exception:
-        return False
+    return extract_url(text) is not None
 
 
 def _safe_name(name: str, default: str = "download.bin") -> str:
