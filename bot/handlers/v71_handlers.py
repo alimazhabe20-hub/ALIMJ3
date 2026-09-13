@@ -3,7 +3,7 @@ import asyncio, re, secrets
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bot.logger import logger
-from bot.services.downloader import is_url, normalize_input_url, probe, download, cleanup, user_message
+from bot.services.downloader import is_url, extract_url, probe, download, cleanup, user_message
 from bot.services.v71_platform import (
     SUPPORTED_LANGS, detect_language, personalize, self_test, set_workspace,
     get_workspace, save_branch, list_branches, schedule_ai,
@@ -21,9 +21,9 @@ def _dl_lang(update):
 
 async def downloader_entry_v71(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = " ".join(context.args or []).strip() if getattr(context, "args", None) else ""
-    args_url = normalize_input_url(args)
-    if args_url:
-        await _start_probe(update, context, args_url)
+    url = extract_url(args) if args else None
+    if url:
+        await _start_probe(update, context, url)
         return
     context.user_data["waiting_for"] = "downloader_url_v71"
     from bot.services.v72_platform import ux_text
@@ -31,8 +31,8 @@ async def downloader_entry_v71(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(ux_text(lang, "download_title") + "\n\n" + ux_text(lang, "intro"))
 
 async def _start_probe(update, context, url: str):
-    url = normalize_input_url(url)
-    if not is_url(url):
+    url = extract_url(url) or ""
+    if not url:
         await update.message.reply_text(ux_text(_dl_lang(update), "invalid"))
         return
     from bot.services.v72_platform import ux_text
@@ -67,7 +67,7 @@ async def handle_downloader_url_v71(update: Update, context: ContextTypes.DEFAUL
     waiting = context.user_data.get("waiting_for")
     if waiting != "downloader_url_v71":
         return False
-    url = normalize_input_url(text)
+    url = extract_url(text)
     if not url:
         await update.message.reply_text(ux_text(_dl_lang(update), "invalid"))
         return True
@@ -79,7 +79,7 @@ async def handle_downloader_url_v71(update: Update, context: ContextTypes.DEFAUL
     except Exception:
         is_social_url = lambda _u: False  # type: ignore
 
-    if is_social_url(url):
+    if is_social_url(text):
         await _download_social_direct(update, context, url)
         return True
 
