@@ -1,18 +1,19 @@
 from bot.utils.city_data import IRAN_CITIES, IRAQ_CITIES
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+from bot.utils.texts import ui
 
 def get_refresh_button():
     """فقط دکمه بروزرسانی زیر پیام"""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 بروزرسانی", callback_data="refresh_main")]
+        [InlineKeyboardButton(ui("🔄 بروزرسانی"), callback_data="refresh_main")]
     ])
 
 def get_main_keyboard(user_id=None):
     """کیبورد اصلی؛ در صورت وجود کاربر، بخش‌های پرتکرار را بالاتر می‌آورد."""
     rows = [
-        [KeyboardButton("🏙 انتخاب شهر"), KeyboardButton("📅 تقویم")],
-        [KeyboardButton("🌍 زبان"), KeyboardButton("➕ بیشتر")],
-        [KeyboardButton("🤖 دستیار هوشمند")],
+        [KeyboardButton(ui("🏙 انتخاب شهر")), KeyboardButton(ui("📅 تقویم"))],
+        [KeyboardButton(ui("🌍 زبان")), KeyboardButton(ui("➕ بیشتر"))],
+        [KeyboardButton(ui("🤖 دستیار هوشمند"))],
     ]
     # Personalization is intentionally conservative: only reorder existing buttons.
     if user_id is not None:
@@ -33,7 +34,7 @@ def get_main_keyboard(user_id=None):
         rows,
         resize_keyboard=True,
         one_time_keyboard=False,
-        input_field_placeholder="پیام بنویسید یا از دکمه‌ها استفاده کنید...",
+        input_field_placeholder=ui("پیام بنویسید یا از دکمه‌ها استفاده کنید..."),
     )
 
 def get_ai_keyboard(user_id=None):
@@ -47,7 +48,7 @@ def get_ai_keyboard(user_id=None):
         selected_text = f"🎛 فعال: {pretty}"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(selected_text, callback_data="ai_models")],
-        [InlineKeyboardButton("🧹 حذف حافظه", callback_data="ai_clear_memory")],
+        [InlineKeyboardButton(ui("🧹 حذف حافظه"), callback_data="ai_clear_memory")],
     ])
 
 def get_ai_model_keyboard(user_id=None):
@@ -68,20 +69,20 @@ def get_ai_model_keyboard(user_id=None):
             )
         ])
     if not rows:
-        rows.append([InlineKeyboardButton("❌ هیچ سرویسی تنظیم نشده", callback_data="ai_noop")])
-    rows.append([InlineKeyboardButton("↩️ برگشت", callback_data="ai_models_back")])
+        rows.append([InlineKeyboardButton(ui("❌ هیچ سرویسی تنظیم نشده"), callback_data="ai_noop")])
+    rows.append([InlineKeyboardButton(ui("↩️ برگشت"), callback_data="ai_models_back")])
     return InlineKeyboardMarkup(rows)
 
 def get_more_keyboard():
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("📅 تاریخ و سن"), KeyboardButton("🕌 مذهبی")],
-            [KeyboardButton("💰 بازار"), KeyboardButton("🌤 هوا و مکان")],
-            [KeyboardButton("🛠 ابزارها"), KeyboardButton("🎮 سرگرمی")],
-            [KeyboardButton("🎨 فونت"), KeyboardButton("👤 پروفایل")],
-            [KeyboardButton("📥 دانلودر فایل")],
-            [KeyboardButton("🔄 بررسی بروزرسانی")],
-            [KeyboardButton("🔙 بازگشت")],
+            [KeyboardButton(ui("📅 تاریخ و سن")), KeyboardButton(ui("🕌 مذهبی"))],
+            [KeyboardButton(ui("💰 بازار")), KeyboardButton(ui("🌤 هوا و مکان"))],
+            [KeyboardButton(ui("🛠 ابزارها")), KeyboardButton(ui("🎮 سرگرمی"))],
+            [KeyboardButton(ui("🎨 فونت")), KeyboardButton(ui("👤 پروفایل"))],
+            [KeyboardButton(ui("📥 دانلودر فایل"))],
+            [KeyboardButton(ui("🔄 بررسی بروزرسانی"))],
+            [KeyboardButton(ui("🔙 بازگشت"))],
         ],
         resize_keyboard=True,
     )
@@ -89,13 +90,13 @@ def get_more_keyboard():
 def get_date_tools_keyboard():
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🔄 مبدل تاریخ"), KeyboardButton("🎂 محاسبه سن")],
-            [KeyboardButton("🎉 روزشمار تولد"), KeyboardButton("♈ برج و حیوان")],
-            [KeyboardButton("🌙 سن قمری"), KeyboardButton("📆 اختلاف تاریخ")],
-            [KeyboardButton("👥 اختلاف سن"), KeyboardButton("📅 تقویم ماه")],
-            [KeyboardButton("🔍 مناسبت‌یاب"), KeyboardButton("🌸 شمارش نوروز")],
-            [KeyboardButton("🌍 ساعت جهانی"), KeyboardButton("⏳ شمارش‌معکوس")],
-            [KeyboardButton("🔙 بازگشت به بیشتر")],
+            [KeyboardButton(ui("🔄 مبدل تاریخ")), KeyboardButton(ui("🎂 محاسبه سن"))],
+            [KeyboardButton(ui("🎉 روزشمار تولد")), KeyboardButton(ui("♈ برج و حیوان"))],
+            [KeyboardButton(ui("🌙 سن قمری")), KeyboardButton(ui("📆 اختلاف تاریخ"))],
+            [KeyboardButton(ui("👥 اختلاف سن")), KeyboardButton(ui("📅 تقویم ماه"))],
+            [KeyboardButton(ui("🔍 مناسبت‌یاب")), KeyboardButton(ui("🌸 شمارش نوروز"))],
+            [KeyboardButton(ui("🌍 ساعت جهانی")), KeyboardButton(ui("⏳ شمارش‌معکوس"))],
+            [KeyboardButton(ui("🔙 بازگشت به بیشتر"))],
         ],
         resize_keyboard=True,
     )
@@ -103,10 +104,10 @@ def get_date_tools_keyboard():
 def get_religious_keyboard():
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🕋 قبله‌نما"), KeyboardButton("📿 اذکار روز")],
-            [KeyboardButton("📖 آیه و حدیث"), KeyboardButton("🕌 مناسبت مذهبی")],
-            [KeyboardButton("🙏 استخاره"), KeyboardButton("🔔 تنظیم اذان")],
-            [KeyboardButton("🔙 بازگشت به بیشتر")],
+            [KeyboardButton(ui("🕋 قبله‌نما")), KeyboardButton(ui("📿 اذکار روز"))],
+            [KeyboardButton(ui("📖 آیه و حدیث")), KeyboardButton(ui("🕌 مناسبت مذهبی"))],
+            [KeyboardButton(ui("🙏 استخاره")), KeyboardButton(ui("🔔 تنظیم اذان"))],
+            [KeyboardButton(ui("🔙 بازگشت به بیشتر"))],
         ],
         resize_keyboard=True,
     )
@@ -115,12 +116,12 @@ def get_market_keyboard():
     """منوی بازار با دکمه‌های واضح و نشانه‌های رنگی برای تشخیص سریع بخش‌ها."""
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("💵 قیمت کامل بازار"), KeyboardButton("💎 ۲۰ ارز برتر کریپتو")],
-            [KeyboardButton("🔄 تبدیل ارز / کریپتو"), KeyboardButton("📈 سود و ضرر")],
-            [KeyboardButton("🗓 تقویم اقتصادی")],
-            [KeyboardButton("📊 نمودار و تحلیل ارز دیجیتال")],
-            [KeyboardButton("🥇 تحلیل طلا")],
-            [KeyboardButton("🔙 بازگشت به بیشتر")],
+            [KeyboardButton(ui("💵 قیمت کامل بازار")), KeyboardButton(ui("💎 ۲۰ ارز برتر کریپتو"))],
+            [KeyboardButton(ui("🔄 تبدیل ارز / کریپتو")), KeyboardButton(ui("📈 سود و ضرر"))],
+            [KeyboardButton(ui("🗓 تقویم اقتصادی"))],
+            [KeyboardButton(ui("📊 نمودار و تحلیل ارز دیجیتال"))],
+            [KeyboardButton(ui("🥇 تحلیل طلا"))],
+            [KeyboardButton(ui("🔙 بازگشت به بیشتر"))],
         ],
         resize_keyboard=True,
     )
@@ -130,8 +131,8 @@ def get_gold_analysis_keyboard():
     """کیبورد اختصاصی تحلیل طلا؛ طلا بعد از گزارش کریپتو به‌صورت مستقل نمایش داده می‌شود."""
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🟢 🔄 بروزرسانی تحلیل طلا")],
-            [KeyboardButton("📊 نمودار و تحلیل ارز دیجیتال")],
+            [KeyboardButton(ui("🟢 🔄 بروزرسانی تحلیل طلا"))],
+            [KeyboardButton(ui("📊 نمودار و تحلیل ارز دیجیتال"))],
         ],
         resize_keyboard=True,
     )
@@ -139,9 +140,9 @@ def get_gold_analysis_keyboard():
 def get_weather_geo_keyboard():
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🌤 پیش‌بینی هوا"), KeyboardButton("🌫 کیفیت هوا")],
-            [KeyboardButton("📍 لوکیشن من")],
-            [KeyboardButton("🔙 بازگشت به بیشتر")],
+            [KeyboardButton(ui("🌤 پیش‌بینی هوا")), KeyboardButton(ui("🌫 کیفیت هوا"))],
+            [KeyboardButton(ui("📍 لوکیشن من"))],
+            [KeyboardButton(ui("🔙 بازگشت به بیشتر"))],
         ],
         resize_keyboard=True,
     )
@@ -149,9 +150,9 @@ def get_weather_geo_keyboard():
 def get_tools_keyboard():
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🔢 ماشین‌حساب"), KeyboardButton("🔐 پسورد تصادفی")],
-            [KeyboardButton("📝 شمارش متن"), KeyboardButton("🗺 فاصله جهانی")],
-            [KeyboardButton("🔙 بازگشت به بیشتر")],
+            [KeyboardButton(ui("🔢 ماشین‌حساب")), KeyboardButton(ui("🔐 پسورد تصادفی"))],
+            [KeyboardButton(ui("📝 شمارش متن")), KeyboardButton(ui("🗺 فاصله جهانی"))],
+            [KeyboardButton(ui("🔙 بازگشت به بیشتر"))],
         ],
         resize_keyboard=True,
     )
@@ -168,23 +169,23 @@ def get_azan_keyboard(settings: dict = None):
     def mark(on: bool) -> str:
         return "✅" if on else "❌"
 
-    master = "🔔 اعلان‌ها: روشن" if settings.get("enabled") else "🔕 اعلان‌ها: خاموش"
+    master = ui("🔔 اعلان‌ها: روشن") if settings.get("enabled") else ui("🔕 اعلان‌ها: خاموش")
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton(master)],
             [
-                KeyboardButton(f"{mark(settings.get('fajr'))} اذان صبح"),
-                KeyboardButton(f"{mark(settings.get('dhuhr'))} اذان ظهر"),
+                KeyboardButton(f"{mark(settings.get('fajr'))} {ui('اذان صبح')}"),
+                KeyboardButton(f"{mark(settings.get('dhuhr'))} {ui('اذان ظهر')}"),
             ],
             [
-                KeyboardButton(f"{mark(settings.get('asr'))} اذان عصر"),
-                KeyboardButton(f"{mark(settings.get('maghrib'))} اذان مغرب"),
+                KeyboardButton(f"{mark(settings.get('asr'))} {ui('اذان عصر')}"),
+                KeyboardButton(f"{mark(settings.get('maghrib'))} {ui('اذان مغرب')}"),
             ],
             [
-                KeyboardButton(f"{mark(settings.get('isha'))} اذان عشاء"),
+                KeyboardButton(f"{mark(settings.get('isha'))} {ui('اذان عشاء')}"),
             ],
-            [KeyboardButton("🔄 همه روشن"), KeyboardButton("⏹ همه خاموش")],
-            [KeyboardButton("🔙 بازگشت به مذهبی")],
+            [KeyboardButton(ui("🔄 همه روشن")), KeyboardButton(ui("⏹ همه خاموش"))],
+            [KeyboardButton(ui("🔙 بازگشت به مذهبی"))],
         ],
         resize_keyboard=True,
     )
@@ -192,10 +193,10 @@ def get_azan_keyboard(settings: dict = None):
 def get_fun_keyboard():
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("📖 فال حافظ"), KeyboardButton("😂 جوک روز")],
-            [KeyboardButton("🧠 دانستنی روز"), KeyboardButton("💪 چالش امروز")],
-            [KeyboardButton("💖 جمله انگیزشی")],
-            [KeyboardButton("🔙 بازگشت به بیشتر")],
+            [KeyboardButton(ui("📖 فال حافظ")), KeyboardButton(ui("😂 جوک روز"))],
+            [KeyboardButton(ui("🧠 دانستنی روز")), KeyboardButton(ui("💪 چالش امروز"))],
+            [KeyboardButton(ui("💖 جمله انگیزشی"))],
+            [KeyboardButton(ui("🔙 بازگشت به بیشتر"))],
         ],
         resize_keyboard=True,
     )
@@ -204,13 +205,13 @@ def get_joke_keyboard():
     """کیبورد دسته‌بندی جوک"""
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🎲 جوک تصادفی"), KeyboardButton("😄 عمومی")],
-            [KeyboardButton("🤣 ترکی"), KeyboardButton("😂 رشتی")],
-            [KeyboardButton("😏 قزوینی"), KeyboardButton("👨 مردان")],
-            [KeyboardButton("👩 زنان"), KeyboardButton("🤑 اصفهانی")],
-            [KeyboardButton("🔞 سکسی"), KeyboardButton("🎭 متفرقه")],
-            [KeyboardButton("💀 زشت")],
-            [KeyboardButton("🔙 بازگشت به سرگرمی")],
+            [KeyboardButton(ui("🎲 جوک تصادفی")), KeyboardButton(ui("😄 عمومی"))],
+            [KeyboardButton(ui("🤣 ترکی")), KeyboardButton(ui("😂 رشتی"))],
+            [KeyboardButton(ui("😏 قزوینی")), KeyboardButton(ui("👨 مردان"))],
+            [KeyboardButton(ui("👩 زنان")), KeyboardButton(ui("🤑 اصفهانی"))],
+            [KeyboardButton(ui("🔞 سکسی")), KeyboardButton(ui("🎭 متفرقه"))],
+            [KeyboardButton(ui("💀 زشت"))],
+            [KeyboardButton(ui("🔙 بازگشت به سرگرمی"))],
         ],
         resize_keyboard=True,
     )
@@ -218,9 +219,10 @@ def get_joke_keyboard():
 def get_profile_keyboard():
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("👤 پروفایل من"), KeyboardButton("📊 آمار من")],
-            [KeyboardButton("🎂 ذخیره تاریخ تولد"), KeyboardButton("⚙️ تنظیمات هوشمند")],
-            [KeyboardButton("🔙 بازگشت به بیشتر")],
+            [KeyboardButton(ui("👤 پروفایل من")), KeyboardButton(ui("📊 آمار من"))],
+            [KeyboardButton(ui("🎂 ذخیره تاریخ تولد")), KeyboardButton(ui("⚙️ تنظیمات هوشمند"))],
+            [KeyboardButton(ui("🔄 بررسی بروزرسانی"))],
+            [KeyboardButton(ui("🔙 بازگشت به بیشتر"))],
         ],
         resize_keyboard=True,
     )
@@ -228,19 +230,19 @@ def get_profile_keyboard():
 def get_smart_settings_keyboard():
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("✍️ پاسخ کوتاه"), KeyboardButton("📚 پاسخ کامل")],
-            [KeyboardButton("⚖️ پاسخ متعادل"), KeyboardButton("💵 ارز USD")],
-            [KeyboardButton("💶 ارز EUR"), KeyboardButton("🇮🇷 ارز IRR")],
-            [KeyboardButton("🧹 پاک‌سازی تنظیمات")],
-            [KeyboardButton("🔙 بازگشت به پروفایل")],
+            [KeyboardButton(ui("✍️ پاسخ کوتاه")), KeyboardButton(ui("📚 پاسخ کامل"))],
+            [KeyboardButton(ui("⚖️ پاسخ متعادل")), KeyboardButton(ui("💵 ارز USD"))],
+            [KeyboardButton(ui("💶 ارز EUR")), KeyboardButton(ui("🇮🇷 ارز IRR"))],
+            [KeyboardButton(ui("🧹 پاک‌سازی تنظیمات"))],
+            [KeyboardButton(ui("🔙 بازگشت به پروفایل"))],
         ], resize_keyboard=True
     )
 
 def get_country_keyboard():
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🇮🇷 ایران"), KeyboardButton("🇮🇶 عراق")],
-            [KeyboardButton("🔙 بازگشت")],
+            [KeyboardButton(ui("🇮🇷 ایران")), KeyboardButton(ui("🇮🇶 عراق"))],
+            [KeyboardButton(ui("🔙 بازگشت"))],
         ],
         resize_keyboard=True,
     )
@@ -255,7 +257,7 @@ def get_iran_cities_keyboard():
             row = []
     if row:
         buttons.append(row)
-    buttons.append([KeyboardButton("🔙 بازگشت")])
+    buttons.append([KeyboardButton(ui("🔙 بازگشت"))])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 def get_iraq_cities_keyboard():
@@ -268,14 +270,14 @@ def get_iraq_cities_keyboard():
             row = []
     if row:
         buttons.append(row)
-    buttons.append([KeyboardButton("🔙 بازگشت")])
+    buttons.append([KeyboardButton(ui("🔙 بازگشت"))])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 def get_language_keyboard():
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("فارسی 🇮🇷"), KeyboardButton("English 🇬🇧"), KeyboardButton("العربية 🇸🇦")],
-            [KeyboardButton("🔙 بازگشت")],
+            [KeyboardButton(ui("فارسی 🇮🇷")), KeyboardButton(ui("English 🇬🇧")), KeyboardButton(ui("العربية 🇸🇦"))],
+            [KeyboardButton(ui("🔙 بازگشت"))],
         ],
         resize_keyboard=True,
     )
@@ -284,9 +286,9 @@ def get_font_keyboard():
     """کیبورد فونت: فارسی / انگلیسی / همه"""
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🇬🇧 فونت انگلیسی"), KeyboardButton("🇮🇷 فونت فارسی")],
-            [KeyboardButton("🌈 همه فونت‌ها"), KeyboardButton("📋 لیست فونت‌ها")],
-            [KeyboardButton("🔙 بازگشت به بیشتر")],
+            [KeyboardButton(ui("🇬🇧 فونت انگلیسی")), KeyboardButton(ui("🇮🇷 فونت فارسی"))],
+            [KeyboardButton(ui("🌈 همه فونت‌ها")), KeyboardButton(ui("📋 لیست فونت‌ها"))],
+            [KeyboardButton(ui("🔙 بازگشت به بیشتر"))],
         ],
         resize_keyboard=True,
     )
@@ -303,7 +305,7 @@ def get_font_en_keyboard():
             row = []
     if row:
         buttons.append(row)
-    buttons.append([KeyboardButton("🔙 بازگشت فونت")])
+    buttons.append([KeyboardButton(ui("🔙 بازگشت فونت"))])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 def get_font_fa_keyboard():
@@ -318,7 +320,7 @@ def get_font_fa_keyboard():
             row = []
     if row:
         buttons.append(row)
-    buttons.append([KeyboardButton("🔙 بازگشت فونت")])
+    buttons.append([KeyboardButton(ui("🔙 بازگشت فونت"))])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 # Canonical registry used by startup checks and future feature modules.
