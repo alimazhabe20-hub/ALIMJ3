@@ -1,7 +1,7 @@
 async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
     """استریم AI و ویرایش تدریجی پیام؛ در پایان همه تکه‌ها ارسال و دکمه ادامه اضافه می‌شود."""
     import asyncio
-    from bot.services.ai_service import ask_ai_stream
+    from bot.services.ai_service import ask_ai_stream, ask_ai
     msg = update.message
     sent = await msg.reply_text("✍️ در حال نوشتن...")
     buf = []
@@ -34,6 +34,21 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
         answer = "".join(buf).strip()
         if not answer:
             raise RuntimeError("جواب خالی")
+        # پاسخ stream ممکن است قبل از پایان جمله توسط Provider متوقف شود.
+        # حداکثر یک بار ادامهٔ خودکار می‌گیریم تا خروجی ناقص به کاربر نرسد.
+        if _looks_truncated(answer):
+            try:
+                continuation_prompt = (
+                    "پاسخ قبلی در میانه قطع شده است. فقط از همان نقطه ادامه بده؛ "
+                    "متن قبلی را تکرار نکن، مقدمه نده و پاسخ را با یک جمله کامل تمام کن."
+                )
+                extra, _provider = await ask_ai(user_id, continuation_prompt)
+                extra = (extra or "").strip()
+                if extra:
+                    answer = answer.rstrip() + " " + extra
+            except Exception as _exc:
+                logger.warning("AI stream auto-continuation failed: %s", _exc)
+
         aid = store_answer(user_id, answer, prompt=text)
         chunks = _split_telegram_text("🤖 " + answer, 3900)
         if not chunks:
