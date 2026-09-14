@@ -641,9 +641,9 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
 
     lines.append("")
     lines.append("⚠️ صرفاً تحلیلی/آموزشی است؛ توصیه سرمایه‌گذاری قطعی نیست.")
-    # مهم: این تابع نباید گزارش را برای محدودیت پیام تلگرام truncate کند.
-    # هندلر مسئول split امن گزارش به چند پیام است؛ در غیر این صورت انتهای
-    # تحلیل (Price Action، سناریوها، مشتقات، قیمت و هشدار ریسک) بی‌صدا حذف می‌شود.
+    # Never truncate the analytical report here. Telegram delivery is handled
+    # by the caller and can split a long report into multiple messages.
+    # Truncating at 3900 here silently discards the tail of the analysis.
     return chr(10).join(lines)
 
 
