@@ -179,7 +179,11 @@ async def _handle_cx(query, update, context, data, user_id):
                 try:
                     await _update_market_analysis_text(full_input)
                 except Exception as _txt_exc:
-                    logger.debug("market analysis text update: %s", _txt_exc)
+                    logger.warning("market analysis text update failed: %s", _txt_exc)
+                    try:
+                        await _send_full_text(full_input, reply_to=query.message, reply_markup=menu)
+                    except Exception as _fb:
+                        logger.warning("market analysis fallback send failed: %s", _fb)
             cap = full_input.split("\n━━━━━━━━━━━━━━━━━━━━", 1)[0].strip()[:1000]
             try:
                 # دکمه‌ها زیر متن هستند؛ بنابراین callback معمولاً از پیام متن می‌آید.
@@ -274,22 +278,18 @@ async def _handle_cx(query, update, context, data, user_id):
             return
 
         if action == "ai":
-            # گزارش هوشمند باید کل داده قابل‌استفاده را تحلیل کند، نه اینکه آن را به جدول تبدیل کند.
+            # گزارش کامل ۱۶ بخشی با تشخیص ناقص بودن و ادامه خودکار (crypto_ai_report)
             ai_timeframe = context.user_data.get("crypto_ai_timeframe", "4h")
             if ai_timeframe not in ("15m", "1h", "4h", "1d"):
                 ai_timeframe = "4h"
             base = await analyze_crypto(symbol, timeframe=ai_timeframe)
-            from bot.services.ai_service import ask_ai
-            prompt = (
-                "تو تحلیل‌گر ارشد Price Action و بازارهای مالی هستی. داده‌های زیر از منابع زنده سیستم آمده‌اند. "
-                "همه داده‌های موجود را بررسی کن و هیچ قیمت، سطح یا درصدی را حدس نزن. "
-                "خروجی را برای Telegram و به‌صورت گزارش خوانا بنویس؛ جدول Markdown نساز. "
-                "بخش‌ها: وضعیت بازار، ساختار HH/HL/LH/LL، BOS/CHOCH، کندل‌ها و rejection، حمایت/مقاومت همان تایم‌فریم، "
-                "عرضه/تقاضا، نقدینگی و Equal High/Low، شکست و retest، RSI/ADX/ATR، حجم، واگرایی، Funding/OI/Long-Short، "
-                "MTF، سناریوی Long، سناریوی Short، invalidation، و نتیجه نهایی. اگر داده‌ای نیست صریح بگو. "
-                "از عبارت‌های کوتاه و تیترهای واضح استفاده کن. در بازار ضعیف یا متناقض، ورود را تأیید نکن.\n\n" + base[:12000]
+            from bot.services.crypto_ai_report import build_crypto_ai_report
+            answer = await build_crypto_ai_report(
+                user_id=query.from_user.id,
+                symbol=symbol,
+                base_report=base or "",
+                timeframe=ai_timeframe.upper(),
             )
-            answer, _ = await ask_ai(query.from_user.id, prompt)
             safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip())
             out = "🧠 <b>تحلیل هوشمند حرفه‌ای</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
             chart_days = {"15m": 3, "1h": 7, "4h": 30, "1d": 90}.get(ai_timeframe, 30)
