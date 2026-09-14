@@ -331,12 +331,5 @@ async def _h_ict(u, c, t, uid):
         await progress.delete()
     except Exception:
         pass
-# Static API anchors; implementations are loaded from fragments below.
-def _h_profit(*args, **kwargs): pass
-def _h_currency(*args, **kwargs): pass
-def _h_crypto_full(*args, **kwargs): pass
-def _h_crypto_pos(*args, **kwargs): pass
-def _h_crypto_chart(*args, **kwargs): pass
-def _h_crypto_analyze(*args, **kwargs): pass
 
 
