@@ -1,10 +1,10 @@
 """سرگرمی — فال حافظ، جوک، دانستنی، چالش"""
+from bot.utils.modular_loader import load_modular_part
 import random
 import httpx
 from bot.logger import logger
 
-def pn(n):
-    return str(n).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
+load_modular_part(__file__, 'fun_tools_parts/part_001_pn.py')
 
 
 # ——— فال حافظ (شبیه hafez.taktemp.com) ———
@@ -42,93 +42,10 @@ HAFEZ_LOCAL = [
 ]
 
 
-def _format_verses(verses: list) -> str:
-    """چیدمان ابیات مثل سایت‌های فال حافظ (مصراع‌ها جفت‌جفت)"""
-    lines = []
-    couplet = []
-    for v in verses:
-        if not isinstance(v, dict):
-            continue
-        text = (v.get("text") or "").strip()
-        if not text:
-            continue
-        couplet.append(text)
-        # versePosition 0 = مصراع اول، 1 = مصراع دوم
-        pos = v.get("versePosition")
-        if pos == 1 or len(couplet) >= 2:
-            lines.append("\n".join(couplet))
-            couplet = []
-    if couplet:
-        lines.append("\n".join(couplet))
-    return "\n\n".join(lines)
+load_modular_part(__file__, 'fun_tools_parts/part_002__format_verses.py')
 
 
-async def hafez_fal(user_id: int = 0) -> str:
-    """
-    فال حافظ — شبیه hafez.taktemp.com
-    نیت → دعا → غزل کامل → تفسیر
-    """
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as c:
-            r = await c.get("https://api.ganjoor.net/api/ganjoor/hafez/faal")
-            if r.status_code == 200:
-                data = r.json() or {}
-                title = data.get("title") or "غزل حافظ"
-                full_title = data.get("fullTitle") or title
-                verses = data.get("verses") or []
-                body = _format_verses(verses) if verses else (data.get("plainText") or "").replace("\r\n", "\n\n")
-                # تفسیر: خلاصه هوش‌مصنوعی گنجور
-                meaning = (data.get("poemSummary") or "").strip()
-                if not meaning:
-                    # از coupletSummary اولین بیت
-                    for v in verses:
-                        if isinstance(v, dict) and v.get("coupletSummary"):
-                            meaning = v["coupletSummary"]
-                            break
-                if meaning.startswith("هوش مصنوعی:"):
-                    meaning = meaning.replace("هوش مصنوعی:", "", 1).strip()
-
-                if body:
-                    parts = [
-                        "🔮 **فال حافظ**",
-                        "",
-                        "نیت کنید…",
-                        "",
-                        f"📿 {HAFEZ_OPENING}",
-                        "",
-                        "━━━━━━━━━━━━━━━━━━━━",
-                        f"📖 **{title}**",
-                        f"_{full_title}_" if full_title != title else "",
-                        "",
-                        body.strip(),
-                        "",
-                    ]
-                    if meaning:
-                        parts.extend([
-                            "━━━━━━━━━━━━━━━━━━━━",
-                            "💡 **تفسیر فال**",
-                            "",
-                            meaning[:900],
-                            "",
-                        ])
-                    parts.append("🕯️ برای شادی روح حافظ، صلوات یا فاتحه‌ای نثار کنید.")
-                    return "\n".join(p for p in parts if p is not None)
-    except Exception as e:
-        logger.error(f"hafez api: {e}")
-
-    title, body, advice = random.choice(HAFEZ_LOCAL)
-    return (
-        f"🔮 **فال حافظ**\n\n"
-        f"نیت کنید…\n\n"
-        f"📿 {HAFEZ_OPENING}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📖 **{title}**\n\n"
-        f"{body}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"💡 **تفسیر فال**\n\n"
-        f"{advice}\n\n"
-        f"🕯️ برای شادی روح حافظ، صلوات یا فاتحه‌ای نثار کنید."
-    )
+load_modular_part(__file__, 'fun_tools_parts/part_003_hafez_fal.py')
 
 
 # ——— جوک‌ها از farsijokes.com (۵۵۱۶ جوک دسته‌بندی‌شده) ———
@@ -138,65 +55,13 @@ from pathlib import Path
 _JOKES_CACHE = None
 
 
-def _load_jokes():
-    global _JOKES_CACHE
-    if _JOKES_CACHE is not None:
-        return _JOKES_CACHE
-    path = Path(__file__).parent / "jokes_data.json"
-    try:
-        with open(path, encoding="utf-8") as f:
-            _JOKES_CACHE = json.load(f)
-    except Exception:
-        _JOKES_CACHE = {
-            "labels": {"general": "😄 عمومی"},
-            "jokes": {"general": ["جوکی موجود نیست."]},
-        }
-    return _JOKES_CACHE
+load_modular_part(__file__, 'fun_tools_parts/part_004__load_jokes.py')
 
 
-def get_joke_categories() -> dict:
-    """برگرداندن {key: label} دسته‌ها"""
-    data = _load_jokes()
-    return data.get("labels", {})
+load_modular_part(__file__, 'fun_tools_parts/part_005_get_joke_categories.py')
 
 
-def random_joke(category: str = None, user_id: int = None) -> str:
-    """جوک تصادفی — برای هر کاربر تکراری نمی‌فرستد"""
-    import hashlib
-    data = _load_jokes()
-    jokes_map = data.get("jokes", {})
-    labels = data.get("labels", {})
-
-    if category and category in jokes_map and jokes_map[category]:
-        pool = list(jokes_map[category])
-        label = labels.get(category, category)
-    else:
-        pool = []
-        for lst in jokes_map.values():
-            pool.extend(lst)
-        label = "تصادفی"
-
-    if not pool:
-        return "جوکی موجود نیست."
-
-    # حذف جوک‌هایی که این کاربر قبلاً دیده
-    if user_id:
-        try:
-            from bot.database import get_sent_joke_hashes, mark_joke_sent, reset_sent_jokes
-            seen = get_sent_joke_hashes(user_id)
-            fresh = [j for j in pool if hashlib.md5(j.encode("utf-8")).hexdigest() not in seen]
-            if not fresh:
-                # همه را دیده — از نو شروع کن
-                reset_sent_jokes(user_id)
-                fresh = pool
-            text = random.choice(fresh)
-            mark_joke_sent(user_id, hashlib.md5(text.encode("utf-8")).hexdigest())
-        except Exception:
-            text = random.choice(pool)
-    else:
-        text = random.choice(pool)
-
-    return f"😂 **جوک ({label})**\n\n{text}"
+load_modular_part(__file__, 'fun_tools_parts/part_006_random_joke.py')
 
 
 # سازگاری با کد قبلی
@@ -241,17 +106,10 @@ CHALLENGES = [
 ]
 
 
-async def joke_of_day(category: str = None, user_id: int = None) -> str:
-    return random_joke(category, user_id=user_id)
+load_modular_part(__file__, 'fun_tools_parts/part_007_joke_of_day.py')
 
 
-async def fact_of_day() -> str:
-    return f"🧠 **دانستنی**\n\n{random.choice(FACTS)}"
+load_modular_part(__file__, 'fun_tools_parts/part_008_fact_of_day.py')
 
 
-async def daily_challenge() -> str:
-    return (
-        f"💪 **چالش امروز**\n\n"
-        f"{random.choice(CHALLENGES)}\n\n"
-        f"✅ وقتی انجام دادی به خودت امتیاز بده!"
-    )
+load_modular_part(__file__, 'fun_tools_parts/part_009_daily_challenge.py')
