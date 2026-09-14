@@ -58,6 +58,7 @@ async def _h_crypto_full(u, c, t, uid):
 
     symbol = symbol.lower().replace("usdt", "").strip()
     c.user_data["crypto_symbol"] = symbol
+    c.user_data["market_chart_timeframe"] = f"{days}d"
     wait = await u.message.reply_text(f"⏳ در حال دریافت تحلیل {symbol.upper()}...")
     chart_task = _aio.create_task(get_crypto_chart(symbol, days))
     try:
@@ -90,6 +91,7 @@ async def _h_crypto_full(u, c, t, uid):
             )
             c.user_data["market_chart_message_id"] = chart_msg.message_id
             c.user_data["market_chart_chat_id"] = u.effective_chat.id
+            c.user_data["market_chart_timeframe"] = f"{days}d"
         except Exception as e:
             chart_note = f"⚠️ ارسال نمودار ناموفق بود: {e}"
     if chart_note and not png:
@@ -176,13 +178,34 @@ async def _h_ict(u, c, t, uid):
     text = (t or "").strip()
     if not text or text in ("📐 تحلیل ICT", "تحلیل ICT", "ICT", "ict"):
         c.user_data["waiting_for"] = "ict_analyze"
-        await u.message.reply_text(
+        prompt_text = (
             "📐 تحلیل به روش ICT\n\n"
             "نماد را بفرستید، مثلاً:\n"
             "• btc\n• eth\n• sol\n• btc 4h\n• eth 1h\n\n"
-            "تایم‌فریم اختیاری: 15m / 1h / 4h / 1d",
-            reply_markup=get_market_keyboard(),
+            "تایم‌فریم اختیاری: 15m / 1h / 4h / 1d"
         )
+        # اگر از جریان تحلیل بازار آمده‌ایم، همان پیام قبلی را ویرایش کن؛
+        # با زدن کلید ICT پیام جدید به چت اضافه نشود.
+        old_ids = list(c.user_data.get("market_analysis_text_ids") or [])
+        old_chat_id = c.user_data.get("market_analysis_chat_id") or u.effective_chat.id
+        prompt_msg = None
+        if old_ids:
+            target_id = old_ids[-1]
+            try:
+                await c.bot.edit_message_text(
+                    chat_id=old_chat_id,
+                    message_id=target_id,
+                    text=prompt_text,
+                    reply_markup=get_market_keyboard(),
+                )
+                c.user_data["ict_prompt_message_id"] = target_id
+                c.user_data["ict_prompt_chat_id"] = old_chat_id
+                return
+            except Exception:
+                pass
+        prompt_msg = await u.message.reply_text(prompt_text, reply_markup=get_market_keyboard())
+        c.user_data["ict_prompt_message_id"] = prompt_msg.message_id
+        c.user_data["ict_prompt_chat_id"] = u.effective_chat.id
         return
     parts = text.replace("،", " ").split()
     symbol = parts[0] if parts else "btc"
@@ -197,7 +220,7 @@ async def _h_ict(u, c, t, uid):
                 "1d": "1d", "1day": "1d", "daily": "1d",
             }.get(pl, "1h")
     c.user_data.pop("waiting_for", None)
-    await u.message.reply_text("⏳ در حال تحلیل ICT...")
+    c.user_data["market_chart_timeframe"] = interval
     try:
         report = await analyze_ict(symbol, interval=interval)
     except Exception as exc:
@@ -205,4 +228,19 @@ async def _h_ict(u, c, t, uid):
     # Telegram message limit
     if len(report) > 4000:
         report = report[:3980] + "\n…"
+
+    # پاسخ ICT همان پیام راهنما را ویرایش می‌کند؛ پیام جدید تولید نمی‌شود.
+    prompt_id = c.user_data.pop("ict_prompt_message_id", None)
+    prompt_chat_id = c.user_data.pop("ict_prompt_chat_id", None) or u.effective_chat.id
+    if prompt_id:
+        try:
+            await c.bot.edit_message_text(
+                chat_id=prompt_chat_id,
+                message_id=prompt_id,
+                text=report,
+                reply_markup=get_market_keyboard(),
+            )
+            return
+        except Exception:
+            pass
     await u.message.reply_text(report, reply_markup=get_market_keyboard())

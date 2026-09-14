@@ -1496,6 +1496,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         photo_msg_id = msg.message_id
                         chat_id = msg.chat_id
                     if photo_msg_id:
+                        # اگر نمودار همین تایم‌فریم از قبل روی پیام است، دوباره عکس را ارسال/ویرایش نکن.
+                        requested_tf = context.user_data.get("market_requested_timeframe")
+                        current_tf = context.user_data.get("market_chart_timeframe")
+                        if png and requested_tf and current_tf == requested_tf:
+                            return
                         if png:
                             bio = BytesIO(png)
                             bio.name = f"{symbol}_chart.png"
@@ -1503,6 +1508,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await context.bot.edit_message_media(
                                 chat_id=chat_id, message_id=photo_msg_id, media=media, reply_markup=None
                             )
+                            if requested_tf:
+                                context.user_data["market_chart_timeframe"] = requested_tf
                         else:
                             await context.bot.edit_message_caption(
                                 chat_id=chat_id, message_id=photo_msg_id,
@@ -1543,6 +1550,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if action == "ai" and symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
+                context.user_data["market_requested_timeframe"] = "1h"
                 base = await analyze_gold("1h")
                 from bot.services.ai_service import ask_ai
                 prompt = (
@@ -1560,6 +1568,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if action == "ai":
+                context.user_data["market_requested_timeframe"] = context.user_data.get("crypto_ai_timeframe", "4h")
                 # گزارش هوشمند باید کل داده قابل‌استفاده را تحلیل کند، نه اینکه آن را به جدول تبدیل کند.
                 ai_timeframe = context.user_data.get("crypto_ai_timeframe", "4h")
                 if ai_timeframe not in ("15m", "1h", "4h", "1d"):
@@ -1584,6 +1593,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if action == "pa":
+                context.user_data["market_requested_timeframe"] = "1h" if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd") else "4h"
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     txt = await analyze_gold("1h")
                     png, _ = await get_gold_chart("1h")
@@ -1596,6 +1606,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if action == "15m":
                 context.user_data["crypto_ai_timeframe"] = "15m"
+                context.user_data["market_requested_timeframe"] = "15m"
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     txt = await analyze_gold("15m")
                     png, _ = await get_gold_chart("15m")
@@ -1608,6 +1619,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if action == "day":
                 context.user_data["crypto_ai_timeframe"] = "1d"
+                context.user_data["market_requested_timeframe"] = "1d"
                 # برای طلا: روزانه از XAU/USD همان تایم‌فریم؛ برای کریپتو همان مسیر قبلی
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     base = await analyze_gold("1d")
@@ -1622,6 +1634,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             elif action == "hr":
                 context.user_data["crypto_ai_timeframe"] = "1h"
+                context.user_data["market_requested_timeframe"] = "1h"
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     base = await analyze_gold("1h")
                     png, _ = await get_gold_chart("1h")
@@ -1634,6 +1647,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             elif action == "4h":
                 context.user_data["crypto_ai_timeframe"] = "4h"
+                context.user_data["market_requested_timeframe"] = "4h"
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     txt = await analyze_gold("4h")
                     png, _ = await get_gold_chart("4h")
