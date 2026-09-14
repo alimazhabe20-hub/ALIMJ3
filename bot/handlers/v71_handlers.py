@@ -69,6 +69,16 @@ async def handle_downloader_url_v71(update: Update, context: ContextTypes.DEFAUL
         return False
     url = extract_url(text)
     if not url:
+        # Do not consume ReplyKeyboard buttons while waiting for a downloader URL.
+        # Buttons such as "🔙 بازگشت" are routed by the normal menu handler;
+        # they are not downloader input and must never trigger the invalid-URL message.
+        stripped = (text or "").strip()
+        if (
+            "بازگشت" in stripped
+            or stripped.startswith(("📥", "🔙", "🏠", "📊", "🥇", "🗓", "🧠", "⚙️", "🔔", "💾", "🌐", "📚", "🛠", "⬅️", "➡️"))
+        ):
+            context.user_data.pop("waiting_for", None)
+            return False
         await update.message.reply_text(ux_text(_dl_lang(update), "invalid"))
         return True
     context.user_data.pop("waiting_for", None)
