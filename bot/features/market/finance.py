@@ -1210,9 +1210,12 @@ def get_crypto_analysis_keyboard(symbol: str) -> "InlineKeyboardMarkup":
                 InlineKeyboardButton("📅 تحلیل و نمودار روزانه", callback_data=f"cx:day:{s}"),
                 InlineKeyboardButton("⏰ تحلیل و نمودار ساعتی", callback_data=f"cx:hr:{s}"),
             ],
+            [InlineKeyboardButton("🕓 تحلیل و نمودار 4 ساعته", callback_data=f"cx:4h:{s}")],
     ]
     if s in ("gold", "xau", "xauusd", "xau/usd"):
         rows.append([InlineKeyboardButton("🕒 تحلیل 15 دقیقه‌ای طلا", callback_data="cx:15m:gold")])
+    else:
+        rows.append([InlineKeyboardButton("🕒 تحلیل و نمودار 15 دقیقه‌ای", callback_data=f"cx:15m:{s}")])
     rows += [
             [
                 InlineKeyboardButton("🎯 توصیه معاملاتی", callback_data=f"cx:rec:{s}"),
@@ -1227,7 +1230,6 @@ def get_crypto_analysis_keyboard(symbol: str) -> "InlineKeyboardMarkup":
                 InlineKeyboardButton("🔔 هشدار ورود", callback_data=f"cx:al:{s}"),
             ],
             [InlineKeyboardButton("🧠 تحلیل هوشمند حرفه‌ای", callback_data=f"cx:ai:{s}")],
-            [InlineKeyboardButton("📐 تحلیل ICT", callback_data=f"cx:ict:{s}")],
             [InlineKeyboardButton("🔄 بروزرسانی تحلیل", callback_data=f"cx:ref:{s}")],
         ]
     return InlineKeyboardMarkup(rows)
