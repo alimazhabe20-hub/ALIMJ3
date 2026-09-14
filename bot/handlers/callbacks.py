@@ -1345,7 +1345,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = data.split(":")
         if len(parts) < 3:
             return
-        action, symbol = parts[1], parts[2]
+        action, symbol = parts[1].strip().lower(), parts[2].strip()
+        # Compatibility aliases: older keyboards/cached Telegram callbacks may
+        # still use these action names. Never fall through to «گزینه ناشناخته»
+        # for a normal crypto-analysis request.
+        action_aliases = {
+            "chart": "ref",
+            "crypto_chart": "ref",
+            "analyze": "ref",
+            "analysis": "ref",
+            "full": "ref",
+            "crypto": "ref",
+            "refresh": "ref",
+        }
+        action = action_aliases.get(action, action)
         context.user_data["crypto_symbol"] = symbol
         try:
             from bot.features.market.finance import (

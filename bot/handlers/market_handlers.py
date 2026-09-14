@@ -78,15 +78,7 @@ async def _h_crypto_full(u, c, t, uid):
     except Exception:
         pass
 
-    # Keyboard construction/sending must never turn a successful analysis
-    # into the generic "خطا در پردازش" response.  If Telegram rejects a
-    # callback/markup, the analysis itself is still useful without a keyboard.
-    try:
-        menu = get_crypto_analysis_keyboard(symbol)
-    except Exception:
-        from bot.logger import logger
-        logger.exception("crypto keyboard build failed for %s", symbol)
-        menu = None
+    menu = get_crypto_analysis_keyboard(symbol)
 
     # نمودار هرگز با caption بلند ارسال نمی‌شود؛ متن تحلیل جدا و کامل می‌ماند.
     if png:
@@ -123,45 +115,19 @@ async def _h_crypto_full(u, c, t, uid):
         return esc
 
     # متن تحلیل کاملاً جدا از تصویر ارسال می‌شود؛ کیبورد فقط زیر آخرین پیام متن است.
-    def _split_report(text: str, limit: int = 3900) -> list[str]:
-        raw = (text or "").strip()
-        if not raw:
-            return ["داده کافی برای تحلیل در دسترس نیست."]
-        out, current = [], ""
-        for line in raw.splitlines():
-            candidate = line if not current else current + "\n" + line
-            if len(candidate) <= limit:
-                current = candidate
-                continue
-            if current:
-                out.append(current)
-                current = ""
-            rest = line
-            while len(rest) > limit:
-                cut = rest.rfind(" ", 0, limit + 1)
-                if cut < max(1, limit // 2):
-                    cut = limit
-                out.append(rest[:cut].rstrip())
-                rest = rest[cut:].lstrip()
-            current = rest
-        if current:
-            out.append(current)
-        return out or ["داده کافی برای تحلیل در دسترس نیست."]
-
-    chunks = _split_report(report)
+    chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل در دسترس نیست."]
     text_ids = []
     for i, chunk in enumerate(chunks):
-        is_last = i == len(chunks) - 1
-        markup = menu if is_last else None
         try:
-            mtxt = await u.message.reply_text(chunk, parse_mode="HTML", reply_markup=markup)
+            mtxt = await u.message.reply_text(
+                chunk, parse_mode="HTML",
+                reply_markup=menu if i == len(chunks) - 1 else None,
+            )
         except Exception:
             plain = re.sub(r"<[^>]+>", "", chunk)
-            try:
-                mtxt = await u.message.reply_text(plain[:3900], reply_markup=markup)
-            except Exception:
-                # A bad inline keyboard must not suppress the actual report.
-                mtxt = await u.message.reply_text(plain[:3900], reply_markup=None)
+            mtxt = await u.message.reply_text(
+                plain[:3500], reply_markup=menu if i == len(chunks) - 1 else None
+            )
         text_ids.append(mtxt.message_id)
     c.user_data["market_analysis_text_ids"] = text_ids
     c.user_data["market_analysis_chat_id"] = u.effective_chat.id
