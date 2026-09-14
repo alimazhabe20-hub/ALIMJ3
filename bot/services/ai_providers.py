@@ -372,7 +372,7 @@ async def _openai_compatible(
                 payload = {
                     "model": model,
                     "messages": messages,
-                    "max_tokens": min(int(MAX_OUTPUT), 4096),
+                    "max_tokens": MAX_OUTPUT,
                     "temperature": 0.6,
                 }
                 if tools_enabled and _round < max_tool_rounds:
