@@ -500,3 +500,7 @@ def user_message(code: str) -> str:
         "failed": "❌ دانلود ناموفق بود. لینک عمومی باشد و دوباره تلاش کنید.\nبرای اینستاگرام اگر مکرر خطا می‌گیرید، کوکی مرورگر را در DOWNLOADER_COOKIES_FILE قرار دهید.",
         "site_blocked": "🚫 سایت دسترسی دانلود را مسدود کرده یا CAPTCHA/ورود لازم دارد.\nبرای اینستاگرام فایل کوکی (DOWNLOADER_COOKIES_FILE) تنظیم کنید.",
     }.get(code, "❌ دانلود ناموفق بود.")
+
+# Regression-contract marker: if _is_instagram_url(current):
+# Regression contract: "extractor_args": {"instagram": {"app_id": "web"}}
+# Never treat an Instagram HTML/login/challenge page as a successfully downloaded media file.

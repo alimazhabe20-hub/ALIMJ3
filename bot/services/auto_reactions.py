@@ -1,5 +1,6 @@
 """Reliable automatic Telegram reactions for incoming user messages."""
 from __future__ import annotations
+from bot.utils.modular_loader import load_modular_part
 
 import asyncio
 import json
@@ -44,199 +45,40 @@ _worker_task: Optional[asyncio.Task] = None
 _client: Optional[httpx.AsyncClient] = None
 
 
-def _enabled() -> bool:
-    return bool(getattr(config, "AUTO_REACTIONS_ENABLED", True))
+load_modular_part(__file__, 'auto_reactions_parts/part_001__enabled.py')
 
 
-def _normalize(text: str) -> str:
-    value = (text or "").strip().lower()
-    value = value.replace("\u200c", " ").replace("\u200f", " ").replace("\u200e", " ")
-    return re.sub(r"\s+", " ", value)
+load_modular_part(__file__, 'auto_reactions_parts/part_002__normalize.py')
 
 
-def classify_reaction(text: str) -> Optional[tuple[str, str, float]]:
-    value = _normalize(text)
-    if not value or len(value) < 3:
-        return None
-    max_len = max(40, int(getattr(config, "AUTO_REACTIONS_MAX_TEXT_LENGTH", 1200)))
-    value = value[:max_len]
-    best = None
-    for category, phrases, emoji, confidence in _RULES:
-        hits = sum(1 for phrase in phrases if _normalize(phrase) in value)
-        if hits:
-            score = min(.995, confidence + min(.025, (hits - 1) * .01))
-            candidate = (category, emoji, score, hits)
-            if best is None or candidate[2:] > best[2:]:
-                best = candidate
-    if best is None:
-        return None
-    category, emoji, score, _ = best
-    if score < float(getattr(config, "AUTO_REACTIONS_MIN_CONFIDENCE", .80)):
-        return None
-    return category, emoji, score
+load_modular_part(__file__, 'auto_reactions_parts/part_003_classify_reaction.py')
 
 
-def _scope_allows(chat_type: str | None) -> bool:
-    allowed = getattr(config, "AUTO_REACTIONS_SCOPE", "private,group,supergroup")
-    return (chat_type or "private").lower() in {x.strip().lower() for x in str(allowed).split(",") if x.strip()}
+load_modular_part(__file__, 'auto_reactions_parts/part_004__scope_allows.py')
 
 
-def _mark_seen(key: tuple[int, int]) -> bool:
-    if key in _recent_set:
-        return False
-    if len(_recent_messages) == _recent_messages.maxlen:
-        _recent_set.discard(_recent_messages[0])
-    _recent_messages.append(key)
-    _recent_set.add(key)
-    return True
+load_modular_part(__file__, 'auto_reactions_parts/part_005__mark_seen.py')
 
 
-async def _get_client() -> httpx.AsyncClient:
-    global _client
-    if _client is None or _client.is_closed:
-        _client = httpx.AsyncClient(timeout=httpx.Timeout(
-            float(getattr(config, "AUTO_REACTIONS_TIMEOUT", 3.0)),
-            connect=2.0,
-        ), limits=httpx.Limits(max_connections=4, max_keepalive_connections=2))
-    return _client
+load_modular_part(__file__, 'auto_reactions_parts/part_006__get_client.py')
 
 
-async def _api(token: str, method: str, data: dict) -> tuple[bool, dict]:
-    url = f"https://api.telegram.org/bot{token}/{method}"
-    try:
-        client = await _get_client()
-        response = await client.post(url, data=data)
-        try:
-            payload = response.json()
-        except Exception:
-            payload = {"ok": False, "description": response.text[:300]}
-        return response.status_code == 200 and bool(payload.get("ok")), payload
-    except Exception as exc:
-        return False, {"ok": False, "description": str(exc)}
+load_modular_part(__file__, 'auto_reactions_parts/part_007__api.py')
 
 
-async def _available_reactions(token: str, chat_id: int | str) -> Optional[set[str]]:
-    try:
-        cid = int(chat_id)
-    except (TypeError, ValueError):
-        return None
-    now = time.monotonic()
-    cached = _available_cache.get(cid)
-    ttl = float(getattr(config, "AUTO_REACTIONS_CHAT_CACHE_TTL", 900.0))
-    if cached and now - cached[0] < ttl:
-        return cached[1]
-    ok, payload = await _api(token, "getChat", {"chat_id": chat_id})
-    if not ok:
-        return None
-    raw = (payload.get("result") or {}).get("available_reactions")
-    if raw is None:
-        allowed = None
-    else:
-        allowed = {str(item.get("emoji")) for item in raw if isinstance(item, dict) and item.get("type") == "emoji" and item.get("emoji")}
-    _available_cache[cid] = (now, allowed)
-    return allowed
+load_modular_part(__file__, 'auto_reactions_parts/part_008__available_reactions.py')
 
 
-async def _set_reaction(token: str, chat_id: int | str, message_id: int, emoji: str) -> bool:
-    reaction_json = json.dumps([{"type": "emoji", "emoji": emoji}], ensure_ascii=False)
-    ok, payload = await _api(token, "setMessageReaction", {
-        "chat_id": chat_id,
-        "message_id": message_id,
-        "reaction": reaction_json,
-        "is_big": "true" if bool(getattr(config, "AUTO_REACTIONS_BIG", False)) else "false",
-    })
-    if ok:
-        return True
-
-    description = str(payload.get("description", "unknown Telegram error"))
-    # Only pay the extra getChat request when Telegram actually rejects the emoji.
-    if "REACTION_INVALID" in description or "reaction" in description.lower():
-        try:
-            _available_cache.pop(int(chat_id), None)
-        except (TypeError, ValueError):
-            pass
-        allowed = await _available_reactions(token, chat_id)
-        if allowed is not None:
-            candidate = emoji if emoji in allowed else next(
-                (x for x in ("❤️", "👍", "🔥", "👏", "😂") if x in allowed), None
-            )
-            if candidate:
-                ok2, payload2 = await _api(token, "setMessageReaction", {
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "reaction": json.dumps([{"type": "emoji", "emoji": candidate}], ensure_ascii=False),
-                    "is_big": "false",
-                })
-                if ok2:
-                    return True
-                description = str(payload2.get("description", description))
-    logger.warning("auto reaction failed chat=%s message=%s emoji=%s: %s", chat_id, message_id, emoji, description[:300])
-    return False
+load_modular_part(__file__, 'auto_reactions_parts/part_009__set_reaction.py')
 
 
-async def _worker() -> None:
-    while True:
-        item = await _queue.get()
-        try:
-            chat_id, message_id, emoji, user_id, category, confidence = item
-            token = (getattr(config, "BOT_TOKEN", "") or "").strip()
-            if token and await _set_reaction(token, chat_id, message_id, emoji):
-                logger.info("auto reaction applied user=%s chat=%s message=%s category=%s emoji=%s confidence=%.2f", user_id, chat_id, message_id, category, emoji, confidence)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.debug("auto reaction worker error: %s", exc)
-        finally:
-            _queue.task_done()
+load_modular_part(__file__, 'auto_reactions_parts/part_010__worker.py')
 
 
-def _ensure_worker() -> None:
-    global _queue, _worker_task
-    if _queue is None:
-        _queue = asyncio.Queue(maxsize=256)
-    if _worker_task is None or _worker_task.done():
-        _worker_task = asyncio.create_task(_worker(), name="auto-reaction-worker")
+load_modular_part(__file__, 'auto_reactions_parts/part_011__ensure_worker.py')
 
 
-def enqueue_auto_reaction(update) -> bool:
-    """Fast, non-blocking hook used by the message handler.
-
-    Classification and queueing are local-only; all Telegram I/O happens in a
-    single background worker so the AI/message path never waits for reactions.
-    """
-    if not _enabled() or not update or not getattr(update, "message", None):
-        return False
-    message = update.message
-    if not getattr(message, "text", None) or getattr(message, "from_user", None) is None:
-        return False
-    if getattr(message.from_user, "is_bot", False):
-        return False
-    chat = getattr(update, "effective_chat", None)
-    if not chat or not _scope_allows(getattr(chat, "type", None)):
-        return False
-    result = classify_reaction(message.text)
-    if result is None:
-        return False
-    category, emoji, confidence = result
-    user_id = int(message.from_user.id)
-    now = time.monotonic()
-    cooldown = max(0.0, float(getattr(config, "AUTO_REACTIONS_COOLDOWN", 0.0)))
-    if now - _last_by_user.get(user_id, 0.0) < cooldown:
-        return False
-    key = (int(chat.id), int(message.message_id))
-    if not _mark_seen(key):
-        return False
-    if not (getattr(config, "BOT_TOKEN", "") or "").strip():
-        return False
-    _ensure_worker()
-    try:
-        _queue.put_nowait((chat.id, message.message_id, emoji, user_id, category, confidence))
-    except asyncio.QueueFull:
-        return False
-    _last_by_user[user_id] = now
-    return True
+load_modular_part(__file__, 'auto_reactions_parts/part_012_enqueue_auto_reaction.py')
 
 
-async def maybe_auto_react(update, context=None) -> bool:
-    """Backward-compatible async entry point; it only queues work."""
-    return enqueue_auto_reaction(update)
+load_modular_part(__file__, 'auto_reactions_parts/part_013_maybe_auto_react.py')
