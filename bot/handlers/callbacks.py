@@ -1561,7 +1561,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if action == "ai":
                 # گزارش هوشمند باید کل داده قابل‌استفاده را تحلیل کند، نه اینکه آن را به جدول تبدیل کند.
-                base = await analyze_crypto(symbol, timeframe=timeframe)
+                ai_timeframe = context.user_data.get("crypto_ai_timeframe", "4h")
+                if ai_timeframe not in ("15m", "1h", "4h", "1d"):
+                    ai_timeframe = "4h"
+                base = await analyze_crypto(symbol, timeframe=ai_timeframe)
                 from bot.services.ai_service import ask_ai
                 prompt = (
                     "تو تحلیل‌گر ارشد Price Action و بازارهای مالی هستی. داده‌های زیر از منابع زنده سیستم آمده‌اند. "
@@ -1575,8 +1578,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 answer, _ = await ask_ai(query.from_user.id, prompt)
                 safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip())
                 out = "🧠 <b>تحلیل هوشمند حرفه‌ای</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
-                # تحلیل AI روی 4H است؛ نمودار هم دقیقاً 4H باشد.
-                png, _cap = await get_crypto_chart(symbol, 30)
+                chart_days = {"15m": 3, "1h": 7, "4h": 30, "1d": 90}.get(ai_timeframe, 30)
+                png, _cap = await get_crypto_chart(symbol, chart_days)
                 await _edit_photo_caption(png, out)
                 return
 
@@ -1592,15 +1595,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if action == "15m":
+                context.user_data["crypto_ai_timeframe"] = "15m"
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     txt = await analyze_gold("15m")
                     png, _ = await get_gold_chart("15m")
                     await _edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 15M</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
                 else:
-                    await _edit_text("⚠️ تایم‌فریم 15M در این بخش فقط برای XAU/USD فعال است.")
+                    txt = await analyze_crypto(symbol, timeframe="15m")
+                    png, _ = await get_crypto_chart(symbol, 3)
+                    await _edit_photo_caption(png, "🧠 <b>تحلیل کریپتو — 15M</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
                 return
 
             if action == "day":
+                context.user_data["crypto_ai_timeframe"] = "1d"
                 # برای طلا: روزانه از XAU/USD همان تایم‌فریم؛ برای کریپتو همان مسیر قبلی
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     base = await analyze_gold("1d")
@@ -1614,6 +1621,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _edit_photo_caption(png, report or "داده کافی نیست.")
 
             elif action == "hr":
+                context.user_data["crypto_ai_timeframe"] = "1h"
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     base = await analyze_gold("1h")
                     png, _ = await get_gold_chart("1h")
@@ -1623,6 +1631,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 report = base
                 png, _cap = await get_crypto_chart(symbol, 7)
                 await _edit_photo_caption(png, report or "داده کافی نیست.")
+
+            elif action == "4h":
+                context.user_data["crypto_ai_timeframe"] = "4h"
+                if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
+                    txt = await analyze_gold("4h")
+                    png, _ = await get_gold_chart("4h")
+                    await _edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 4H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
+                else:
+                    txt = await analyze_crypto(symbol, timeframe="4h")
+                    png, _ = await get_crypto_chart(symbol, 30)
+                    await _edit_photo_caption(png, "🧠 <b>تحلیل کریپتو — 4H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
+                return
 
             elif action == "rec":
                 txt = await trading_recommendation(symbol)
