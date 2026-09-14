@@ -27,12 +27,19 @@ from bot.logger import logger
 MAX_BYTES = max(1, int(os.getenv("DOWNLOADER_MAX_BYTES", str(48 * 1024 * 1024))))
 TIMEOUT = max(5.0, float(os.getenv("DOWNLOADER_TIMEOUT", "60")))
 MAX_REDIRECTS = max(1, int(os.getenv("DOWNLOADER_MAX_REDIRECTS", "5")))
-GLOBAL_CONCURRENCY = max(1, int(os.getenv("DOWNLOADER_CONCURRENCY", "3")))
+GLOBAL_CONCURRENCY = max(1, int(os.getenv("DOWNLOADER_CONCURRENCY", "2")))
 PER_USER_CONCURRENCY = max(1, int(os.getenv("DOWNLOADER_PER_USER_CONCURRENCY", "1")))
 CACHE_TTL = max(0, int(os.getenv("DOWNLOADER_CACHE_TTL", "3600")))
 CACHE_MAX_BYTES = max(MAX_BYTES, int(os.getenv("DOWNLOADER_CACHE_MAX_BYTES", str(512 * 1024 * 1024))))
 CACHE_DIR = Path(os.getenv("DOWNLOADER_CACHE_DIR", str(Path(tempfile.gettempdir()) / "alimj3_downloader_cache")))
 UA = "Mozilla/5.0 (compatible; ALIMJ3-Downloader/2.0)"
+
+# Direct-download tuning. Parallel ranges are used only for sufficiently large
+# files and only when the origin explicitly advertises byte-range support.
+# Keeping this conservative avoids making small/CDN-sensitive downloads slower.
+DIRECT_CONCURRENCY = max(2, min(6, int(os.getenv("DOWNLOADER_DIRECT_CONCURRENCY", "4"))))
+DIRECT_PARALLEL_MIN_BYTES = max(4 * 1024 * 1024, int(os.getenv("DOWNLOADER_DIRECT_PARALLEL_MIN_BYTES", str(16 * 1024 * 1024))))
+DIRECT_CHUNK_BYTES = max(256 * 1024, min(4 * 1024 * 1024, int(os.getenv("DOWNLOADER_CHUNK_BYTES", str(1024 * 1024)))))
 
 class DownloadError(Exception):
     pass
@@ -497,6 +504,11 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 "Accept-Language": "en-US,en;q=0.9",
             },
             "merge_output_format": "mp4", "continuedl": True, "overwrites": False,
+            # Parallelize DASH/HLS fragments without forcing parallelism on
+            # single-file HTTP downloads. yt-dlp ignores this where irrelevant.
+            "concurrent_fragment_downloads": max(2, min(8, int(os.getenv("DOWNLOADER_FRAGMENT_CONCURRENCY", "8")))),
+            "buffersize": 1024 * 1024,
+            "http_chunk_size": 10 * 1024 * 1024,
         }
         parsed_host = (urlparse(url).hostname or "").lower().rstrip(".")
         if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
@@ -537,7 +549,10 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
         mode = "best"
     url = _normalize_media_url(url)
     if preflight:
-        url = _preflight_redirects(url)
+        # Do not perform a second HEAD/redirect probe here.  The actual engines
+        # validate every URL/redirect before opening the media stream.  Keeping
+        # this flag for API compatibility avoids a needless network round-trip.
+        pass
     if use_cache:
         cached = _cache_get(url, mode)
         if cached:
