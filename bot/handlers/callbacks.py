@@ -564,18 +564,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ]
                     prompt = (
                         "نقش: تحلیل‌گر اقتصاد کلان.\n"
-                        "قوانین سخت: فقط فارسی؛ عدد جعلی نساز؛ فارکس جفت‌ارز ننویس؛ هیچ جمله یا تیتر ناتمام نگذار.\n"
-                        "دقیقاً این ۸ بخش را به ترتیب و کامل بنویس و هر بخش حداکثر ۲ جمله کامل باشد.\n"
-                        "معنی خبر: توضیح خبر و مقایسه Actual/Forecast/Previous.\n"
-                        "کریپتو: اثر احتمالی بر BTC/ETH و آلت‌کوین‌ها.\n"
-                        "دلار/DXY: اثر احتمالی بر دلار و شاخص DXY.\n"
-                        "طلا: اثر احتمالی بر طلا.\n"
-                        "سهام: اثر احتمالی بر سهام.\n"
-                        "اوراق و بازدهی: اثر احتمالی بر اوراق و بازدهی خزانه‌داری.\n"
-                        "سناریوی Actual در برابر Forecast: اگر Actual منتشر نشده، سناریوی بالاتر/مطابق/پایین‌تر از Forecast را کوتاه توضیح بده.\n"
-                        "جمع‌بندی: سناریوی پایه، مهم‌ترین ریسک و نکته کلیدی.\n"
-                        "حتماً پاسخ را تا «جمع‌بندی» تمام کن؛ پاسخ کوتاه اما کامل باشد.\n\n"
-                        "داده: "+ ctx
+                        "قوانین سخت:\n"
+                        "- فقط فارسی\n"
+                        "- عدد جعلی نساز\n"
+                        "- فارکس جفت‌ارز ننویس\n"
+                        "- هیچ جمله یا تیتر ناتمام نگذار\n"
+                        "- هر تیتر فقط یک‌بار بیاید\n"
+                        "دقیقاً این ۸ بخش را به ترتیب و کامل بنویس "
+                        "(اگر اثر ضعیف است بنویس «اثر مستقیم کم»):\n"
+                        "معنی خبر:\n"
+                        "کریپتو:\n"
+                        "دلار/DXY:\n"
+                        "طلا:\n"
+                        "سهام:\n"
+                        "اوراق و بازدهی:\n"
+                        "سناریوی Actual در برابر Forecast:\n"
+                        "جمع‌بندی:\n"
+                        "هر بخش حداکثر ۲ جمله کامل. حتماً تا جمع‌بندی را تمام کن.\n\n"
+                        "داده:\n" + ctx
                     )
 
                     try:
@@ -589,60 +595,46 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                     answer = (answer or "").strip() or "تحلیل در دسترس نیست."
 
-                    # مدل‌ها گاهی به‌دلیل سقف خروجی وسط یک بخش متوقف می‌شوند.
-                    # قبل از ارسال، پاسخ را بررسی و حداکثر دو بار از همان نقطه تکمیل می‌کنیم.
-                    section_aliases = {
-                        "معنی خبر": ("معنی خبر",),
-                        "کریپتو": ("کریپتو", "رمزارز", "ارز دیجیتال"),
-                        "دلار": ("دلار/DXY", "دلار", "DXY"),
-                        "طلا": ("طلا",),
-                        "سهام": ("سهام",),
-                        "اوراق": ("اوراق و بازدهی", "اوراق"),
-                        "سناریو": ("سناریوی Actual", "سناریو"),
-                        "جمع‌بندی": ("جمع‌بندی", "جمع بندی"),
-                    }
-
                     def _missing_sections(text: str) -> list[str]:
-                        low = (text or "").replace("**", "").lower()
-                        return [name for name, aliases in section_aliases.items()
-                                if not any(a.lower() in low for a in aliases)]
+                        return [s for s in required_sections if s not in text]
 
                     def _looks_cut(text: str) -> bool:
                         t = (text or "").strip()
                         if not t:
                             return True
-                        if t.endswith(("،", ":", "؛", "-", "—")):
+                        if t[-1] not in ".!?…۔؟":
+                            # جمله ناتمام یا قطع‌شده
+                            if len(t) > 80:
+                                return True
+                        if t.endswith(("،", ":", "؛", "-", "—", "…")):
                             return True
-                        return len(t) > 80 and t[-1] not in ".!?…۔؟"
+                        return False
 
-                    for repair_round in range(2):
-                        missing = _missing_sections(answer)
-                        if not missing and not _looks_cut(answer):
-                            break
-                        missing_text = "، ".join(missing) if missing else "ادامه جمله/بخش ناتمام"
-                        cont_prompt = (
-                            "پاسخ زیر ناقص یا قطع شده است. فقط ادامه لازم را بنویس و هیچ بخش قبلی را تکرار نکن.\n"
-                            f"بخش‌های ناقص: {missing_text}.\n"
-                            "از دقیقاً همان نقطه ادامه بده و در پایان حتماً «جمع‌بندی:» را کامل کن. "
-                            "اگر بخش‌های اصلی قبلاً آمده‌اند، دوباره آن‌ها را ننویس. حداکثر ۲ جمله برای هر بخش.\n\n"
-                            "--- انتهای پاسخ قبلی ---\n" + answer[-1200:] +
-                            "\n--- داده اصلی ---\n" + ctx
-                        )
+                    # اگر بخش‌ها ناقص است یا متن قطع شده، یکبار ادامه بخواه
+                    missing = _missing_sections(answer)
+                    if missing or _looks_cut(answer):
                         try:
+                            cont_prompt = (
+                                "پاسخ قبلی ناقص بود. از همان‌جا که قطع شده ادامه بده و "
+                                "هیچ بخشی از متن قبلی را تکرار نکن.\n"
+                                "اگر تیتری جا مانده فقط همان‌ها را کامل بنویس:\n"
+                                + "\n".join(f"- {m}" for m in (missing or required_sections[-4:]))
+                                + "\nحتماً با «جمع‌بندی:» تمام کن.\n\n"
+                                "--- انتهای پاسخ قبلی ---\n"
+                                + answer[-700:]
+                                + "\n--- ادامه از اینجا ---\n\n"
+                                "داده:\n" + ctx
+                            )
                             cont, _ = await ask_ai(user_id, cont_prompt)
                             cont = (cont or "").strip()
-                            if not cont:
-                                continue
-                            # اگر مدل دوباره از اول جواب داد، فقط قسمت بعد از اولین بخش جدید را نگه می‌داریم.
-                            if cont.startswith(answer[:50]):
-                                cont = cont[len(answer[:50]):].lstrip(" \n")
-                            answer = (answer.rstrip() + "\n" + cont).strip()
+                            if cont:
+                                # جلوگیری از تکرار تیتر اول اگر مدل دوباره از اول شروع کرد
+                                if cont.startswith(answer[:40]):
+                                    answer = cont
+                                else:
+                                    answer = (answer.rstrip() + "\n" + cont).strip()
                         except Exception as cont_err:
-                            logger.warning("ec analyze continuation round %s failed: %s", repair_round + 1, cont_err)
-                            break
-
-                    # Markdown ستاره‌ای مدل را به خروجی تمیز HTML تبدیل می‌کنیم.
-                    answer = answer.replace("**", "")
+                            logger.debug("ec analyze continue failed: %s", cont_err)
 
                     from html import escape as _esc
 
@@ -1356,10 +1348,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(parts) < 3:
             return
         action, symbol = parts[1], parts[2]
-        # ICT تایم‌فریم را از callback چهارم می‌گیرد: cx:ict:BTC:4h
-        ict_interval = parts[3].lower() if len(parts) >= 4 else "1h"
-        if ict_interval not in {"15m", "1h", "4h", "1d"}:
-            ict_interval = "1h"
         context.user_data["crypto_symbol"] = symbol
         try:
             from bot.features.market.finance import (
@@ -1587,6 +1575,53 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "از عبارت‌های کوتاه و تیترهای واضح استفاده کن. در بازار ضعیف یا متناقض، ورود را تأیید نکن.\n\n" + base[:12000]
                 )
                 answer, _ = await ask_ai(query.from_user.id, prompt)
+                answer = (answer or "").strip()
+
+                # مدل ممکن است به سقف توکن برسد و دقیقاً وسط یک بخش قطع شود.
+                # در این حالت ادامه را چند مرحله‌ای می‌گیریم تا گزارش واقعاً تا
+                # «نتیجه نهایی» کامل شود؛ سپس کل گزارش را در پیام‌های متنی جدا از
+                # نمودار قرار می‌دهیم تا محدودیت caption باعث حذف محتوا نشود.
+                def _ai_report_is_complete(text: str) -> bool:
+                    t = (text or "").strip()
+                    if not t:
+                        return False
+                    lower = t.lower()
+                    final_markers = (
+                        "نتیجه نهایی", "جمع‌بندی نهایی", "جمع بندی نهایی",
+                        "نتیجه‌گیری", "نتیجه گیری",
+                    )
+                    has_final = any(m in lower for m in final_markers)
+                    # اگر پایان جمله/بخش کاملاً باز مانده باشد، ادامه لازم است.
+                    clean = t.rstrip()
+                    looks_open = clean.endswith((":", "،", "؛", "-", "—", "(", "/"))
+                    return has_final and not looks_open
+
+                continuation_round = 0
+                while answer and not _ai_report_is_complete(answer) and continuation_round < 3:
+                    continuation_round += 1
+                    tail = answer[-1800:]
+                    cont_prompt = (
+                        "گزارش قبلی به سقف خروجی رسید و ناقص مانده است. فقط ادامه گزارش را بنویس؛ "
+                        "هیچ‌کدام از متن یا تیترهای کامل قبلی را تکرار نکن. دقیقاً از بعدِ آخرین خط ادامه بده. "
+                        "بخش‌های باقی‌مانده شامل حجم، واگرایی، Funding/OI/Long-Short، MTF، سناریوی Long، "
+                        "سناریوی Short، invalidation و نتیجه نهایی هستند. اگر بعضی قبلاً کامل آمده‌اند، دوباره ننویس. "
+                        "هیچ عدد جدیدی حدس نزن. حتماً با یک بخش کامل «نتیجه نهایی» تمام کن و جمله ناتمام نگذار.\n\n"
+                        "آخرین بخش گزارش:\n" + tail + "\n\n"
+                        "داده مرجع:\n" + base[:8000]
+                    )
+                    try:
+                        cont, _ = await ask_ai(query.from_user.id, cont_prompt)
+                        cont = (cont or "").strip()
+                    except Exception as cont_err:
+                        logger.warning("crypto smart analysis continuation %s failed: %s", continuation_round, cont_err)
+                        break
+                    if not cont:
+                        break
+                    # اگر مدل دوباره کل گزارش را از اول تولید کرد، فقط ادامه متفاوت را نگه می‌داریم.
+                    if cont == answer or cont[:120] in answer:
+                        break
+                    answer = (answer.rstrip() + "\n\n" + cont).strip()
+
                 safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip())
                 out = "🧠 <b>تحلیل هوشمند حرفه‌ای</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
                 # تحلیل AI روی 4H است؛ نمودار هم دقیقاً 4H باشد.
@@ -1595,83 +1630,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if action == "ict":
-                # ICT همیشه همان پیام را به‌روزرسانی می‌کند. با تغییر تایم‌فریم،
-                # هم تحلیل و هم تصویر نمودار همان پیام عوض می‌شوند.
                 try:
                     from bot.features.market.finance_ict import analyze_ict
                 except Exception as imp_exc:
-                    report = f"❌ ماژول ICT در دسترس نیست: {imp_exc}"
-                    try:
-                        if query.message.photo:
-                            await query.message.edit_caption(caption=report[:1000], reply_markup=get_crypto_analysis_keyboard(symbol))
-                        else:
-                            await query.message.edit_text(report[:4000], reply_markup=get_crypto_analysis_keyboard(symbol))
-                    except Exception:
-                        pass
+                    await query.message.reply_text(f"❌ ماژول ICT در دسترس نیست: {imp_exc}")
                     return
-
+                # بازه پیش‌فرض 1h؛ کاربر از منوی نمودار می‌تواند تایم‌فریم ببیند
                 try:
-                    report = await analyze_ict(symbol, interval=ict_interval)
+                    await query.message.reply_text("⏳ در حال تحلیل ICT...")
+                except Exception:
+                    pass
+                try:
+                    report = await analyze_ict(symbol, interval="1h")
                 except Exception as exc:
                     report = f"❌ خطا در تحلیل ICT: {exc}"
-
-                # Caption تلگرام حداکثر 1024 کاراکتر است؛ برای حفظ «همان پیام»
-                # خروجی ICT را تمیز و کوتاه می‌کنیم و هرگز پیام دوم نمی‌فرستیم.
-                report = re.sub(r"\*{1,2}", "", str(report or "")).strip()
-                if not report:
-                    report = "⚠️ داده کافی برای تحلیل ICT در دسترس نیست."
-                if len(report) > 950:
-                    report = report[:950].rsplit("\n", 1)[0].rstrip() + "\n…"
-
-                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                # نمودار نیز دقیقاً مطابق تایم‌فریم ICT ساخته می‌شود.
-                chart_days = {"15m": 3, "1h": 7, "4h": 30, "1d": 90}[ict_interval]
+                if len(report) > 4000:
+                    report = report[:3980] + "\n…"
+                # HTML escape not needed for plain report; send as plain text
+                menu = get_crypto_analysis_keyboard(symbol)
                 try:
-                    png, _ = await get_crypto_chart(symbol, chart_days)
-                except Exception as chart_exc:
-                    png = None
-                    logger.warning("ICT chart generation failed for %s %s: %s", symbol, ict_interval, chart_exc)
-
-                menu = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("15M" if ict_interval != "15m" else "✅ 15M", callback_data=f"cx:ict:{symbol}:15m"),
-                        InlineKeyboardButton("1H" if ict_interval != "1h" else "✅ 1H", callback_data=f"cx:ict:{symbol}:1h"),
-                        InlineKeyboardButton("4H" if ict_interval != "4h" else "✅ 4H", callback_data=f"cx:ict:{symbol}:4h"),
-                        InlineKeyboardButton("1D" if ict_interval != "1d" else "✅ 1D", callback_data=f"cx:ict:{symbol}:1d"),
-                    ],
-                    [InlineKeyboardButton("🔙 بازگشت به تحلیل", callback_data=f"cx:ref:{symbol}")],
-                ])
-                msg = query.message
-                try:
-                    if msg.photo:
-                        # همان پیام حفظ می‌شود؛ با تغییر تایم‌فریم خود عکس و caption با هم عوض می‌شوند.
-                        if png:
-                            bio = BytesIO(png)
-                            bio.name = f"{symbol}_{ict_interval}_ict.png"
-                            await context.bot.edit_message_media(
-                                chat_id=msg.chat_id,
-                                message_id=msg.message_id,
-                                media=InputMediaPhoto(
-                                    media=bio,
-                                    caption="📐 <b>تحلیل ICT — " + html.escape(symbol.upper()) + " | " + ict_interval.upper() + "</b>\n━━━━━━━━━━━━━━━━━━━━\n" + html.escape(report),
-                                    parse_mode="HTML",
-                                ),
-                                reply_markup=menu,
-                            )
-                        else:
-                            await msg.edit_caption(
-                                caption="📐 <b>تحلیل ICT — " + html.escape(symbol.upper()) + " | " + ict_interval.upper() + "</b>\n━━━━━━━━━━━━━━━━━━━━\n" + html.escape(report),
-                                parse_mode="HTML",
-                                reply_markup=menu,
-                            )
-                    else:
-                        await msg.edit_text(
-                            "📐 <b>تحلیل ICT — " + html.escape(symbol.upper()) + " | " + ict_interval.upper() + "</b>\n━━━━━━━━━━━━━━━━━━━━\n" + html.escape(report),
-                            parse_mode="HTML",
-                            reply_markup=menu,
-                        )
-                except Exception as edit_exc:
-                    logger.warning("ICT same-message edit failed for %s: %s", symbol, edit_exc)
+                    await query.message.reply_text(report, reply_markup=menu)
+                except Exception:
+                    await query.message.reply_text(report)
                 return
 
             if action == "pa":
