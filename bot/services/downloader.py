@@ -27,6 +27,9 @@ MAX_BYTES = max(1, int(os.getenv("DOWNLOADER_MAX_BYTES", str(48 * 1024 * 1024)))
 TIMEOUT = max(5.0, float(os.getenv("DOWNLOADER_TIMEOUT", "60")))
 MAX_REDIRECTS = max(1, int(os.getenv("DOWNLOADER_MAX_REDIRECTS", "5")))
 GLOBAL_CONCURRENCY = max(1, int(os.getenv("DOWNLOADER_CONCURRENCY", "2")))
+# Parallel DASH/HLS fragment fetching noticeably improves YouTube speed while
+# keeping a conservative default for shared hosting.
+FRAGMENT_CONCURRENCY = max(1, int(os.getenv("DOWNLOADER_FRAGMENT_CONCURRENCY", "4")))
 PER_USER_CONCURRENCY = max(1, int(os.getenv("DOWNLOADER_PER_USER_CONCURRENCY", "1")))
 CACHE_TTL = max(0, int(os.getenv("DOWNLOADER_CACHE_TTL", "3600")))
 CACHE_MAX_BYTES = max(MAX_BYTES, int(os.getenv("DOWNLOADER_CACHE_MAX_BYTES", str(512 * 1024 * 1024))))
@@ -362,6 +365,11 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 "Accept-Language": "en-US,en;q=0.9",
             },
             "merge_output_format": "mp4", "continuedl": True, "overwrites": False,
+            # YouTube commonly exposes video/audio as separate DASH fragments.
+            # Fetch several fragments concurrently instead of the yt-dlp default
+            # of one at a time. This is the main speed fix for large videos.
+            "concurrent_fragment_downloads": FRAGMENT_CONCURRENCY,
+            "buffersize": 1024 * 1024,
         }
         parsed_host = (urlparse(url).hostname or "").lower().rstrip(".")
         if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
@@ -397,11 +405,19 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
         raise DownloadError(_classify_error(str(exc))) from exc
 
 
-async def download(url: str, *, mode: str = "best", user_id: int | None = None, progress_cb=None, use_cache: bool = True) -> dict:
+def _is_youtube_url(url: str) -> bool:
+    host = (urlparse((url or "").strip()).hostname or "").lower().rstrip(".")
+    return host == "youtube.com" or host.endswith(".youtube.com") or host == "youtu.be" or host.endswith(".youtu.be")
+
+
+async def download(url: str, *, mode: str = "best", user_id: int | None = None, progress_cb=None, use_cache: bool = True, preflight: bool = True) -> dict:
     if mode not in {"best", "1080p", "720p", "480p", "audio"}:
         mode = "best"
     url = _normalize_media_url(url)
-    url = _preflight_redirects(url)
+    # The callback flow has already probed/validated the URL. Skipping a second
+    # HEAD/redirect walk avoids an unnecessary network round-trip before yt-dlp.
+    if preflight:
+        url = _preflight_redirects(url)
     if use_cache:
         cached = _cache_get(url, mode)
         if cached:
@@ -453,6 +469,8 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
                 try:
                     result = await _ytdlp(url, outdir, mode=mode, progress_cb=progress_cb)
                 except DownloadError as first:
+                    if _is_youtube_url(url):
+                        raise
                     if str(first) in {"site_blocked", "rate_limited", "access_restricted", "too_large", "yt_dlp_missing"}:
                         if str(first) == "yt_dlp_missing" and mode == "best":
                             filename = _safe_name(Path(urlparse(url).path).name or "download.bin")
