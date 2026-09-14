@@ -1586,28 +1586,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if not t:
                         return False
                     lower = t.lower()
-                    final_markers = (
-                        "نتیجه نهایی", "جمع‌بندی نهایی", "جمع بندی نهایی",
-                        "نتیجه‌گیری", "نتیجه گیری",
-                    )
+                    final_markers = ("نتیجه نهایی", "جمع‌بندی نهایی", "جمع بندی نهایی", "نتیجه‌گیری", "نتیجه گیری")
+                    required = ("وضعیت بازار", "ساختار", "bos", "choch", "حمایت", "مقاومت", "عرضه", "تقاضا", "نقدینگی", "حجم", "واگرایی", "funding", "oi", "mtf", "سناریوی long", "سناریوی short", "invalidation")
                     has_final = any(m in lower for m in final_markers)
-                    # اگر پایان جمله/بخش کاملاً باز مانده باشد، ادامه لازم است.
+                    has_core = sum(1 for m in required if m in lower) >= 10
                     clean = t.rstrip()
                     looks_open = clean.endswith((":", "،", "؛", "-", "—", "(", "/"))
-                    return has_final and not looks_open
+                    broken_heading = any(x in lower for x in ("عرضه/", "عرضه /", "📈 عرضه/", "تقاضا/", "تقاضا /"))
+                    return has_final and has_core and not looks_open and not broken_heading
 
                 continuation_round = 0
                 while answer and not _ai_report_is_complete(answer) and continuation_round < 3:
                     continuation_round += 1
-                    tail = answer[-1800:]
+                    tail = answer[-2200:]
+                    broken_supply = any(x in answer.lower() for x in ("عرضه/", "عرضه /", "📈 عرضه/")) and "تقاضا" not in answer.lower()
+                    if broken_supply:
+                        task = ("فقط بخش «عرضه/تقاضا» را کامل کن. با تیتر «📈 عرضه/تقاضا» شروع کن و فقط از داده مرجع استفاده کن؛ هیچ عددی حدس نزن.")
+                    else:
+                        task = ("فقط ادامه بخش‌های ناقص را بنویس؛ تیترهای کامل قبلی را تکرار نکن و در پایان «نتیجه نهایی» کامل بده.")
                     cont_prompt = (
-                        "گزارش قبلی به سقف خروجی رسید و ناقص مانده است. فقط ادامه گزارش را بنویس؛ "
-                        "هیچ‌کدام از متن یا تیترهای کامل قبلی را تکرار نکن. دقیقاً از بعدِ آخرین خط ادامه بده. "
-                        "بخش‌های باقی‌مانده شامل حجم، واگرایی، Funding/OI/Long-Short، MTF، سناریوی Long، "
-                        "سناریوی Short، invalidation و نتیجه نهایی هستند. اگر بعضی قبلاً کامل آمده‌اند، دوباره ننویس. "
-                        "هیچ عدد جدیدی حدس نزن. حتماً با یک بخش کامل «نتیجه نهایی» تمام کن و جمله ناتمام نگذار.\n\n"
-                        "آخرین بخش گزارش:\n" + tail + "\n\n"
-                        "داده مرجع:\n" + base[:8000]
+                        "گزارش قبلی ناقص مانده است. " + task + " هیچ جمله یا تیتر ناتمامی باقی نگذار.\n\n"
+                        "آخرین بخش گزارش:\n" + tail + "\n\nداده مرجع:\n" + base[:8000]
                     )
                     try:
                         cont, _ = await ask_ai(query.from_user.id, cont_prompt)
@@ -1617,10 +1616,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         break
                     if not cont:
                         break
-                    # اگر مدل دوباره کل گزارش را از اول تولید کرد، فقط ادامه متفاوت را نگه می‌داریم.
-                    if cont == answer or cont[:120] in answer:
-                        break
-                    answer = (answer.rstrip() + "\n\n" + cont).strip()
+                    if broken_supply:
+                        pattern = r"(?im)^\s*\*{0,2}\s*📈\s*عرضه/\s*\*{0,2}\s*$"
+                        replaced, n = re.subn(pattern, cont, answer, count=1)
+                        if n:
+                            answer = replaced.strip()
+                        else:
+                            answer = (answer.rstrip() + "\n\n" + cont).strip()
+                    else:
+                        if cont == answer or cont[:120] in answer:
+                            break
+                        answer = (answer.rstrip() + "\n\n" + cont).strip()
 
                 safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip())
                 out = "🧠 <b>تحلیل هوشمند حرفه‌ای</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
