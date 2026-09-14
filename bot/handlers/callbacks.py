@@ -1353,6 +1353,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 trading_recommendation, derivatives_radar, risk_scenarios,
                 position_size_guide, entry_alert_text, market_scanner,
             )
+            from bot.features.market.finance_ict import analyze_ict
             from io import BytesIO
             from telegram import InputMediaPhoto
 
@@ -1574,6 +1575,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception:
                     png = None
                 await _edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
+                return
+
+            if action == "ict":
+                # تحلیل ICT به‌صورت مستقیم از همان منوی تحلیل کریپتو اجرا می‌شود؛
+                # دکمه دقیقاً زیر «تحلیل هوشمند حرفه‌ای» قرار دارد.
+                ict_timeframe = context.user_data.get("crypto_ai_timeframe", "1h")
+                if ict_timeframe not in ("15m", "1h", "4h", "1d"):
+                    ict_timeframe = "1h"
+                try:
+                    ict_report = await analyze_ict(symbol, interval=ict_timeframe)
+                except Exception as exc:
+                    logger.exception("ICT callback analysis failed for %s/%s: %s", symbol, ict_timeframe, exc)
+                    ict_report = "❌ تحلیل ICT فعلاً در دسترس نیست؛ دوباره تلاش کنید."
+                safe_ict = html.escape((ict_report or "داده کافی برای تحلیل ICT وجود ندارد.").strip())
+                out = (
+                    f"📐 <b>تحلیل ICT — {html.escape(symbol.upper())} / {ict_timeframe.upper()}</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    + safe_ict
+                )
+                await _edit_text(out)
                 return
 
             if action == "ai" and symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
