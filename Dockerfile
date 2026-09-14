@@ -9,7 +9,7 @@ WORKDIR /app
 
 # Runtime-only OS packages; keep the image small and predictable.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies before copying the application to maximize Docker layer reuse.
