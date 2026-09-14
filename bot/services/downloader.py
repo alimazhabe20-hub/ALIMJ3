@@ -23,13 +23,13 @@ from urllib.parse import unquote, urljoin, urlparse
 
 from bot.logger import logger
 
-MAX_BYTES = max(1, int(os.getenv("DOWNLOADER_MAX_BYTES", str(48 * 1024 * 1024))))
+MAX_BYTES = max(1, int(os.getenv("DOWNLOADER_MAX_BYTES", str(1024 * 1024 * 1024))))
 TIMEOUT = max(5.0, float(os.getenv("DOWNLOADER_TIMEOUT", "60")))
 MAX_REDIRECTS = max(1, int(os.getenv("DOWNLOADER_MAX_REDIRECTS", "5")))
 GLOBAL_CONCURRENCY = max(1, int(os.getenv("DOWNLOADER_CONCURRENCY", "2")))
 PER_USER_CONCURRENCY = max(1, int(os.getenv("DOWNLOADER_PER_USER_CONCURRENCY", "1")))
 CACHE_TTL = max(0, int(os.getenv("DOWNLOADER_CACHE_TTL", "3600")))
-CACHE_MAX_BYTES = max(MAX_BYTES, int(os.getenv("DOWNLOADER_CACHE_MAX_BYTES", str(512 * 1024 * 1024))))
+CACHE_MAX_BYTES = max(MAX_BYTES, int(os.getenv("DOWNLOADER_CACHE_MAX_BYTES", str(1024 * 1024 * 1024))))
 CACHE_DIR = Path(os.getenv("DOWNLOADER_CACHE_DIR", str(Path(tempfile.gettempdir()) / "alimj3_downloader_cache")))
 UA = "Mozilla/5.0 (compatible; ALIMJ3-Downloader/2.0)"
 # Conservative defaults: enough parallelism to improve DASH/HLS throughput
