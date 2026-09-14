@@ -8,7 +8,6 @@ CAPTCHA, authentication, DRM, geo/access controls, or site bans.
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import ipaddress
 import json
@@ -33,13 +32,11 @@ CACHE_TTL = max(0, int(os.getenv("DOWNLOADER_CACHE_TTL", "3600")))
 CACHE_MAX_BYTES = max(MAX_BYTES, int(os.getenv("DOWNLOADER_CACHE_MAX_BYTES", str(512 * 1024 * 1024))))
 CACHE_DIR = Path(os.getenv("DOWNLOADER_CACHE_DIR", str(Path(tempfile.gettempdir()) / "alimj3_downloader_cache")))
 UA = "Mozilla/5.0 (compatible; ALIMJ3-Downloader/2.0)"
-
-# Direct-download tuning. Parallel ranges are used only for sufficiently large
-# files and only when the origin explicitly advertises byte-range support.
-# Keeping this conservative avoids making small/CDN-sensitive downloads slower.
-DIRECT_CONCURRENCY = max(2, min(6, int(os.getenv("DOWNLOADER_DIRECT_CONCURRENCY", "4"))))
-DIRECT_PARALLEL_MIN_BYTES = max(4 * 1024 * 1024, int(os.getenv("DOWNLOADER_DIRECT_PARALLEL_MIN_BYTES", str(16 * 1024 * 1024))))
-DIRECT_CHUNK_BYTES = max(256 * 1024, min(4 * 1024 * 1024, int(os.getenv("DOWNLOADER_CHUNK_BYTES", str(1024 * 1024)))))
+# Conservative defaults: enough parallelism to improve DASH/HLS throughput
+# without creating the bursty request pattern that can trigger upstream 401/429s.
+YTDLP_CONCURRENT_FRAGMENTS = max(1, min(8, int(os.getenv("DOWNLOADER_CONCURRENT_FRAGMENTS", "4"))))
+YTDLP_HTTP_CHUNK_SIZE = max(0, min(10 * 1024 * 1024, int(os.getenv("DOWNLOADER_HTTP_CHUNK_SIZE", str(10 * 1024 * 1024)))))
+YTDLP_BUFFER_SIZE = max(64 * 1024, int(os.getenv("DOWNLOADER_BUFFER_SIZE", str(1024 * 1024))))
 
 class DownloadError(Exception):
     pass
@@ -255,39 +252,17 @@ def _content_disposition_name(value: str) -> str:
     return _safe_name(m.group(1).strip() if m else "")
 
 
-async def _direct(url: str, out: Path, progress_cb=None) -> dict:
-    """Fast direct HTTP downloader with adaptive parallel range requests.
-
-    Small/non-rangeable files use one persistent streamed connection.  Larger
-    files from servers that advertise byte ranges are split into a few ranges,
-    downloaded concurrently, then concatenated in order.  If the origin does
-    not honor ranges, it transparently falls back to the normal stream path.
-    """
+async def _direct(url: str, out: Path) -> dict:
     try:
         import requests
         loop = asyncio.get_running_loop()
-
         def work():
             session = requests.Session()
-            adapter = requests.adapters.HTTPAdapter(
-                pool_connections=DIRECT_CONCURRENCY + 2,
-                pool_maxsize=DIRECT_CONCURRENCY + 2,
-                max_retries=0,
-            )
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
             current = url
             for _ in range(MAX_REDIRECTS + 1):
                 current = _validate_url(current)
-                try:
-                    r = session.get(
-                        current, stream=True, timeout=TIMEOUT,
-                        headers={"User-Agent": UA, "Accept": "*/*"},
-                        allow_redirects=False,
-                    )
-                except Exception as exc:
-                    raise DownloadError(_classify_error(str(exc))) from exc
-                if r.is_redirect or r.status_code in {301, 302, 303, 307, 308}:
+                r = session.get(current, stream=True, timeout=TIMEOUT, headers={"User-Agent": UA, "Accept": "*/*"}, allow_redirects=False)
+                if r.is_redirect or r.status_code in {301,302,303,307,308}:
                     location = r.headers.get("Location")
                     r.close()
                     if not location:
@@ -297,147 +272,35 @@ async def _direct(url: str, out: Path, progress_cb=None) -> dict:
                 r.raise_for_status()
                 length = int(r.headers.get("content-length") or 0)
                 if length > MAX_BYTES:
-                    r.close()
-                    raise DownloadError("too_large")
+                    r.close(); raise DownloadError("too_large")
                 ctype = r.headers.get("content-type", "").lower()
                 name = _content_disposition_name(r.headers.get("content-disposition", ""))
                 if not name:
                     name = _safe_name(Path(urlparse(current).path).name or "download.bin")
-                accepts_ranges = "bytes" in (r.headers.get("accept-ranges", "").lower())
-                r.close()
-
                 part = out.with_suffix(out.suffix + ".part")
-                total_existing = part.stat().st_size if part.exists() else 0
-
-                # Resume is intentionally kept on the single-stream path. A
-                # partially-written old .part file cannot safely be combined
-                # with fresh parallel ranges without per-range metadata.
-                if length >= DIRECT_PARALLEL_MIN_BYTES and accepts_ranges and not total_existing:
-                    workers = min(DIRECT_CONCURRENCY, max(2, length // DIRECT_PARALLEL_MIN_BYTES))
-                    workers = max(2, workers)
-                    ranges_dir = Path(str(out) + ".ranges")
-                    ranges_dir.mkdir(parents=True, exist_ok=True)
-                    completed = 0
-                    lock = threading.Lock()
-
-                    def fetch_range(index: int, start: int, end: int):
-                        target = ranges_dir / f"{index:04d}.part"
-                        expected = end - start + 1
-                        if target.exists() and target.stat().st_size == expected:
-                            return expected
-                        for attempt in range(3):
-                            try:
-                                with requests.Session() as rs:
-                                    rs.headers.update({"User-Agent": UA, "Accept": "*/*"})
-                                    rr = rs.get(
-                                        current, stream=True, timeout=TIMEOUT,
-                                        headers={"Range": f"bytes={start}-{end}"},
-                                    )
-                                    if rr.status_code != 206:
-                                        rr.close()
-                                        raise RuntimeError(f"range_status:{rr.status_code}")
-                                    cr = rr.headers.get("Content-Range", "")
-                                    if cr and not cr.startswith(f"bytes {start}-{end}/"):
-                                        rr.close()
-                                        raise RuntimeError("range_mismatch")
-                                    written = 0
-                                    tmp = target.with_suffix(target.suffix + ".tmp")
-                                    with tmp.open("wb") as fh:
-                                        for chunk in rr.iter_content(DIRECT_CHUNK_BYTES):
-                                            if not chunk:
-                                                continue
-                                            written += len(chunk)
-                                            if written > expected:
-                                                raise RuntimeError("range_oversize")
-                                            fh.write(chunk)
-                                    rr.close()
-                                    if written != expected:
-                                        raise RuntimeError(f"range_short:{written}/{expected}")
-                                    tmp.replace(target)
-                                    with lock:
-                                        nonlocal_completed[0] += written
-                                        done = nonlocal_completed[0]
-                                    if progress_cb:
-                                        try:
-                                            progress_cb({"downloaded": done, "total": length})
-                                        except Exception:
-                                            pass
-                                    return written
-                            except Exception:
-                                target.unlink(missing_ok=True)
-                                if attempt == 2:
-                                    raise
-                                time.sleep(0.15 * (attempt + 1))
-
-                    # A tiny mutable box avoids nonlocal assignment inside the
-                    # nested worker while keeping the progress callback cheap.
-                    nonlocal_completed = [completed]
-                    ranges = []
-                    base = length // workers
-                    for i in range(workers):
-                        a = i * base
-                        b = length - 1 if i == workers - 1 else ((i + 1) * base - 1)
-                        ranges.append((i, a, b))
-                    try:
-                        with ThreadPoolExecutor(max_workers=workers) as pool:
-                            futures = [pool.submit(fetch_range, i, a, b) for i, a, b in ranges]
-                            for f in as_completed(futures):
-                                f.result()
-                        tmp_out = out.with_suffix(out.suffix + ".merge")
-                        with tmp_out.open("wb") as dst:
-                            for i, _a, _b in ranges:
-                                src = ranges_dir / f"{i:04d}.part"
-                                with src.open("rb") as fh:
-                                    shutil.copyfileobj(fh, dst, length=DIRECT_CHUNK_BYTES)
-                        if tmp_out.stat().st_size != length:
-                            raise RuntimeError("merged_size_mismatch")
-                        tmp_out.replace(out)
-                        shutil.rmtree(ranges_dir, ignore_errors=True)
-                        return {"path": str(out), "title": name, "size": length, "content_type": ctype, "method": "direct-parallel"}
-                    except Exception as exc:
-                        # Never return a corrupt partial merge. Fall back to a
-                        # clean sequential request; the origin may simply not
-                        # support parallel ranges reliably.
-                        shutil.rmtree(ranges_dir, ignore_errors=True)
-                        if isinstance(exc, DownloadError):
-                            raise
-
-                total = total_existing
+                total = part.stat().st_size if part.exists() else 0
                 headers = {"User-Agent": UA, "Accept": "*/*"}
                 if total:
-                    rr = session.get(
-                        current, stream=True, timeout=TIMEOUT,
-                        headers={**headers, "Range": f"bytes={total}-"}, allow_redirects=False,
-                    )
+                    # Restart cleanly if server cannot honor range.
+                    r.close()
+                    rr = session.get(current, stream=True, timeout=TIMEOUT, headers={**headers, "Range": f"bytes={total}-"}, allow_redirects=False)
                     if rr.status_code == 206:
                         r = rr
                     else:
-                        rr.close()
-                        part.unlink(missing_ok=True)
-                        total = 0
+                        rr.close(); part.unlink(missing_ok=True); total = 0
                         r = session.get(current, stream=True, timeout=TIMEOUT, headers=headers, allow_redirects=False)
-                else:
-                    r = session.get(current, stream=True, timeout=TIMEOUT, headers=headers, allow_redirects=False)
                 with part.open("ab" if total else "wb") as f:
-                    for chunk in r.iter_content(DIRECT_CHUNK_BYTES):
+                    for chunk in r.iter_content(YTDLP_BUFFER_SIZE):
                         if not chunk:
                             continue
                         total += len(chunk)
                         if total > MAX_BYTES:
-                            r.close()
-                            part.unlink(missing_ok=True)
-                            raise DownloadError("too_large")
+                            r.close(); part.unlink(missing_ok=True); raise DownloadError("too_large")
                         f.write(chunk)
-                        if progress_cb:
-                            try:
-                                progress_cb({"downloaded": total, "total": length})
-                            except Exception:
-                                pass
                 r.close()
                 part.replace(out)
                 return {"path": str(out), "title": name, "size": total, "content_type": ctype, "method": "direct"}
             raise DownloadError("failed")
-
         return await loop.run_in_executor(None, work)
     except DownloadError:
         raise
@@ -453,7 +316,7 @@ async def probe(url: str) -> dict:
         return {"supported": False, "direct": True, "url": url, "formats": []}
     loop = asyncio.get_running_loop()
     def work():
-        opts = {"quiet": True, "no_warnings": True, "skip_download": True, "socket_timeout": int(TIMEOUT), "noplaylist": True, "http_headers": {"User-Agent": UA}}
+        opts = {"quiet": True, "no_warnings": True, "skip_download": True, "socket_timeout": int(TIMEOUT), "noplaylist": True, "http_headers": {"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"}}
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
         formats = []
@@ -497,18 +360,16 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                     except Exception: pass
         opts = {
             "format": fmt, "outtmpl": outtmpl, "noplaylist": True, "quiet": True, "no_warnings": True,
-            "retries": 3, "fragment_retries": 3, "socket_timeout": int(TIMEOUT), "max_filesize": MAX_BYTES,
+            "retries": 5, "fragment_retries": 5, "socket_timeout": int(TIMEOUT), "max_filesize": MAX_BYTES,
+            "concurrent_fragment_downloads": YTDLP_CONCURRENT_FRAGMENTS,
+            "http_chunk_size": YTDLP_HTTP_CHUNK_SIZE or None,
+            "buffersize": YTDLP_BUFFER_SIZE,
             "restrictfilenames": True, "progress_hooks": [hook],
             "http_headers": {
                 "User-Agent": UA,
                 "Accept-Language": "en-US,en;q=0.9",
             },
             "merge_output_format": "mp4", "continuedl": True, "overwrites": False,
-            # Parallelize DASH/HLS fragments without forcing parallelism on
-            # single-file HTTP downloads. yt-dlp ignores this where irrelevant.
-            "concurrent_fragment_downloads": max(2, min(8, int(os.getenv("DOWNLOADER_FRAGMENT_CONCURRENCY", "8")))),
-            "buffersize": 1024 * 1024,
-            "http_chunk_size": 10 * 1024 * 1024,
         }
         parsed_host = (urlparse(url).hostname or "").lower().rstrip(".")
         if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
@@ -549,10 +410,7 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
         mode = "best"
     url = _normalize_media_url(url)
     if preflight:
-        # Do not perform a second HEAD/redirect probe here.  The actual engines
-        # validate every URL/redirect before opening the media stream.  Keeping
-        # this flag for API compatibility avoids a needless network round-trip.
-        pass
+        url = _preflight_redirects(url)
     if use_cache:
         cached = _cache_get(url, mode)
         if cached:
@@ -607,12 +465,12 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
                     if str(first) in {"site_blocked", "rate_limited", "access_restricted", "too_large", "yt_dlp_missing"}:
                         if str(first) == "yt_dlp_missing" and mode == "best":
                             filename = _safe_name(Path(urlparse(url).path).name or "download.bin")
-                            result = await _direct(url, outdir / filename, progress_cb=progress_cb)
+                            result = await _direct(url, outdir / filename)
                         else:
                             raise
                     else:
                         filename = _safe_name(Path(urlparse(url).path).name or "download.bin")
-                        result = await _direct(url, outdir / filename, progress_cb=progress_cb)
+                        result = await _direct(url, outdir / filename)
                 _cache_put(result, url, mode)
                 return result
             except Exception:
