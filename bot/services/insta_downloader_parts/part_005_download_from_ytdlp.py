@@ -18,6 +18,16 @@ async def download_from_ytdlp(url: str, temp_dir: str | None = None) -> str:
             "no_warnings": True,
             "noplaylist": True,
             "merge_output_format": "mp4",
+            # Speed-oriented settings: fetch DASH/HLS fragments concurrently
+            # and keep HTTP transfers large enough to avoid tiny reads.
+            "concurrent_fragment_downloads": max(2, int(os.getenv("DOWNLOADER_FRAGMENT_CONCURRENCY", "8"))),
+            "http_chunk_size": 10 * 1024 * 1024,
+            "buffersize": 1024 * 1024,
+            "retries": 3,
+            "fragment_retries": 3,
+            "socket_timeout": 60,
+            "continuedl": True,
+            "overwrites": False,
             "http_headers": {
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
