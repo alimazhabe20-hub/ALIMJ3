@@ -1591,11 +1591,64 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "Invalidation", "مدیریت ریسک / توصیه عملی", "نتیجه نهایی",
                 ]
 
-                # Keep enough market data for every chunk without allowing the
-                # prompt itself to approach the router's input ceiling.
-                source_data = (base or "").strip()
-                if len(source_data) > 10500:
-                    source_data = source_data[:10500]
+                # ai_runtime has a relatively small input budget. Passing the
+                # beginning of the long human-readable report was dropping the
+                # later sections (supply/demand, derivatives, MTF, etc.). Build
+                # one compact, data-first context instead of blindly truncating.
+                def _build_smart_source(report: str, limit: int = 4700) -> str:
+                    text = (report or "").replace("\r", "").strip()
+                    if not text:
+                        return "داده تحلیل در دسترس نیست."
+                    lines = [x.strip() for x in text.splitlines() if x.strip()]
+                    # Prefer actual data-bearing lines. These keywords cover the
+                    # complete 18-section Smart AI contract without depending on
+                    # the exact presentation order of analyze_crypto().
+                    keys = (
+                        "قیمت", "روند", "سیگنال", "ستاپ", "اجرا", "حمایت", "مقاومت",
+                        "ساختار", "BOS", "CHOCH", "کندل", "نقدینگی", "Equal",
+                        "شکست", "Break", "Retest", "RSI", "ADX", "ATR", "MACD",
+                        "EMA", "SMA", "حجم", "Volume", "واگرایی", "Divergence",
+                        "Funding", "فاندینگ", "OI", "Open Interest", "Long", "Short",
+                        "لانگ", "شورت", "MTF", "تایم", "چندتایم", "عرضه", "تقاضا",
+                        "FVG", "Order Block", "OB", "سناریو", "ابطال", "R:R",
+                        "ریسک", "BTC.D", "ETH/BTC", "Order Flow", "لیکویید", "لیکوییدیشن",
+                    )
+                    selected = []
+                    seen = set()
+                    # Keep the short header/summary first, then every relevant
+                    # data line. Deduplication prevents repeated MTF/level lines
+                    # from consuming the context budget.
+                    for line in lines:
+                        if any(k.lower() in line.lower() for k in keys):
+                            norm = re.sub(r"\s+", " ", line).strip()
+                            if norm not in seen:
+                                selected.append(norm)
+                                seen.add(norm)
+                    if not selected:
+                        selected = lines[:80]
+                    # If there is room, include the first few summary lines so
+                    # the model still knows the asset/timeframe and headline bias.
+                    prefix = lines[:8]
+                    merged = []
+                    for line in prefix + selected:
+                        if line and line not in merged:
+                            merged.append(line)
+                    result = "\n".join(merged)
+                    if len(result) <= limit:
+                        return result
+                    # Trim by complete lines first; never cut a numeric value in
+                    # the middle.
+                    kept = []
+                    size = 0
+                    for line in merged:
+                        add = len(line) + (1 if kept else 0)
+                        if size + add > limit:
+                            continue
+                        kept.append(line)
+                        size += add
+                    return "\n".join(kept)[:limit].rstrip()
+
+                source_data = _build_smart_source(base)
 
                 def _norm_heading(value: str) -> str:
                     value = re.sub(r"[*_`#]", "", value or "")
