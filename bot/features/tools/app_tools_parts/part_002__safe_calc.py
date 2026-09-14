@@ -1,4 +1,4 @@
-from ast import ast
+import ast
 
 # Auto-split part 2: _safe_calc
 def _safe_calc(node: ast.AST, depth: int = 0):
