@@ -1353,185 +1353,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 trading_recommendation, derivatives_radar, risk_scenarios,
                 position_size_guide, entry_alert_text, market_scanner,
             )
-            from io import BytesIO
-            from telegram import InputMediaPhoto
-
             is_gold = symbol.lower() in ("gold", "xau", "xauusd", "xau/usd")
             # این منو باید Inline باشد تا همان پیام نمودار بتواند با تغییر تایم‌فریم ویرایش شود.
             # ReplyKeyboard در اینجا باعث می‌شد پیام تحلیل از جریان «بازار» خارج شود.
             menu = get_crypto_analysis_keyboard(symbol)
 
-            async def _smart_ai(base_txt: str, tf_name: str) -> tuple:
-                """جمع‌بندی + راهنما دقیق‌تر بر اساس تایم‌فریم"""
-                try:
-                    from bot.services.ai_service import ask_ai
-                    prompt = (
-                        f"تو تحلیل‌گر ارشد مشتقات کریپتو هستی. تایم‌فریم تمرکز: {tf_name}.\n"
-                        "فقط از داده زیر استفاده کن؛ عدد جعلی نساز.\n"
-                        "خروجی دقیقاً:\n"
-                        "جمع‌بندی: ۲ تا ۴ جمله فارسی (روند این تایم‌فریم، ساختار، مومنتوم، سیگنال)\n"
-                        "راهنما: ۱ تا ۲ جمله (ورود الان / صبر / فرصت گذشته)\n"
-                        "بدون بولت، بدون تضمین سود.\n\n"
-                        + (base_txt or "")[:3000]
-                    )
-                    answer, _ = await ask_ai(query.from_user.id, prompt)
-                    raw = (answer or "").strip()
-                    summary, guide = "", ""
-                    if "راهنما:" in raw:
-                        a, b = raw.split("راهنما:", 1)
-                        summary = a.replace("جمع‌بندی:", "").strip().replace("\n", " ")
-                        guide = b.strip().replace("\n", " ")
-                    elif "جمع‌بندی:" in raw:
-                        summary = raw.split("جمع‌بندی:", 1)[-1].strip().replace("\n", " ")
-                    else:
-                        summary = raw.replace("\n", " ")
-                    if len(summary) > 320:
-                        summary = summary[:320].rsplit(" ", 1)[0] + "…"
-                    if len(guide) > 220:
-                        guide = guide[:220].rsplit(" ", 1)[0] + "…"
-                    return summary, guide
-                except Exception:
-                    return "", ""
-
-            def _split_telegram_text(txt: str, limit: int = 3900):
-                """Split long Telegram messages without losing whole analysis sections.
-
-                Telegram text messages are limited to 4096 chars and captions to 1024.
-                We keep a safety margin and prefer line/section boundaries.
-                """
-                raw = (txt or "").strip()
-                if not raw:
-                    return []
-                chunks = []
-                current = ""
-                for line in raw.splitlines():
-                    candidate = line if not current else current + "\n" + line
-                    if len(candidate) <= limit:
-                        current = candidate
-                        continue
-                    if current:
-                        chunks.append(current)
-                        current = ""
-                    if len(line) <= limit:
-                        current = line
-                        continue
-                    # Extremely long AI line: strip HTML tags before hard-splitting so
-                    # a partial <b>...</b> tag can never corrupt Telegram parsing.
-                    plain = re.sub(r"<[^>]*>", "", line)
-                    plain = html.unescape(plain)
-                    while len(plain) > limit:
-                        chunks.append(plain[:limit].rstrip())
-                        plain = plain[limit:]
-                    current = plain
-                if current:
-                    chunks.append(current)
-                return chunks
-
-            async def _send_full_text(txt: str, *, reply_to=None, reply_markup=None):
-                """Send the complete analysis as one or more Telegram messages."""
-                chunks = _split_telegram_text(txt)
-                if not chunks:
-                    return
-                target = reply_to or query.message
-                for i, chunk in enumerate(chunks):
-                    kwargs = {"text": chunk, "parse_mode": "HTML"}
-                    if i == len(chunks) - 1 and reply_markup is not None:
-                        kwargs["reply_markup"] = reply_markup
-                    await target.reply_text(**kwargs)
-
-            async def _update_market_analysis_text(full_text: str):
-                """متن تحلیل جدا از عکس؛ کیبورد همیشه زیر آخرین پیام تحلیل قرار می‌گیرد."""
-                ids = list(context.user_data.get("market_analysis_text_ids") or [])
-                chat_id = context.user_data.get("market_analysis_chat_id") or query.message.chat_id
-                chunks = _split_telegram_text(full_text, limit=3900) or ["داده کافی نیست."]
-                bot = context.bot
-                if ids:
-                    try:
-                        await bot.edit_message_text(
-                            chat_id=chat_id, message_id=ids[0], text=chunks[0],
-                            parse_mode="HTML", reply_markup=None
-                        )
-                    except Exception:
-                        pass
-                    for old_id in ids[1:]:
-                        try:
-                            await bot.delete_message(chat_id=chat_id, message_id=old_id)
-                        except Exception:
-                            pass
-                else:
-                    m = await bot.send_message(chat_id=chat_id, text=chunks[0], parse_mode="HTML")
-                    ids = [m.message_id]
-                for chunk in chunks[1:]:
-                    m = await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="HTML")
-                    ids.append(m.message_id)
-                # فقط آخرین/آخرین تکه دکمه‌ها را داشته باشد؛ نه عکس و نه متن اول.
-                for old_id in ids[:-1]:
-                    try:
-                        await bot.edit_message_reply_markup(chat_id=chat_id, message_id=old_id, reply_markup=None)
-                    except Exception:
-                        pass
-                try:
-                    await bot.edit_message_reply_markup(chat_id=chat_id, message_id=ids[-1], reply_markup=menu)
-                except Exception:
-                    pass
-                context.user_data["market_analysis_text_ids"] = ids
-                context.user_data["market_analysis_chat_id"] = chat_id
-
-            async def _edit_photo_caption(png: bytes | None, caption: str):
-                """نمودار را روی همان پیام به‌روزرسانی کن؛ کیبورد فقط زیر متن تحلیل باشد."""
-                msg = query.message
-                full_input = (caption or "📈 نمودار تحلیل").strip()
-                if len(full_input) > 1000 or "━━━━━━━━━━━━━━━━━━━━" in full_input or "تحلیل هوشمند" in full_input:
-                    try:
-                        await _update_market_analysis_text(full_input)
-                    except Exception as _txt_exc:
-                        logger.debug("market analysis text update: %s", _txt_exc)
-                cap = full_input.split("\n━━━━━━━━━━━━━━━━━━━━", 1)[0].strip()[:1000]
-                try:
-                    # دکمه‌ها زیر متن هستند؛ بنابراین callback معمولاً از پیام متن می‌آید.
-                    # شناسه عکس قبلاً ذخیره شده و همان عکس را ویرایش می‌کنیم.
-                    photo_msg_id = context.user_data.get("market_chart_message_id")
-                    chat_id = context.user_data.get("market_chart_chat_id") or msg.chat_id
-                    if msg.photo:
-                        photo_msg_id = msg.message_id
-                        chat_id = msg.chat_id
-                    if photo_msg_id:
-                        if png:
-                            bio = BytesIO(png)
-                            bio.name = f"{symbol}_chart.png"
-                            media = InputMediaPhoto(media=bio, caption=cap, parse_mode="HTML")
-                            await context.bot.edit_message_media(
-                                chat_id=chat_id, message_id=photo_msg_id, media=media, reply_markup=None
-                            )
-                        else:
-                            await context.bot.edit_message_caption(
-                                chat_id=chat_id, message_id=photo_msg_id,
-                                caption=cap, parse_mode="HTML", reply_markup=None
-                            )
-                        return
-                    # اگر عکس شناسه نداشت، متن callback را دست‌کاری نکن؛ تحلیل متن قبلاً آپدیت شده است.
-                except Exception as exc:
-                    logger.warning("market chart same-message edit failed: %s", exc)
-
-            async def _edit_text(txt: str):
-                """Edit first message and send remaining chunks; never truncate at 4000."""
-                text = (txt or "").strip()
-                msg = query.message
-                chunks = _split_telegram_text(text)
-                if not chunks:
-                    chunks = ["داده کافی نیست."]
-                try:
-                    if msg.photo:
-                        # عکس فقط نمودار است؛ دکمه‌ها زیر متن تحلیل قرار می‌گیرند.
-                        await msg.edit_caption(caption=msg.caption or "📈 نمودار تحلیل", parse_mode="HTML", reply_markup=None)
-                        await _update_market_analysis_text(text)
-                    else:
-                        await _update_market_analysis_text(text)
-                except Exception:
-                    try:
-                        await _send_full_text(text, reply_to=msg, reply_markup=menu)
-                    except Exception as _exc:
-                        logger.debug("%s: %s", __name__, _exc)
+            from bot.services.crypto_callback_ui import CryptoCallbackUI
+            ui = CryptoCallbackUI(query=query, context=context, menu=menu, symbol=symbol)
 
             if action == "gold":
                 txt = await analyze_gold("1h")
@@ -1539,7 +1367,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     png, _cap = await get_gold_chart("1h")
                 except Exception:
                     png = None
-                await _edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
+                await ui.edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
                 return
 
             if action == "ai" and symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
@@ -1556,84 +1384,42 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند طلا وجود ندارد.").strip())
                 out = "🧠 <b>تحلیل هوشمند XAU/USD</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
                 png, _cap = await get_gold_chart("1h")
-                await _edit_photo_caption(png, out)
+                await ui.edit_photo_caption(png, out)
                 return
 
             if action == "ai":
-                # گزارش هوشمند باید کل داده قابل‌استفاده را تحلیل کند، نه اینکه آن را به
-                # caption عکس محدود کند. پاسخ AI هم در صورت توقف زودهنگام ادامه داده می‌شود.
+                from bot.services.crypto_ai_report import build_crypto_ai_report
                 base = await analyze_crypto(symbol, timeframe="4h")
-                from bot.services.ai_service import ask_ai
-                required_sections = [
-                    "وضعیت بازار", "ساختار", "BOS", "کندل", "حمایت", "عرضه",
-                    "نقدینگی", "شکست", "RSI", "حجم", "Funding", "MTF",
-                    "Long", "Short", "invalidation", "نتیجه",
-                ]
-                prompt = (
-                    "تو تحلیل‌گر ارشد Price Action و بازارهای مالی هستی. داده‌های زیر از منابع زنده سیستم آمده‌اند. "
-                    "همه داده‌های موجود را بررسی کن و هیچ قیمت، سطح یا درصدی را حدس نزن. "
-                    "خروجی برای Telegram است و باید یک گزارش کامل و چندبخشی باشد؛ جدول Markdown نساز. "
-                    "حتماً همه این بخش‌ها را تا انتها پوشش بده و قبل از تکمیل هیچ‌وقت گزارش را متوقف نکن: "
-                    "1) وضعیت بازار، 2) HH/HL/LH/LL، 3) BOS/CHOCH، 4) کندل و rejection، "
-                    "5) حمایت/مقاومت همان 4H، 6) عرضه/تقاضا، 7) نقدینگی و Equal High/Low، "
-                    "8) شکست و retest، 9) RSI/ADX/ATR و حجم، 10) واگرایی، 11) Funding/OI/Long-Short، "
-                    "12) MTF، 13) سناریوی Long، 14) سناریوی Short، 15) invalidation و مدیریت ریسک، "
-                    "16) نتیجه نهایی. اگر داده‌ای نیست صریحاً «داده‌ای موجود نیست» بنویس. "
-                    "در بازار ضعیف یا متناقض، ورود را تأیید نکن. تیترها واضح و شماره‌گذاری‌شده باشند. "
-                    "از اعداد موجود در داده استفاده کن و عدد جدید نساز.\n\n" + (base or "")[:12000]
+                answer = await build_crypto_ai_report(
+                    user_id=query.from_user.id,
+                    symbol=symbol,
+                    base_report=base,
+                    timeframe="4H",
                 )
-                answer, _ = await ask_ai(query.from_user.id, prompt)
-                answer = (answer or "").strip()
-
-                # بعضی مدل‌ها با وجود prompt کامل، وسط گزارش متوقف می‌شوند. در این حالت
-                # فقط بخش‌های مفقود را در یک درخواست ادامه‌ای می‌گیریم و به پاسخ اول می‌چسبانیم.
-                lower_answer = answer.lower()
-                missing = [sec for sec in required_sections if sec.lower() not in lower_answer]
-                if answer and (len(missing) >= 3 or not any(x in lower_answer for x in ("نتیجه", "سناریوی long", "سناریوی short"))):
-                    continuation_prompt = (
-                        "پاسخ زیر یک گزارش Price Action است که زودتر از موعد متوقف شده است. "
-                        "آن را از ادامه همان نقطه کامل کن؛ بخش‌های قبلی را تکرار نکن و مقدمه جدید نساز. "
-                        "تمام بخش‌های باقی‌مانده را با داده‌های گزارش پایه پوشش بده، مخصوصاً: "
-                        "شکست و retest، RSI/ADX/ATR، حجم، واگرایی، Funding/OI/Long-Short، MTF، "
-                        "سناریوی Long، سناریوی Short، invalidation/ریسک و نتیجه نهایی. "
-                        "اگر داده‌ای برای موردی نیست صریحاً بگو «داده‌ای موجود نیست». هیچ عددی را حدس نزن. "
-                        "پاسخ فقط ادامه متن باشد.\n\n"
-                        "گزارش پایه:\n" + (base or "")[:12000] +
-                        "\n\nپاسخ ناقص فعلی:\n" + answer[-9000:]
-                    )
-                    try:
-                        continuation, _ = await ask_ai(query.from_user.id, continuation_prompt)
-                        continuation = (continuation or "").strip()
-                        if continuation:
-                            answer = answer + "\n\n" + continuation
-                    except Exception as _cont_exc:
-                        logger.debug("AI crypto continuation failed: %s", _cont_exc)
-
                 safe_answer = html.escape(answer or "داده کافی برای تحلیل هوشمند وجود ندارد.")
                 out = "🧠 <b>تحلیل هوشمند حرفه‌ای</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
-                # عکس فقط نمودار است؛ گزارش کامل در پیام‌های متنی ارسال/ویرایش می‌شود.
                 png, _cap = await get_crypto_chart(symbol, 30)
-                await _edit_photo_caption(png, out)
+                await ui.edit_photo_caption(png, out)
                 return
 
             if action == "pa":
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     txt = await analyze_gold("1h")
                     png, _ = await get_gold_chart("1h")
-                    await _edit_photo_caption(png, "🧠 <b>تحلیل پرایس اکشن طلا / XAUUSD — 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
+                    await ui.edit_photo_caption(png, "🧠 <b>تحلیل پرایس اکشن طلا / XAUUSD — 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
                 else:
                     txt = await analyze_crypto(symbol, timeframe="4h")
                     png, _ = await get_crypto_chart(symbol, 30)
-                    await _edit_photo_caption(png, "🧠 <b>تحلیل پرایس اکشن</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
+                    await ui.edit_photo_caption(png, "🧠 <b>تحلیل پرایس اکشن</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
                 return
 
             if action == "15m":
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     txt = await analyze_gold("15m")
                     png, _ = await get_gold_chart("15m")
-                    await _edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 15M</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
+                    await ui.edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 15M</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
                 else:
-                    await _edit_text("⚠️ تایم‌فریم 15M در این بخش فقط برای XAU/USD فعال است.")
+                    await ui.edit_text("⚠️ تایم‌فریم 15M در این بخش فقط برای XAU/USD فعال است.")
                 return
 
             if action == "day":
@@ -1641,63 +1427,63 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     base = await analyze_gold("1d")
                     png, _ = await get_gold_chart("1d")
-                    await _edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 1D</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (base or "داده کافی نیست."))
+                    await ui.edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 1D</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (base or "داده کافی نیست."))
                     return
                 # تحلیل روزانه + نمودار روزانه روی همان پیام
                 base = await analyze_crypto(symbol, timeframe="1d")
                 report = base
                 png, _cap = await get_crypto_chart(symbol, 90)
-                await _edit_photo_caption(png, report or "داده کافی نیست.")
+                await ui.edit_photo_caption(png, report or "داده کافی نیست.")
 
             elif action == "hr":
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     base = await analyze_gold("1h")
                     png, _ = await get_gold_chart("1h")
-                    await _edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (base or "داده کافی نیست."))
+                    await ui.edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (base or "داده کافی نیست."))
                     return
                 base = await analyze_crypto(symbol, timeframe="1h")
                 report = base
                 png, _cap = await get_crypto_chart(symbol, 7)
-                await _edit_photo_caption(png, report or "داده کافی نیست.")
+                await ui.edit_photo_caption(png, report or "داده کافی نیست.")
 
             elif action == "rec":
                 txt = await trading_recommendation(symbol)
-                await _edit_text(txt)
+                await ui.edit_text(txt)
 
             elif action == "der":
                 txt = await derivatives_radar(symbol)
-                await _edit_text(txt)
+                await ui.edit_text(txt)
 
             elif action == "risk":
                 txt = await risk_scenarios(symbol)
-                await _edit_text(txt)
+                await ui.edit_text(txt)
 
             elif action == "pos":
                 context.user_data["waiting_for"] = "crypto_pos"
-                await _edit_text(position_size_guide(symbol))
+                await ui.edit_text(position_size_guide(symbol))
 
             elif action == "al":
                 context.user_data["waiting_for"] = "crypto_alert"
                 txt = await entry_alert_text(symbol)
-                await _edit_text(txt)
+                await ui.edit_text(txt)
 
             elif action == "scan":
                 txt = await market_scanner(10)
-                await _edit_text(txt)
+                await ui.edit_text(txt)
 
             elif action == "ref":
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     base = await analyze_gold("4h")
                     png, _ = await get_gold_chart("4h")
-                    await _edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 4H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (base or "داده کافی نیست."))
+                    await ui.edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 4H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (base or "داده کافی نیست."))
                     return
                 base = await analyze_crypto(symbol, timeframe="4h")
                 report = base
                 png, _ = await get_crypto_chart(symbol, 30)
-                await _edit_photo_caption(png, report or "داده کافی نیست.")
+                await ui.edit_photo_caption(png, report or "داده کافی نیست.")
 
             else:
-                await _edit_text("❌ گزینه ناشناخته")
+                await ui.edit_text("❌ گزینه ناشناخته")
         except Exception as e:
             try:
                 await query.message.reply_text(f"⚠️ خطا: {e}")
