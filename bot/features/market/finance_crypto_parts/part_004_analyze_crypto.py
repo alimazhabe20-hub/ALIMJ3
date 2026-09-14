@@ -389,7 +389,7 @@ async def analyze_crypto(symbol: str, ai_summary: str = "", ai_guide: str = "", 
 
     lines.append("")
     lines.append("⚠️ صرفاً تحلیلی/آموزشی است؛ توصیه سرمایه‌گذاری قطعی نیست.")
-    text_out = chr(10).join(lines)
-    if len(text_out) > 3900:
-        text_out = text_out[:3890].rsplit(chr(10), 1)[0] + chr(10) + "…"
-    return text_out
+    # Telegram splitting is handled by the caller. Do not truncate the
+    # analytical report here; truncating at 3900 silently discarded the tail
+    # before the handler had a chance to split it into multiple messages.
+    return chr(10).join(lines)
