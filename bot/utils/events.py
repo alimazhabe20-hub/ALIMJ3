@@ -1,3 +1,4 @@
+from bot.utils.modular_loader import load_modular_part
 # دیکشنری کامل مناسبت‌های شمسی (همان دیکشنری قبلی - برای اختصار کامل نوشته شده)
 shamsi_events = {
     "1-1": ["جشن نوروز", "سال نو"],
@@ -316,19 +317,7 @@ hijri_events = {
 
 # Stable read-only-style accessors; callers receive copies and cannot mutate the
 # canonical event dictionaries accidentally.
-def get_shamsi_events(month: int, day: int) -> list[str]:
-    """Return Persian-calendar events for a month/day pair."""
-    try:
-        key = f"{int(month)}-{int(day)}"
-    except (TypeError, ValueError):
-        return []
-    return list(shamsi_events.get(key, ()))
+load_modular_part(__file__, 'events_parts/part_001_get_shamsi_events.py')
 
 
-def get_hijri_events(month: int, day: int) -> list[str]:
-    """Return Hijri events for a month/day pair."""
-    try:
-        key = f"{int(month)}-{int(day)}"
-    except (TypeError, ValueError):
-        return []
-    return list(hijri_events.get(key, ()))
+load_modular_part(__file__, 'events_parts/part_002_get_hijri_events.py')

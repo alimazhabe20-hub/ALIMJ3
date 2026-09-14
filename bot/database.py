@@ -3,6 +3,7 @@
 Low-level connection, transaction and backup primitives are isolated in
 ``database_core.py``; feature repositories remain available from this module.
 """
+from bot.utils.modular_loader import load_modular_part
 import sqlite3
 import os
 import time
@@ -23,202 +24,30 @@ from bot.database_core import (
 DB_PATH = config.DB_PATH
 BACKUP_DIR = Path(config.BACKUP_DIR)
 
-def init_db() -> None:
-    logger.info(f"Initializing database at {DB_PATH} ...")
-    restore_from_backup_if_needed()
-    # ریستور خودکار از GitHub (اگر DB خالی و تنظیمات موجود باشد)
-    try:
-        from bot.db_persist import auto_restore_if_empty
-        auto_restore_if_empty()
-    except Exception as e:
-        logger.error(f"auto_restore_if_empty: {e}")
-
-    conn = get_db_connection()
-    c = conn.cursor()
-    # فقط CREATE IF NOT EXISTS — هیچ‌وقت جدول users را DROP نمی‌کنیم
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS users ("
-        "user_id INTEGER PRIMARY KEY,"
-        "first_name TEXT,"
-        "city TEXT DEFAULT 'قم',"
-        "country TEXT DEFAULT 'Iran',"
-        "language TEXT DEFAULT 'fa',"
-        "subscribed INTEGER DEFAULT 1,"
-        "register_date TEXT,"
-        "last_active TEXT,"
-        "notification_enabled INTEGER DEFAULT 0,"
-        "notify_fajr INTEGER DEFAULT 0,"
-        "notify_dhuhr INTEGER DEFAULT 0,"
-        "notify_asr INTEGER DEFAULT 0,"
-        "notify_maghrib INTEGER DEFAULT 0,"
-        "notify_isha INTEGER DEFAULT 0"
-        ")"
-    )
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS stats ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "date TEXT,"
-        "total_users INTEGER,"
-        "active_users INTEGER"
-        ")"
-    )
-    for col, default in (
-        ("last_main_msg_id", "INTEGER"),
-        ("notification_enabled", "INTEGER DEFAULT 0"),
-        ("notify_fajr", "INTEGER DEFAULT 0"),
-        ("notify_dhuhr", "INTEGER DEFAULT 0"),
-        ("notify_asr", "INTEGER DEFAULT 0"),
-        ("notify_maghrib", "INTEGER DEFAULT 0"),
-        ("notify_isha", "INTEGER DEFAULT 0"),
-        ("birth_date", "TEXT"),
-    ):
-        try:
-            c.execute(f"ALTER TABLE users ADD COLUMN {col} {default}")
-        except sqlite3.OperationalError:
-            # Column already exists — expected on upgraded databases
-            pass
-        except Exception as mig_exc:
-            logger.debug("users migration %s failed: %s", col, mig_exc)
-    conn.commit()
-    conn.close()
-    init_extra_tables()
-    # V61-V65 platform tables: memory, watchlist, price alerts, metrics.
-    try:
-        from bot.services.v61_v65_platform import init_platform_tables
-        init_platform_tables()
-    except Exception as platform_exc:
-        logger.error("platform table initialization failed: %s", platform_exc)
-    try:
-        from bot.services.v70_platform import init_v70_tables
-        init_v70_tables()
-        from bot.services.v71_platform import init_v71_tables
-        init_v71_tables()
-        from bot.services.v73_platform import init_v73_tables
-        init_v73_tables()
-        from bot.services.v74_platform import init_v74_tables
-        init_v74_tables()
-        from bot.services.v75_platform import init_v75_tables
-        init_v75_tables()
-        from bot.services.v76_platform import init_v76_tables
-        init_v76_tables()
-        from bot.services.v77_platform import init_v77_tables
-        init_v77_tables()
-    except Exception as v70_exc:
-        logger.error("V70/V71/V73 table initialization failed: %s", v70_exc)
-    # V36: ثبت و کنترل نسخه schema؛ هیچ داده‌ای حذف یا بازنویسی نمی‌شود.
-    conn = get_db_connection()
-    try:
-        ensure_schema_version(conn, DB_PATH)
-    finally:
-        conn.close()
-    # یک‌بار: اذان‌ها پیش‌فرض خاموش (مگر کاربر خودش روشن کرده باشد بعد از این)
-    try:
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
-        c.execute("SELECT value FROM meta WHERE key = 'azan_off_by_default_v2'")
-        row = c.fetchone()
-        if not row:
-            c.execute(
-                "UPDATE users SET notification_enabled = 0, "
-                "notify_fajr = 0, notify_dhuhr = 0, notify_asr = 0, "
-                "notify_maghrib = 0, notify_isha = 0"
-            )
-            c.execute(
-                "INSERT INTO meta (key, value) VALUES ('azan_off_by_default_v2', '1')"
-            )
-            conn.commit()
-            logger.info("Migration: all azan notifications set to OFF by default")
-        conn.close()
-    except Exception as e:
-        logger.error(f"azan migration: {e}")
-    n = _user_count(DB_PATH)
-    logger.info(f"Database ready — {n} users")
+load_modular_part(__file__, 'database_parts/part_001_init_db.py')
 
 
 
-def get_schema_status() -> dict[str, object]:
-    """Return safe database schema metadata for diagnostics and tests."""
-    conn = get_db_connection()
-    try:
-        return schema_status(conn)
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_002_get_schema_status.py')
 
 
-def get_user(user_id: int) -> tuple[Any, ...] | None:
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-    result = c.fetchone()
-    conn.close()
-    return result
+load_modular_part(__file__, 'database_parts/part_003_get_user.py')
 
-def save_user(user_id: int, first_name: str | None, city: str = "قم", country: str = "Iran", language: str = "fa") -> None:
-    """ثبت/به‌روزرسانی کاربر با retry محدود در صورت lock دیتابیس."""
-    _execute_write(
-        "INSERT INTO users "
-        "(user_id, first_name, city, country, language, subscribed, "
-        "register_date, last_active, notification_enabled, notify_fajr, "
-        "notify_dhuhr, notify_asr, notify_maghrib, notify_isha) "
-        "VALUES (?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'), 0, 0, 0, 0, 0, 0) "
-        "ON CONFLICT(user_id) DO UPDATE SET "
-        "first_name=excluded.first_name, last_active=datetime('now')",
-        (user_id, first_name, city, country, language),
-    )
+load_modular_part(__file__, 'database_parts/part_004_save_user.py')
 
-def update_user_field(user_id: int, field: str, value: Any) -> None:
-    allowed_fields = {
-        "city", "country", "language", "subscribed",
-        "notification_enabled", "notify_fajr", "notify_dhuhr",
-        "notify_asr", "notify_maghrib", "notify_isha"
-    }
-    if field not in allowed_fields:
-        logger.warning(f"Attempt to update invalid field: {field}")
-        return
-    _execute_write(
-        f"UPDATE users SET {field} = ?, last_active = datetime('now') WHERE user_id = ?",
-        (value, user_id),
-    )
+load_modular_part(__file__, 'database_parts/part_005_update_user_field.py')
 
-def get_all_users() -> list[tuple[Any, ...]]:
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT user_id, first_name, city, language FROM users WHERE subscribed = 1")
-    result = c.fetchall()
-    conn.close()
-    return result
+load_modular_part(__file__, 'database_parts/part_006_get_all_users.py')
 
-def get_active_users_today() -> int:
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM users WHERE date(last_active) = date('now')")
-    result = c.fetchone()[0]
-    conn.close()
-    return result
+load_modular_part(__file__, 'database_parts/part_007_get_active_users_today.py')
 
-def update_stats() -> None:
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM users")
-    total = c.fetchone()[0]
-    active = get_active_users_today()
-    c.execute("INSERT INTO stats (date, total_users, active_users) VALUES (date('now'), ?, ?)", (total, active))
-    conn.commit()
-    conn.close()
-    logger.info(f"Stats updated: total={total}, active={active}")
+load_modular_part(__file__, 'database_parts/part_008_update_stats.py')
 
-def get_user_city(user_id: int) -> str:
-    user = get_user(user_id)
-    return user[2] if user else "قم"
+load_modular_part(__file__, 'database_parts/part_009_get_user_city.py')
 
-def get_user_country(user_id: int) -> str:
-    user = get_user(user_id)
-    return user[3] if user else "Iran"
+load_modular_part(__file__, 'database_parts/part_010_get_user_country.py')
 
-def get_user_language(user_id: int) -> str:
-    user = get_user(user_id)
-    return user[4] if user else "fa"
+load_modular_part(__file__, 'database_parts/part_011_get_user_language.py')
 
 
 # ── تنظیمات اذان ──
@@ -233,970 +62,168 @@ AZAN_FIELDS = {
 }
 
 
-def get_azan_settings(user_id):
-    """
-    برگرداندن تنظیمات اذان کاربر.
-    خروجی: {
-      enabled: bool,
-      fajr, dhuhr, asr, maghrib, isha: bool
-    }
-    """
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute(
-            """SELECT COALESCE(notification_enabled, 0),
-                      COALESCE(notify_fajr, 0),
-                      COALESCE(notify_dhuhr, 0),
-                      COALESCE(notify_asr, 0),
-                      COALESCE(notify_maghrib, 0),
-                      COALESCE(notify_isha, 0)
-               FROM users WHERE user_id = ?""",
-            (user_id,),
-        )
-        row = c.fetchone()
-    except Exception:
-        row = None
-    finally:
-        conn.close()
-    if not row:
-        return {
-            "enabled": False,
-            "fajr": False, "dhuhr": False, "asr": False,
-            "maghrib": False, "isha": False,
-        }
-    return {
-        "enabled": bool(row[0]),
-        "fajr": bool(row[1]),
-        "dhuhr": bool(row[2]),
-        "asr": bool(row[3]),
-        "maghrib": bool(row[4]),
-        "isha": bool(row[5]),
-    }
+load_modular_part(__file__, 'database_parts/part_012_get_azan_settings.py')
 
 
-def set_azan_master(user_id, enabled: bool):
-    """روشن/خاموش کردن کل اعلان اذان"""
-    update_user_field(user_id, "notification_enabled", 1 if enabled else 0)
+load_modular_part(__file__, 'database_parts/part_013_set_azan_master.py')
 
 
-def toggle_azan_prayer(user_id, prayer_key: str) -> bool:
-    """
-    روشن/خاموش کردن یک اذان خاص.
-    prayer_key: fajr|dhuhr|asr|maghrib|isha
-    برمی‌گرداند وضعیت جدید (True=روشن)
-    """
-    if prayer_key not in AZAN_FIELDS:
-        return False
-    field, _ = AZAN_FIELDS[prayer_key]
-    settings = get_azan_settings(user_id)
-    new_val = not settings.get(prayer_key, False)
-    update_user_field(user_id, field, 1 if new_val else 0)
-    return new_val
+load_modular_part(__file__, 'database_parts/part_014_toggle_azan_prayer.py')
 
 
-def get_users_for_azan():
-    """
-    کاربران فعال برای اعلان اذان.
-    خروجی: لیست (user_id, city, enabled, fajr, dhuhr, asr, maghrib, isha)
-    """
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute(
-            """SELECT user_id, city,
-                      COALESCE(notification_enabled, 0),
-                      COALESCE(notify_fajr, 0),
-                      COALESCE(notify_dhuhr, 0),
-                      COALESCE(notify_asr, 0),
-                      COALESCE(notify_maghrib, 0),
-                      COALESCE(notify_isha, 0)
-               FROM users
-               WHERE subscribed = 1
-                 AND COALESCE(notification_enabled, 0) = 1"""
-        )
-        rows = c.fetchall()
-    except Exception as e:
-        logger.error(f"get_users_for_azan: {e}")
-        rows = []
-    finally:
-        conn.close()
-    return rows
+load_modular_part(__file__, 'database_parts/part_015_get_users_for_azan.py')
 
-def get_last_main_msg_id(user_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute("SELECT last_main_msg_id FROM users WHERE user_id = ?", (user_id,))
-        row = c.fetchone()
-        return row[0] if row else None
-    except Exception:
-        return None
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_016_get_last_main_msg_id.py')
 
-def set_last_main_msg_id(user_id, message_id):
-    try:
-        _execute_write("UPDATE users SET last_main_msg_id = ? WHERE user_id = ?", (message_id, user_id))
-    except Exception as e:
-        logger.error(f"set_last_main_msg_id failed: {e}")
+load_modular_part(__file__, 'database_parts/part_017_set_last_main_msg_id.py')
 
 
 # ── یادداشت و یادآوری و آمار شخصی ──
 
-def init_extra_tables():
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS notes ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "user_id INTEGER,"
-        "content TEXT,"
-        "created_at TEXT DEFAULT (datetime('now')))"
-    )
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS reminders ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "user_id INTEGER,"
-        "text TEXT,"
-        "remind_at TEXT,"
-        "done INTEGER DEFAULT 0,"
-        "created_at TEXT DEFAULT (datetime('now')),"
-        "repeat_type TEXT DEFAULT 'once',"
-        "repeat_every INTEGER DEFAULT 0,"
-        "active INTEGER DEFAULT 1)"
-    )
-    for col, typ in (
-        ("repeat_type", "TEXT DEFAULT 'once'"),
-        ("repeat_every", "INTEGER DEFAULT 0"),
-        ("active", "INTEGER DEFAULT 1"),
-    ):
-        try:
-            c.execute(f"ALTER TABLE reminders ADD COLUMN {col} {typ}")
-        except Exception as _exc:
-            logger.debug("%s: %s", __name__, _exc)
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS ai_memory ("
-        "user_id INTEGER NOT NULL,"
-        "key TEXT NOT NULL,"
-        "value TEXT NOT NULL,"
-        "updated_at TEXT DEFAULT (datetime('now')),"
-        "PRIMARY KEY (user_id, key))"
-    )
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS ai_history_summary ("
-        "user_id INTEGER PRIMARY KEY,"
-        "summary TEXT,"
-        "updated_at TEXT DEFAULT (datetime('now')))"
-    )
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS usage_stats ("
-        "user_id INTEGER,"
-        "feature TEXT,"
-        "count INTEGER DEFAULT 1,"
-        "last_used TEXT,"
-        "PRIMARY KEY (user_id, feature))"
-    )
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS sent_jokes ("
-        "user_id INTEGER,"
-        "joke_hash TEXT,"
-        "sent_at TEXT DEFAULT (datetime('now')),"
-        "PRIMARY KEY (user_id, joke_hash))"
-    )
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS ai_preferences ("
-        "user_id INTEGER PRIMARY KEY,"
-        "provider TEXT NOT NULL,"
-        "model TEXT DEFAULT '*',"
-        "updated_at TEXT DEFAULT (datetime('now')))"
-    )
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS user_preferences ("
-        "user_id INTEGER PRIMARY KEY,"
-        "response_style TEXT DEFAULT 'balanced',"
-        "currency TEXT DEFAULT 'USD',"
-        "updated_at TEXT DEFAULT (datetime('now')))"
-    )
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS automation_preferences ("
-        "user_id INTEGER PRIMARY KEY,"
-        "daily_digest INTEGER DEFAULT 0,"
-        "last_digest_date TEXT,"
-        "updated_at TEXT DEFAULT (datetime('now')))"
-    )
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS economic_calendar_preferences ("
-        "user_id INTEGER PRIMARY KEY,"
-        "alerts INTEGER DEFAULT 0,"
-        "lead_minutes INTEGER DEFAULT 15,"
-        "timezone TEXT DEFAULT '',"
-        "currencies TEXT DEFAULT '',"
-        "impact TEXT DEFAULT 'high',"
-        "updated_at TEXT DEFAULT (datetime('now'))"
-        ")"
-    )
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS economic_calendar_sent ("
-        "user_id INTEGER NOT NULL,"
-        "event_id TEXT NOT NULL,"
-        "sent_at TEXT DEFAULT (datetime('now')),"
-        "PRIMARY KEY (user_id, event_id)"
-        ")"
-    )
-    # داده‌های تقویم اقتصادی به‌صورت دائمی نگهداری می‌شوند تا رویدادهای گذشته
-    # و مقدار Actual بعد از انتشار از بین نروند.
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS economic_calendar_events ("
-        "event_id TEXT PRIMARY KEY,"
-        "utc TEXT NOT NULL,"
-        "country TEXT DEFAULT '',"
-        "currency_name TEXT DEFAULT '',"
-        "impact TEXT DEFAULT '',"
-        "title TEXT DEFAULT '',"
-        "title_fa TEXT DEFAULT '',"
-        "actual TEXT DEFAULT '',"
-        "forecast TEXT DEFAULT '',"
-        "previous TEXT DEFAULT '',"
-        "source TEXT DEFAULT '',"
-        "updated_at TEXT DEFAULT (datetime('now'))"
-        ")"
-    )
-    c.execute("CREATE INDEX IF NOT EXISTS idx_economic_calendar_events_utc ON economic_calendar_events(utc)")
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS agent_learning ("
-        "user_id INTEGER NOT NULL,"
-        "agent TEXT NOT NULL,"
-        "tool TEXT NOT NULL,"
-        "success_count INTEGER DEFAULT 0,"
-        "failure_count INTEGER DEFAULT 0,"
-        "last_success TEXT,"
-        "last_failure TEXT,"
-        "last_error TEXT,"
-        "updated_at TEXT DEFAULT (datetime('now')),"
-        "PRIMARY KEY (user_id, agent, tool))"
-    )
-    try:
-        c.execute("ALTER TABLE users ADD COLUMN birth_date TEXT")
-    except Exception as _exc:
-        logger.debug("%s: %s", __name__, _exc)
-    # Indexes for the hottest read paths; CREATE IF NOT EXISTS is safe for upgrades.
-    for sql in (
-        "CREATE INDEX IF NOT EXISTS idx_users_subscribed ON users(subscribed)",
-        "CREATE INDEX IF NOT EXISTS idx_users_last_active ON users(last_active)",
-        "CREATE INDEX IF NOT EXISTS idx_reminders_pending ON reminders(done, active, remind_at)",
-        "CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, done, active)",
-        "CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(user_id, id DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_sent_jokes_user_time ON sent_jokes(user_id, sent_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_usage_feature ON usage_stats(feature, count DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_agent_learning_user ON agent_learning(user_id, agent, tool)",
-        "CREATE INDEX IF NOT EXISTS idx_economic_calendar_sent_user ON economic_calendar_sent(user_id, sent_at DESC)",
-    ):
-        c.execute(sql)
-    conn.commit()
-    conn.close()
+load_modular_part(__file__, 'database_parts/part_018_init_extra_tables.py')
 
 
 
-def get_sent_joke_hashes(user_id, limit=5000):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute(
-            "SELECT joke_hash FROM sent_jokes WHERE user_id = ? ORDER BY sent_at DESC LIMIT ?",
-            (user_id, limit),
-        )
-        return {row[0] for row in c.fetchall()}
-    except Exception:
-        return set()
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_019_get_sent_joke_hashes.py')
 
 
-def mark_joke_sent(user_id, joke_hash):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute(
-            "INSERT OR IGNORE INTO sent_jokes (user_id, joke_hash) VALUES (?, ?)",
-            (user_id, joke_hash),
-        )
-        conn.commit()
-    except Exception as e:
-        logger.error(f"mark_joke_sent: {e}")
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_020_mark_joke_sent.py')
 
 
-def reset_sent_jokes(user_id):
-    """اگر همه جوک‌ها دیده شد، تاریخچه را پاک کن تا از اول شروع شود"""
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute("DELETE FROM sent_jokes WHERE user_id = ?", (user_id,))
-        conn.commit()
-    except Exception as e:
-        logger.error(f"reset_sent_jokes: {e}")
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_021_reset_sent_jokes.py')
 
 
 
-def add_note(user_id, content):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("INSERT INTO notes (user_id, content) VALUES (?, ?)", (user_id, content[:500]))
-    conn.commit()
-    conn.close()
+load_modular_part(__file__, 'database_parts/part_022_add_note.py')
 
 
-def get_notes(user_id, limit=10):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT id, content, created_at FROM notes WHERE user_id = ? ORDER BY id DESC LIMIT ?", (user_id, limit))
-    rows = c.fetchall()
-    conn.close()
-    return rows
+load_modular_part(__file__, 'database_parts/part_023_get_notes.py')
 
 
-def delete_note(user_id, note_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("DELETE FROM notes WHERE id = ? AND user_id = ?", (note_id, user_id))
-    conn.commit()
-    conn.close()
+load_modular_part(__file__, 'database_parts/part_024_delete_note.py')
 
 
-def add_reminder(user_id, text, remind_at, repeat_type="once", repeat_every=0):
-    """
-    repeat_type: once | daily | weekly | monthly | every_minutes
-    repeat_every: برای every_minutes = تعداد دقیقه؛ برای بقیه معمولاً ۱
-    """
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO reminders (user_id, text, remind_at, done, repeat_type, repeat_every, active) "
-        "VALUES (?, ?, ?, 0, ?, ?, 1)",
-        (user_id, (text or "")[:300], remind_at, repeat_type or "once", int(repeat_every or 0)),
-    )
-    rid = c.lastrowid
-    conn.commit()
-    conn.close()
-    return rid
+load_modular_part(__file__, 'database_parts/part_025_add_reminder.py')
 
 
-def get_pending_reminders(before_time=None):
-    conn = get_db_connection()
-    c = conn.cursor()
-    if before_time:
-        c.execute(
-            "SELECT id, user_id, text, remind_at, COALESCE(repeat_type,'once'), "
-            "COALESCE(repeat_every,0), COALESCE(active,1) "
-            "FROM reminders WHERE done = 0 AND COALESCE(active,1) = 1 AND remind_at <= ?",
-            (before_time,),
-        )
-    else:
-        c.execute(
-            "SELECT id, user_id, text, remind_at, COALESCE(repeat_type,'once'), "
-            "COALESCE(repeat_every,0), COALESCE(active,1) "
-            "FROM reminders WHERE done = 0 AND COALESCE(active,1) = 1"
-        )
-    rows = c.fetchall()
-    conn.close()
-    return rows
+load_modular_part(__file__, 'database_parts/part_026_get_pending_reminders.py')
 
 
-def mark_reminder_done(rid):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("UPDATE reminders SET done = 1, active = 0 WHERE id = ?", (rid,))
-    conn.commit()
-    conn.close()
+load_modular_part(__file__, 'database_parts/part_027_mark_reminder_done.py')
 
 
-def reschedule_reminder(rid, next_at):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "UPDATE reminders SET remind_at = ?, done = 0, active = 1 WHERE id = ?",
-        (next_at, rid),
-    )
-    conn.commit()
-    conn.close()
+load_modular_part(__file__, 'database_parts/part_028_reschedule_reminder.py')
 
 
-def list_user_reminders(user_id, limit=20):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "SELECT id, text, remind_at, COALESCE(repeat_type,'once'), COALESCE(repeat_every,0), "
-        "COALESCE(done,0), COALESCE(active,1) FROM reminders "
-        "WHERE user_id = ? ORDER BY id DESC LIMIT ?",
-        (user_id, limit),
-    )
-    rows = c.fetchall()
-    conn.close()
-    return rows
+load_modular_part(__file__, 'database_parts/part_029_list_user_reminders.py')
 
 
-def cancel_reminder(user_id, rid):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "UPDATE reminders SET done = 1, active = 0 WHERE id = ? AND user_id = ?",
-        (rid, user_id),
-    )
-    conn.commit()
-    n = c.rowcount
-    conn.close()
-    return n > 0
+load_modular_part(__file__, 'database_parts/part_030_cancel_reminder.py')
 
 
 # ── حافظه بلندمدت AI ────────────────────────────────────────────────────────
 
-def set_ai_memory(user_id, key, value):
-    key = (key or "note").strip()[:80]
-    value = (value or "").strip()[:1000]
-    if not value:
-        return
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO ai_memory (user_id, key, value, updated_at) VALUES (?, ?, ?, datetime('now')) "
-        "ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
-        (user_id, key, value),
-    )
-    conn.commit()
-    conn.close()
+load_modular_part(__file__, 'database_parts/part_031_set_ai_memory.py')
 
 
-def get_ai_memory(user_id, limit=40, query=None):
-    """Return memory, optionally ranked by lightweight lexical relevance.
-
-    The original (key, value) return shape is preserved. Ranking is performed
-    in Python to avoid DB-specific full-text dependencies and to keep upgrades
-    backward compatible.
-    """
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        # Read a bounded candidate set; this table is intentionally small.
-        c.execute(
-            "SELECT key, value, updated_at FROM ai_memory WHERE user_id = ? "
-            "ORDER BY updated_at DESC LIMIT ?",
-            (user_id, max(1, min(int(limit) * 3, 120))),
-        )
-        rows = c.fetchall()
-    except Exception:
-        return []
-    finally:
-        conn.close()
-
-    if not query:
-        return [(r[0], r[1]) for r in rows[:limit]]
-
-    import re
-    tokens = set(re.findall(r"[\w\u0600-\u06ff]{2,}", str(query).lower()))
-    if not tokens:
-        return [(r[0], r[1]) for r in rows[:limit]]
-
-    scored = []
-    for key, value, updated_at in rows:
-        hay = f"{key} {value}".lower()
-        overlap = sum(1 for token in tokens if token in hay)
-        key_bonus = sum(2 for token in tokens if token in str(key).lower())
-        score = overlap + key_bonus
-        # Small recency tie-break without depending on timestamp parsing.
-        scored.append((score, str(updated_at or ""), key, value))
-    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    return [(key, value) for score, _updated, key, value in scored[:limit]]
+load_modular_part(__file__, 'database_parts/part_032_get_ai_memory.py')
 
 
-def delete_ai_memory(user_id, key=None):
-    conn = get_db_connection()
-    c = conn.cursor()
-    if key:
-        c.execute("DELETE FROM ai_memory WHERE user_id = ? AND key = ?", (user_id, key))
-    else:
-        c.execute("DELETE FROM ai_memory WHERE user_id = ?", (user_id,))
-    conn.commit()
-    conn.close()
+load_modular_part(__file__, 'database_parts/part_033_delete_ai_memory.py')
 
 
-def get_ai_history_summary(user_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute("SELECT summary FROM ai_history_summary WHERE user_id = ?", (user_id,))
-        row = c.fetchone()
-        return row[0] if row and row[0] else ""
-    except Exception:
-        return ""
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_034_get_ai_history_summary.py')
 
 
-def set_ai_history_summary(user_id, summary):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO ai_history_summary (user_id, summary, updated_at) VALUES (?, ?, datetime('now')) "
-        "ON CONFLICT(user_id) DO UPDATE SET summary = excluded.summary, updated_at = datetime('now')",
-        (user_id, (summary or "")[:4000]),
-    )
-    conn.commit()
-    conn.close()
+load_modular_part(__file__, 'database_parts/part_035_set_ai_history_summary.py')
 
 
-def clear_ai_history_summary(user_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute("DELETE FROM ai_history_summary WHERE user_id = ?", (user_id,))
-        conn.commit()
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_036_clear_ai_history_summary.py')
 
 
-def record_agent_outcome(user_id, agent, tool, success, error=""):
-    """Record bounded agent/tool feedback for future routing decisions."""
-    agent = (str(agent or "general").strip()[:40] or "general")
-    tool = (str(tool or "unknown").strip()[:80] or "unknown")
-    error = str(error or "").strip()[:500]
-    conn = get_db_connection()
-    try:
-        conn.execute(
-            "INSERT INTO agent_learning "
-            "(user_id, agent, tool, success_count, failure_count, last_success, last_failure, last_error, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, CASE WHEN ? THEN datetime('now') ELSE NULL END, "
-            "CASE WHEN ? THEN datetime('now') ELSE NULL END, ?, datetime('now')) "
-            "ON CONFLICT(user_id, agent, tool) DO UPDATE SET "
-            "success_count = success_count + excluded.success_count, "
-            "failure_count = failure_count + excluded.failure_count, "
-            "last_success = CASE WHEN excluded.success_count > 0 THEN datetime('now') ELSE agent_learning.last_success END, "
-            "last_failure = CASE WHEN excluded.failure_count > 0 THEN datetime('now') ELSE agent_learning.last_failure END, "
-            "last_error = CASE WHEN excluded.failure_count > 0 THEN excluded.last_error ELSE agent_learning.last_error END, "
-            "updated_at = datetime('now')",
-            (user_id, agent, tool, int(bool(success)), int(not success), bool(success), bool(not success), error),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_037_record_agent_outcome.py')
 
 
-def get_agent_tool_reliability(user_id, agent, tool):
-    """Return (score, attempts, failures) with a neutral prior for unknown tools."""
-    conn = get_db_connection()
-    try:
-        row = conn.execute(
-            "SELECT success_count, failure_count FROM agent_learning WHERE user_id = ? AND agent = ? AND tool = ?",
-            (user_id, str(agent or "general")[:40], str(tool or "unknown")[:80]),
-        ).fetchone()
-    finally:
-        conn.close()
-    if not row:
-        return 0.5, 0, 0
-    success, failures = int(row[0] or 0), int(row[1] or 0)
-    attempts = success + failures
-    return ((success / attempts) if attempts else 0.5), attempts, failures
+load_modular_part(__file__, 'database_parts/part_038_get_agent_tool_reliability.py')
 
 
-def get_agent_learning(user_id, limit=50):
-    """Return recent agent learning rows for diagnostics/UI."""
-    conn = get_db_connection()
-    try:
-        rows = conn.execute(
-            "SELECT agent, tool, success_count, failure_count, last_error, updated_at "
-            "FROM agent_learning WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?",
-            (user_id, max(1, min(int(limit), 100))),
-        ).fetchall()
-        return rows
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_039_get_agent_learning.py')
 
-def track_usage(user_id, feature):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('''INSERT INTO usage_stats (user_id, feature, count, last_used)
-                 VALUES (?, ?, 1, datetime('now'))
-                 ON CONFLICT(user_id, feature) DO UPDATE SET
-                 count = count + 1, last_used = datetime('now')''', (user_id, feature))
-    conn.commit()
-    conn.close()
+load_modular_part(__file__, 'database_parts/part_040_track_usage.py')
 
 
-def get_user_usage(user_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT feature, count FROM usage_stats WHERE user_id = ? ORDER BY count DESC", (user_id,))
-    rows = c.fetchall()
-    conn.close()
-    return rows
+load_modular_part(__file__, 'database_parts/part_041_get_user_usage.py')
 
 
-def set_birth_date(user_id, birth_date):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("UPDATE users SET birth_date = ? WHERE user_id = ?", (birth_date, user_id))
-    conn.commit()
-    conn.close()
+load_modular_part(__file__, 'database_parts/part_042_set_birth_date.py')
 
 
-def get_birth_date(user_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute("SELECT birth_date FROM users WHERE user_id = ?", (user_id,))
-        row = c.fetchone()
-        return row[0] if row else None
-    except Exception:
-        return None
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_043_get_birth_date.py')
 
 
 # ── Smart UX preferences ───────────────────────────────────────────────────
 
-def get_user_preferences(user_id):
-    """Return lightweight UX preferences without exposing raw conversation data."""
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute(
-            "SELECT response_style, currency FROM user_preferences WHERE user_id = ?",
-            (user_id,),
-        )
-        row = c.fetchone()
-        if not row:
-            return {"response_style": "balanced", "currency": "USD"}
-        return {"response_style": row[0] or "balanced", "currency": row[1] or "USD"}
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_044_get_user_preferences.py')
 
 
-def set_user_preference(user_id, key, value):
-    """Safely update one supported UX preference."""
-    allowed = {"response_style", "currency"}
-    if key not in allowed:
-        raise ValueError("unsupported preference")
-    value = str(value).strip()[:32]
-    conn = get_db_connection()
-    try:
-        conn.execute(
-            "INSERT INTO user_preferences (user_id, response_style, currency, updated_at) "
-            "VALUES (?, ?, ?, datetime('now')) "
-            "ON CONFLICT(user_id) DO UPDATE SET "
-            f"{key} = excluded.{key}, updated_at = datetime('now')",
-            (user_id, value if key == "response_style" else "balanced",
-             value if key == "currency" else "USD"),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_045_set_user_preference.py')
 
 
-def clear_user_preferences(user_id):
-    conn = get_db_connection()
-    try:
-        conn.execute("DELETE FROM user_preferences WHERE user_id = ?", (user_id,))
-        conn.commit()
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_046_clear_user_preferences.py')
 
 
-def get_top_user_features(user_id, limit=3):
-    """Return most-used features, preferring recent usage when counts tie."""
-    limit = max(1, min(int(limit), 10))
-    conn = get_db_connection()
-    try:
-        rows = conn.execute(
-            "SELECT feature, count FROM usage_stats WHERE user_id = ? "
-            "ORDER BY count DESC, last_used DESC LIMIT ?",
-            (user_id, limit),
-        ).fetchall()
-        return rows
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_047_get_top_user_features.py')
 
 
 # ── Proactive automation preferences ───────────────────────────────────────
 
-def get_automation_preferences(user_id):
-    conn = get_db_connection()
-    try:
-        row = conn.execute(
-            "SELECT daily_digest, last_digest_date FROM automation_preferences WHERE user_id = ?",
-            (user_id,),
-        ).fetchone()
-        if not row:
-            return {"daily_digest": False, "last_digest_date": None}
-        return {"daily_digest": bool(row[0]), "last_digest_date": row[1]}
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_048_get_automation_preferences.py')
 
 
-def set_daily_digest(user_id, enabled):
-    enabled = 1 if enabled else 0
-    conn = get_db_connection()
-    try:
-        conn.execute(
-            "INSERT INTO automation_preferences (user_id, daily_digest, updated_at) "
-            "VALUES (?, ?, datetime('now')) "
-            "ON CONFLICT(user_id) DO UPDATE SET daily_digest=excluded.daily_digest, updated_at=datetime('now')",
-            (user_id, enabled),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_049_set_daily_digest.py')
 
 
-def get_users_for_daily_digest(date_key, limit=5000):
-    conn = get_db_connection()
-    try:
-        return conn.execute(
-            "SELECT user_id FROM automation_preferences "
-            "WHERE daily_digest = 1 AND COALESCE(last_digest_date, '') <> ? LIMIT ?",
-            (date_key, max(1, int(limit))),
-        ).fetchall()
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_050_get_users_for_daily_digest.py')
 
 
-def mark_daily_digest_sent(user_id, date_key):
-    conn = get_db_connection()
-    try:
-        cur = conn.execute(
-            "UPDATE automation_preferences SET last_digest_date = ?, updated_at = datetime('now') "
-            "WHERE user_id = ? AND daily_digest = 1 AND COALESCE(last_digest_date, '') <> ?",
-            (date_key, user_id, date_key),
-        )
-        conn.commit()
-        return cur.rowcount > 0
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_051_mark_daily_digest_sent.py')
 
 
-def get_upcoming_user_reminders(user_id, now_iso, limit=5):
-    conn = get_db_connection()
-    try:
-        return conn.execute(
-            "SELECT text, remind_at, COALESCE(repeat_type,'once') FROM reminders "
-            "WHERE user_id = ? AND done = 0 AND COALESCE(active,1) = 1 AND remind_at >= ? "
-            "ORDER BY remind_at ASC LIMIT ?",
-            (user_id, now_iso, max(1, int(limit))),
-        ).fetchall()
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_052_get_upcoming_user_reminders.py')
 
 
 # ── AI provider preference (per user) ──────────────────────────────────────
 
-def get_ai_preference(user_id):
-    """Returns (provider, model) or None. model='*' means all models of provider."""
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute(
-            "SELECT provider, model FROM ai_preferences WHERE user_id = ?",
-            (user_id,),
-        )
-        row = c.fetchone()
-        if row:
-            return (row[0], row[1] or "*")
-        return None
-    except Exception:
-        return None
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_053_get_ai_preference.py')
 
 
-def set_ai_preference(user_id, provider, model="*"):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute(
-            "INSERT INTO ai_preferences (user_id, provider, model, updated_at) "
-            "VALUES (?, ?, ?, datetime('now')) "
-            "ON CONFLICT(user_id) DO UPDATE SET "
-            "provider = excluded.provider, model = excluded.model, "
-            "updated_at = datetime('now')",
-            (user_id, provider, model or "*"),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_054_set_ai_preference.py')
 
 
-def clear_ai_preference(user_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute("DELETE FROM ai_preferences WHERE user_id = ?", (user_id,))
-        conn.commit()
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_055_clear_ai_preference.py')
 
 
 # ── تقویم اقتصادی ───────────────────────────────────────────────────────────
 
-def get_economic_calendar_preferences(user_id):
-    conn = get_db_connection()
-    try:
-        row = conn.execute(
-            "SELECT alerts, lead_minutes, timezone, currencies, impact FROM economic_calendar_preferences WHERE user_id = ?",
-            (user_id,),
-        ).fetchone()
-        if not row:
-            return {"alerts": False, "lead_minutes": 15, "timezone": "", "currencies": [], "impact": "all"}
-        return {
-            "alerts": bool(row[0]),
-            "lead_minutes": max(1, min(120, int(row[1] or 15))),
-            "timezone": row[2] or "",
-            "currencies": [x for x in (row[3] or "").split(",") if x],
-            "impact": row[4] or "all",
-        }
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_056_get_economic_calendar_preferences.py')
 
 
-def set_economic_calendar_preferences(user_id, *, alerts=None, lead_minutes=None, timezone=None, currencies=None, impact=None):
-    current = get_economic_calendar_preferences(user_id)
-    if alerts is not None:
-        current["alerts"] = bool(alerts)
-    if lead_minutes is not None:
-        current["lead_minutes"] = max(1, min(120, int(lead_minutes)))
-    if timezone is not None:
-        current["timezone"] = str(timezone).strip()[:64]
-    if currencies is not None:
-        current["currencies"] = [str(x).upper().strip() for x in currencies if str(x).strip()]
-    if impact is not None:
-        current["impact"] = str(impact).strip().lower()[:16] or "all"
-    conn = get_db_connection()
-    try:
-        conn.execute(
-            "INSERT INTO economic_calendar_preferences(user_id,alerts,lead_minutes,timezone,currencies,impact,updated_at) "
-            "VALUES(?,?,?,?,?,?,datetime('now')) "
-            "ON CONFLICT(user_id) DO UPDATE SET alerts=excluded.alerts, lead_minutes=excluded.lead_minutes, "
-            "timezone=excluded.timezone, currencies=excluded.currencies, impact=excluded.impact, updated_at=datetime('now')",
-            (user_id, 1 if current["alerts"] else 0, current["lead_minutes"], current["timezone"],
-             ",".join(current["currencies"]), current["impact"]),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    return current
+load_modular_part(__file__, 'database_parts/part_057_set_economic_calendar_preferences.py')
 
 
-def upsert_economic_calendar_events(events):
-    """ذخیره/به‌روزرسانی رویدادها بدون حذف تاریخچه.
-
-    مقدارهای خالی از منبع، مقدار قبلی ذخیره‌شده را overwrite نمی‌کنند؛ این برای
-    Actual مهم است چون منبع ممکن است بین دو refresh آن را موقتاً خالی برگرداند.
-    """
-    rows = []
-    for e in events or []:
-        try:
-            utc = e.get("utc")
-            utc_s = utc.isoformat() if hasattr(utc, "isoformat") else str(utc or "")
-            if not e.get("id") or not utc_s:
-                continue
-            rows.append((
-                str(e["id"]), utc_s, str(e.get("country") or ""),
-                str(e.get("currency_name") or ""), str(e.get("impact") or ""),
-                str(e.get("title") or ""), str(e.get("title_fa") or ""),
-                str(e.get("actual") if e.get("actual") is not None else ""),
-                str(e.get("forecast") if e.get("forecast") is not None else ""),
-                str(e.get("previous") if e.get("previous") is not None else ""),
-                str(e.get("source") or ""),
-            ))
-        except Exception:
-            continue
-    if not rows:
-        return
-    conn = get_db_connection()
-    try:
-        conn.executemany(
-            "INSERT INTO economic_calendar_events "
-            "(event_id,utc,country,currency_name,impact,title,title_fa,actual,forecast,previous,source,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now')) "
-            "ON CONFLICT(event_id) DO UPDATE SET "
-            "utc=excluded.utc,country=excluded.country,currency_name=excluded.currency_name,"
-            "impact=excluded.impact,title=excluded.title,title_fa=excluded.title_fa,"
-            "actual=CASE WHEN excluded.actual <> '' THEN excluded.actual ELSE economic_calendar_events.actual END,"
-            "forecast=CASE WHEN excluded.forecast <> '' THEN excluded.forecast ELSE economic_calendar_events.forecast END,"
-            "previous=CASE WHEN excluded.previous <> '' THEN excluded.previous ELSE economic_calendar_events.previous END,"
-            "source=CASE WHEN excluded.source <> '' THEN excluded.source ELSE economic_calendar_events.source END,"
-            "updated_at=datetime('now')",
-            rows,
-        )
-        conn.commit()
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_058_upsert_economic_calendar_events.py')
 
 
-def get_economic_calendar_event(event_id):
-    conn = get_db_connection()
-    try:
-        return conn.execute(
-            "SELECT event_id,utc,country,currency_name,impact,title,title_fa,actual,forecast,previous,source FROM economic_calendar_events WHERE event_id=?",
-            (event_id,),
-        ).fetchone()
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_059_get_economic_calendar_event.py')
 
 
-def get_economic_calendar_events(start_utc=None, end_utc=None):
-    """بازیابی تاریخچه تقویم؛ بدون حذف رویدادهای گذشته."""
-    conn = get_db_connection()
-    try:
-        sql = "SELECT event_id,utc,country,currency_name,impact,title,title_fa,actual,forecast,previous,source FROM economic_calendar_events"
-        args = []
-        clauses = []
-        if start_utc is not None:
-            clauses.append("utc >= ?")
-            args.append(start_utc.isoformat() if hasattr(start_utc, "isoformat") else str(start_utc))
-        if end_utc is not None:
-            clauses.append("utc < ?")
-            args.append(end_utc.isoformat() if hasattr(end_utc, "isoformat") else str(end_utc))
-        if clauses:
-            sql += " WHERE " + " AND ".join(clauses)
-        sql += " ORDER BY utc ASC"
-        rows = conn.execute(sql, args).fetchall()
-        return rows
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_060_get_economic_calendar_events.py')
 
 
-def get_economic_calendar_alert_users():
-    conn = get_db_connection()
-    try:
-        return conn.execute(
-            "SELECT p.user_id, p.lead_minutes, p.timezone, p.currencies, p.impact "
-            "FROM economic_calendar_preferences p JOIN users u ON u.user_id=p.user_id "
-            "WHERE p.alerts=1 AND u.subscribed=1"
-        ).fetchall()
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_061_get_economic_calendar_alert_users.py')
 
 
-def economic_calendar_alert_was_sent(user_id, event_id):
-    conn = get_db_connection()
-    try:
-        return conn.execute(
-            "SELECT 1 FROM economic_calendar_sent WHERE user_id=? AND event_id=?",
-            (user_id, event_id),
-        ).fetchone() is not None
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_062_economic_calendar_alert_was_sent.py')
 
 
-def mark_economic_calendar_alert_sent(user_id, event_id):
-    conn = get_db_connection()
-    try:
-        conn.execute(
-            "INSERT OR IGNORE INTO economic_calendar_sent(user_id,event_id,sent_at) VALUES(?,?,datetime('now'))",
-            (user_id, event_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+load_modular_part(__file__, 'database_parts/part_063_mark_economic_calendar_alert_sent.py')

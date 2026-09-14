@@ -1,3 +1,4 @@
+from bot.utils.modular_loader import load_modular_part
 # دیکشنری کامل متون چندزبانه
 TEXTS = {
     "fa": {
@@ -93,47 +94,13 @@ SUPPORTED_LANGUAGES = tuple(TEXTS.keys())
 DEFAULT_LANGUAGE = "fa"
 
 
-def normalize_language(language: str | None) -> str:
-    """Return a supported language code, falling back to Persian."""
-    value = str(language or "").strip().lower()
-    return value if value in TEXTS else DEFAULT_LANGUAGE
+load_modular_part(__file__, 'texts_parts/part_001_normalize_language.py')
 
 
-def get_text_for_language(language: str | None, key: str, **kwargs: object) -> str:
-    """Resolve a translated string without requiring a database lookup."""
-    lang = normalize_language(language)
-    text = TEXTS[lang].get(key, TEXTS[DEFAULT_LANGUAGE].get(key, key))
-    if not kwargs:
-        return text
-    safe_kwargs: dict[str, object] = {}
-    for name, value in kwargs.items():
-        safe_kwargs[name] = value.replace("{", "(").replace("}", ")") if isinstance(value, str) else value
-    try:
-        return text.format(**safe_kwargs)
-    except (KeyError, IndexError, ValueError):
-        return text
+load_modular_part(__file__, 'texts_parts/part_002_get_text_for_language.py')
 
 
-def get_text(user_id, key: str, **kwargs: object) -> str:
-    from bot.database import get_user_language
-    try:
-        lang = get_user_language(user_id) or "fa"
-    except Exception:
-        lang = "fa"
-    text = TEXTS.get(lang, TEXTS["fa"]).get(key, key)
-    if not kwargs:
-        return text
-    # جلوگیری از کرش وقتی نام کاربر شامل { } باشد
-    safe_kwargs = {}
-    for k, v in kwargs.items():
-        if isinstance(v, str):
-            safe_kwargs[k] = v.replace("{", "(").replace("}", ")")
-        else:
-            safe_kwargs[k] = v
-    try:
-        return text.format(**safe_kwargs)
-    except Exception:
-        return text
+load_modular_part(__file__, 'texts_parts/part_003_get_text.py')
 
 
 # UI labels are translated at render-time so ReplyKeyboard buttons follow the
@@ -256,21 +223,10 @@ UI_LABELS.update({
 from contextvars import ContextVar
 _CURRENT_LANGUAGE = ContextVar("alimj3_current_language", default="fa")
 
-def set_current_language(language: str | None) -> str:
-    lang = normalize_language(language)
-    _CURRENT_LANGUAGE.set(lang)
-    return lang
+load_modular_part(__file__, 'texts_parts/part_004_set_current_language.py')
 
-def current_language() -> str:
-    return normalize_language(_CURRENT_LANGUAGE.get())
+load_modular_part(__file__, 'texts_parts/part_005_current_language.py')
 
-def ui(label: str, language: str | None = None) -> str:
-    lang = normalize_language(language or current_language())
-    return UI_LABELS.get(label, {}).get(lang, label)
+load_modular_part(__file__, 'texts_parts/part_006_ui.py')
 
-def canonical_ui_text(text: str) -> str:
-    value = str(text or "").strip()
-    for canonical, variants in UI_LABELS.items():
-        if value == canonical or value in variants.values():
-            return canonical
-    return value
+load_modular_part(__file__, 'texts_parts/part_007_canonical_ui_text.py')
