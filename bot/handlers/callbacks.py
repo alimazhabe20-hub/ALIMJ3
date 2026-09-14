@@ -19,7 +19,6 @@ from bot.api.calendar import get_today_tehran
 from bot.handlers.middleware import check_and_rate_limit
 from bot.config import config
 from bot.logger import logger
-from bot.handlers.v71_handlers import download_callback
 import jdatetime
 import asyncio
 import html
@@ -94,16 +93,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
     user_id = update.effective_user.id
-
-    # V71 downloader callbacks are handled before domain-specific callback routers.
-    if data and data.startswith("dl:"):
-        try:
-            if await download_callback(update, context, data):
-                return
-        except Exception:
-            logger.exception("downloader callback crashed")
-            await _safe_answer(query, "دانلود فعلاً در دسترس نیست.", show_alert=True)
-            return
 
     # ───────────────── تقویم اقتصادی بازار ─────────────────
     if data and data.startswith("ec:"):
@@ -448,9 +437,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     answer, provider = await ask_ai(user_id, prompt)
                 except Exception as ai_err:
                     logger.error("ec analyze ask_ai failed: %s", ai_err, exc_info=True)
+                    msg = str(ai_err).strip() or "سرویس AI پاسخ نداد"
+                    if len(msg) > 280:
+                        msg = msg[:280] + "…"
                     await query.message.reply_text(
-                        "⚠️ تحلیل این خبر الان ممکن نیست.\n\n"
-                        "چند ثانیه بعد دوباره امتحان کنید."
+                        "⚠️ تحلیل این خبر الان ممکن نیست.\n"
+                        f"{msg}\n\n"
+                        "اگر کلید AI تنظیم است، چند ثانیه بعد دوباره امتحان کنید."
                     )
                     return
                 from html import escape
@@ -564,18 +557,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ]
                     prompt = (
                         "نقش: تحلیل‌گر اقتصاد کلان.\n"
-                        "قوانین سخت: فقط فارسی؛ عدد جعلی نساز؛ فارکس جفت‌ارز ننویس؛ هیچ جمله یا تیتر ناتمام نگذار.\n"
-                        "دقیقاً این ۸ بخش را به ترتیب و کامل بنویس و هر بخش حداکثر ۲ جمله کامل باشد.\n"
-                        "معنی خبر: توضیح خبر و مقایسه Actual/Forecast/Previous.\n"
-                        "کریپتو: اثر احتمالی بر BTC/ETH و آلت‌کوین‌ها.\n"
-                        "دلار/DXY: اثر احتمالی بر دلار و شاخص DXY.\n"
-                        "طلا: اثر احتمالی بر طلا.\n"
-                        "سهام: اثر احتمالی بر سهام.\n"
-                        "اوراق و بازدهی: اثر احتمالی بر اوراق و بازدهی خزانه‌داری.\n"
-                        "سناریوی Actual در برابر Forecast: اگر Actual منتشر نشده، سناریوی بالاتر/مطابق/پایین‌تر از Forecast را کوتاه توضیح بده.\n"
-                        "جمع‌بندی: سناریوی پایه، مهم‌ترین ریسک و نکته کلیدی.\n"
-                        "حتماً پاسخ را تا «جمع‌بندی» تمام کن؛ پاسخ کوتاه اما کامل باشد.\n\n"
-                        "داده: "+ ctx
+                        "قوانین سخت:\n"
+                        "- فقط فارسی\n"
+                        "- عدد جعلی نساز\n"
+                        "- فارکس جفت‌ارز ننویس\n"
+                        "- هیچ جمله یا تیتر ناتمام نگذار\n"
+                        "- هر تیتر فقط یک‌بار بیاید\n"
+                        "دقیقاً این ۸ بخش را به ترتیب و کامل بنویس "
+                        "(اگر اثر ضعیف است بنویس «اثر مستقیم کم»):\n"
+                        "معنی خبر:\n"
+                        "کریپتو:\n"
+                        "دلار/DXY:\n"
+                        "طلا:\n"
+                        "سهام:\n"
+                        "اوراق و بازدهی:\n"
+                        "سناریوی Actual در برابر Forecast:\n"
+                        "جمع‌بندی:\n"
+                        "هر بخش حداکثر ۲ جمله کامل. حتماً تا جمع‌بندی را تمام کن.\n\n"
+                        "داده:\n" + ctx
                     )
 
                     try:
@@ -583,66 +582,52 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as ai_err:
                         logger.error("ec analyze failed: %s", ai_err, exc_info=True)
                         await (query.message or update.effective_message).reply_text(
-                            "⚠️ تحلیل هوشمند فعلاً در دسترس نیست. چند ثانیه بعد دوباره امتحان کنید."
+                            "⚠️ تحلیل ناموفق بود:\n" + str(ai_err)[:350]
                         )
                         return
 
                     answer = (answer or "").strip() or "تحلیل در دسترس نیست."
 
-                    # مدل‌ها گاهی به‌دلیل سقف خروجی وسط یک بخش متوقف می‌شوند.
-                    # قبل از ارسال، پاسخ را بررسی و حداکثر دو بار از همان نقطه تکمیل می‌کنیم.
-                    section_aliases = {
-                        "معنی خبر": ("معنی خبر",),
-                        "کریپتو": ("کریپتو", "رمزارز", "ارز دیجیتال"),
-                        "دلار": ("دلار/DXY", "دلار", "DXY"),
-                        "طلا": ("طلا",),
-                        "سهام": ("سهام",),
-                        "اوراق": ("اوراق و بازدهی", "اوراق"),
-                        "سناریو": ("سناریوی Actual", "سناریو"),
-                        "جمع‌بندی": ("جمع‌بندی", "جمع بندی"),
-                    }
-
                     def _missing_sections(text: str) -> list[str]:
-                        low = (text or "").replace("**", "").lower()
-                        return [name for name, aliases in section_aliases.items()
-                                if not any(a.lower() in low for a in aliases)]
+                        return [s for s in required_sections if s not in text]
 
                     def _looks_cut(text: str) -> bool:
                         t = (text or "").strip()
                         if not t:
                             return True
-                        if t.endswith(("،", ":", "؛", "-", "—")):
+                        if t[-1] not in ".!?…۔؟":
+                            # جمله ناتمام یا قطع‌شده
+                            if len(t) > 80:
+                                return True
+                        if t.endswith(("،", ":", "؛", "-", "—", "…")):
                             return True
-                        return len(t) > 80 and t[-1] not in ".!?…۔؟"
+                        return False
 
-                    for repair_round in range(2):
-                        missing = _missing_sections(answer)
-                        if not missing and not _looks_cut(answer):
-                            break
-                        missing_text = "، ".join(missing) if missing else "ادامه جمله/بخش ناتمام"
-                        cont_prompt = (
-                            "پاسخ زیر ناقص یا قطع شده است. فقط ادامه لازم را بنویس و هیچ بخش قبلی را تکرار نکن.\n"
-                            f"بخش‌های ناقص: {missing_text}.\n"
-                            "از دقیقاً همان نقطه ادامه بده و در پایان حتماً «جمع‌بندی:» را کامل کن. "
-                            "اگر بخش‌های اصلی قبلاً آمده‌اند، دوباره آن‌ها را ننویس. حداکثر ۲ جمله برای هر بخش.\n\n"
-                            "--- انتهای پاسخ قبلی ---\n" + answer[-1200:] +
-                            "\n--- داده اصلی ---\n" + ctx
-                        )
+                    # اگر بخش‌ها ناقص است یا متن قطع شده، یکبار ادامه بخواه
+                    missing = _missing_sections(answer)
+                    if missing or _looks_cut(answer):
                         try:
+                            cont_prompt = (
+                                "پاسخ قبلی ناقص بود. از همان‌جا که قطع شده ادامه بده و "
+                                "هیچ بخشی از متن قبلی را تکرار نکن.\n"
+                                "اگر تیتری جا مانده فقط همان‌ها را کامل بنویس:\n"
+                                + "\n".join(f"- {m}" for m in (missing or required_sections[-4:]))
+                                + "\nحتماً با «جمع‌بندی:» تمام کن.\n\n"
+                                "--- انتهای پاسخ قبلی ---\n"
+                                + answer[-700:]
+                                + "\n--- ادامه از اینجا ---\n\n"
+                                "داده:\n" + ctx
+                            )
                             cont, _ = await ask_ai(user_id, cont_prompt)
                             cont = (cont or "").strip()
-                            if not cont:
-                                continue
-                            # اگر مدل دوباره از اول جواب داد، فقط قسمت بعد از اولین بخش جدید را نگه می‌داریم.
-                            if cont.startswith(answer[:50]):
-                                cont = cont[len(answer[:50]):].lstrip(" \n")
-                            answer = (answer.rstrip() + "\n" + cont).strip()
+                            if cont:
+                                # جلوگیری از تکرار تیتر اول اگر مدل دوباره از اول شروع کرد
+                                if cont.startswith(answer[:40]):
+                                    answer = cont
+                                else:
+                                    answer = (answer.rstrip() + "\n" + cont).strip()
                         except Exception as cont_err:
-                            logger.warning("ec analyze continuation round %s failed: %s", repair_round + 1, cont_err)
-                            break
-
-                    # Markdown ستاره‌ای مدل را به خروجی تمیز HTML تبدیل می‌کنیم.
-                    answer = answer.replace("**", "")
+                            logger.debug("ec analyze continue failed: %s", cont_err)
 
                     from html import escape as _esc
 
@@ -730,7 +715,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     logger.error("ec analyze outer: %s", err, exc_info=True)
                     try:
                         await (query.message or update.effective_message).reply_text(
-                            "⚠️ تحلیل هوشمند فعلاً در دسترس نیست. چند ثانیه بعد دوباره امتحان کنید."
+                            "⚠️ خطا در تحلیل:\n" + str(err)[:400]
                         )
                     except Exception:
                         pass
@@ -786,7 +771,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         answer, _ = await ask_ai(user_id, prompt)
                     except Exception as ai_err:
                         await msg_target.reply_text(
-                            "⚠️ خلاصه سخنرانی فعلاً در دسترس نیست. چند ثانیه بعد دوباره امتحان کنید."
+                            "⚠️ خلاصه سخنرانی الان ممکن نیست.\n" + str(ai_err)[:300]
                         )
                         return
                     detail = event_detail(e, tz_name)
@@ -814,7 +799,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     logger.error("ec speech summary failed: %s", err, exc_info=True)
                     try:
                         await (query.message or update.effective_message).reply_text(
-                            "⚠️ خلاصه سخنرانی فعلاً در دسترس نیست. چند ثانیه بعد دوباره امتحان کنید."
+                            "⚠️ خطا در خلاصه سخنرانی:\n" + str(err)[:300]
                         )
                     except Exception:
                         pass
@@ -847,9 +832,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
             try:
-                await query.message.reply_text(
-                    "⚠️ موقتاً مشکلی در تقویم اقتصادی پیش آمد. چند ثانیه بعد دوباره امتحان کنید."
-                )
+                msg = str(e).strip() or "خطای ناشناخته"
+                if len(msg) > 300:
+                    msg = msg[:300] + "…"
+                if "AI" in msg or "api" in msg.lower() or "key" in msg.lower() or "مدل" in msg or "سرویس" in msg:
+                    user_msg = f"⚠️ تحلیل هوشمند الان در دسترس نیست.\n{msg}"
+                else:
+                    user_msg = f"⚠️ موقتاً مشکلی در تقویم اقتصادی پیش آمد.\n{msg}"
+                await query.message.reply_text(user_msg)
             except Exception:
                 pass
             return
@@ -963,7 +953,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error("ai_continue failed: %s", e, exc_info=True)
             try:
                 await query.message.reply_text(
-                    "⚠️ ادامه پاسخ فعلاً ممکن نیست. لطفاً دوباره امتحان کنید.",
+                    f"⚠️ ادامه پاسخ ممکن نشد: {str(e)[:200]}",
                 )
             except Exception:
                 pass
@@ -997,9 +987,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await notice.delete()
             except Exception as _exc:
                 logger.debug("%s: %s", __name__, _exc)
-        except Exception:
-            logger.exception("callback TTS failed for user=%s", user_id)
-            await query.message.reply_text("⚠️ ساخت ویس ناموفق بود. لطفاً دوباره تلاش کنید.")
+        except Exception as e:
+            await query.message.reply_text(f"⚠️ ویس ساخته نشد: {e}")
         return
 
     if data.startswith("ai_quick:"):
@@ -1027,9 +1016,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 txt = "دکمه نامعتبر."
             await query.message.reply_text(txt)
-        except Exception:
-            logger.exception("quick callback failed for user=%s kind=%s", user_id, kind)
-            await query.message.reply_text("⚠️ اجرای این گزینه فعلاً ناموفق بود. لطفاً دوباره تلاش کنید.")
+        except Exception as e:
+            await query.message.reply_text(f"⚠️ {e}")
         return
 
     # ───────────────── بروزرسانی منوی اصلی ─────────────────
@@ -1190,6 +1178,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             chat_id=cid,
                             text=(
                                 "⚠️ بروزرسانی موقتاً ناموفق بود.\n"
+                                f"کد خطا: {type(e).__name__}: {str(e)[:120]}\n"
                                 "چند ثانیه بعد دوباره بزنید یا /start بفرستید."
                             ),
                         )
@@ -1287,7 +1276,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_message(
                         chat_id=chat_id,
                         text=(
-                            "⚠️ موقتاً مشکلی پیش آمد. دستور /start را بفرستید."
+                            "⚠️ موقتاً مشکلی پیش آمد. دستور /start را بفرستید.\n"
+                            f"کد خطا: {type(e).__name__}"
                         ),
                     )
             except Exception as _exc:
@@ -1356,10 +1346,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(parts) < 3:
             return
         action, symbol = parts[1], parts[2]
-        # ICT تایم‌فریم را از callback چهارم می‌گیرد: cx:ict:BTC:4h
-        ict_interval = parts[3].lower() if len(parts) >= 4 else "1h"
-        if ict_interval not in {"15m", "1h", "4h", "1d"}:
-            ict_interval = "1h"
         context.user_data["crypto_symbol"] = symbol
         try:
             from bot.features.market.finance import (
@@ -1574,283 +1560,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if action == "ai":
-                # Smart AI: generate the 18 sections in small independent chunks.
-                # A single long generation can be cut by provider output limits;
-                # chunking makes the final report deterministic and complete.
-                tf = str(context.user_data.get("market_timeframe") or "4h").lower()
-                if tf not in {"15m", "1h", "4h", "1d"}:
-                    tf = "4h"
-                base = await analyze_crypto(symbol, timeframe=tf)
+                # گزارش هوشمند باید کل داده قابل‌استفاده را تحلیل کند، نه اینکه آن را به جدول تبدیل کند.
+                base = await analyze_crypto(symbol, timeframe=timeframe)
                 from bot.services.ai_service import ask_ai
-
-                sections = [
-                    "وضعیت بازار", "ساختار قیمت", "BOS / CHOCH", "کندل‌ها / Rejection",
-                    "حمایت / مقاومت", "عرضه / تقاضا", "نقدینگی / Equal High-Low",
-                    "شکست / Retest", "شاخص‌های تکنیکال", "حجم", "واگرایی",
-                    "Funding / OI / Long-Short", "MTF", "سناریوی Long", "سناریوی Short",
-                    "Invalidation", "مدیریت ریسک / توصیه عملی", "نتیجه نهایی",
-                ]
-
-                # Keep enough market data for every chunk without allowing the
-                # prompt itself to approach the router's input ceiling.
-                def _build_smart_source(report: str, limit: int = 4300) -> str:
-                    """Build a compact, data-rich context for the 18-section AI report.
-
-                    The AI router accepts a limited prompt size. Taking the first N
-                    characters of the full report can discard the most useful later
-                    fields (supply/demand, indicators, MTF, derivatives, risk, etc.).
-                    Keep summary lines plus targeted data lines instead.
-                    """
-                    text = (report or "").replace("\r", "").strip()
-                    if not text:
-                        return "داده مرجع در دسترس نیست."
-                    keywords = (
-                        "قیمت", "روند", "سیگنال", "ستاپ", "اجرا", "حمایت", "مقاومت",
-                        "ساختار", "BOS", "CHOCH", "کندل", "نقدینگی", "Equal",
-                        "شکست", "Break", "Retest", "RSI", "ADX", "ATR", "MACD",
-                        "EMA", "SMA", "حجم", "Volume", "واگرایی", "Divergence",
-                        "Funding", "فاندینگ", "OI", "Open Interest", "Long", "Short",
-                        "لانگ", "شورت", "MTF", "تایم", "چندتایم", "عرضه", "تقاضا",
-                        "FVG", "Order Block", "OB", "سناریو", "ابطال", "R:R", "ریسک",
-                        "BTC.D", "ETH/BTC", "Order Flow", "لیکویید", "لیکوییدیشن",
-                    )
-                    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-                    selected = []
-                    seen = set()
-
-                    def add(line: str):
-                        line = re.sub(r"\s+", " ", line).strip()
-                        if not line or line in seen:
-                            return
-                        # Avoid spending the whole context on decorative separators.
-                        if len(line) > 850:
-                            line = line[:850].rstrip() + "…"
-                        seen.add(line)
-                        selected.append(line)
-
-                    # Preserve the compact top summary because it usually contains
-                    # timeframe, signal and key levels.
-                    for line in lines[:10]:
-                        add(line)
-
-                    # Then collect data-bearing lines from the entire report, not only
-                    # its beginning. This is the critical fix for "داده کافی نیست.".
-                    for line in lines:
-                        low = line.lower()
-                        if any(k.lower() in low for k in keywords):
-                            add(line)
-
-                    # If the report is still sparse, retain remaining useful lines in
-                    # order until the context budget is reached.
-                    for line in lines:
-                        if line not in seen and not set(line) <= set("━─—-=_* "):
-                            add(line)
-
-                    out = []
-                    total = 0
-                    for line in selected:
-                        extra = len(line) + (1 if out else 0)
-                        if total + extra > limit:
-                            continue
-                        out.append(line)
-                        total += extra
-                    return "\n".join(out) or "داده مرجع در دسترس نیست."
-
-                source_data = _build_smart_source(base, 4300)
-
-                def _norm_heading(value: str) -> str:
-                    value = re.sub(r"[*_`#]", "", value or "")
-                    value = re.sub(r"\s+", " ", value).strip().lower()
-                    return value.replace("ـ", "-")
-
-                aliases = {
-                    "وضعیت بازار": ("وضعیت بازار", "وضعیت کلی"),
-                    "ساختار قیمت": ("ساختار قیمت", "ساختار", "hh/hl/lh/ll"),
-                    "BOS / CHOCH": ("bos / choch", "bos/choch", "bos", "choch"),
-                    "کندل‌ها / Rejection": ("کندل‌ها / rejection", "کندل و rejection", "کندل‌ها", "rejection"),
-                    "حمایت / مقاومت": ("حمایت / مقاومت", "حمایت/مقاومت", "حمایت", "مقاومت"),
-                    "عرضه / تقاضا": ("عرضه / تقاضا", "عرضه/تقاضا", "عرضه", "تقاضا"),
-                    "نقدینگی / Equal High-Low": ("نقدینگی / equal high-low", "نقدینگی", "equal high", "equal low"),
-                    "شکست / Retest": ("شکست / retest", "شکست/retest", "breakout", "retest"),
-                    "شاخص‌های تکنیکال": ("شاخص‌های تکنیکال", "شاخص های تکنیکال", "rsi", "adx", "atr"),
-                    "حجم": ("حجم", "volume"),
-                    "واگرایی": ("واگرایی", "divergence"),
-                    "Funding / OI / Long-Short": ("funding / oi / long-short", "funding", "oi", "long-short"),
-                    "MTF": ("mtf", "multi timeframe", "چندتایم‌فریمی"),
-                    "سناریوی Long": ("سناریوی long", "سناریو long", "long"),
-                    "سناریوی Short": ("سناریوی short", "سناریو short", "short"),
-                    "Invalidation": ("invalidation", "ابطال سناریو", "حد ابطال"),
-                    "مدیریت ریسک / توصیه عملی": ("مدیریت ریسک / توصیه عملی", "مدیریت ریسک", "توصیه عملی", "توصیه‌های عملی"),
-                    "نتیجه نهایی": ("نتیجه نهایی", "جمع‌بندی نهایی", "جمع بندی نهایی", "نتیجه‌گیری", "نتیجه گیری"),
-                }
-
-                def _heading_match(line: str, canonical: str) -> bool:
-                    n = _norm_heading(line)
-                    if len(n) > 180:
-                        return False
-                    # Remove list numbering such as "1." before comparing.
-                    n = re.sub(r"^\s*\d+\s*[.)-]?\s*", "", n)
-                    for alias in aliases[canonical]:
-                        a = _norm_heading(alias)
-                        if n == a or n.startswith(a + ":") or n.startswith(a + "-"):
-                            return True
-                    return False
-
-                def _clean_section_body(text: str) -> str:
-                    text = re.sub(r"[*_`#]", "", text or "")
-                    text = re.sub(r"<[^>]*>", "", text)
-                    text = html.unescape(text)
-                    text = re.sub(r"\s+", " ", text).strip(" -:؛")
-                    if not text:
-                        return "داده کافی نیست."
-                    # Keep the Telegram report compact: at most two sentences.
-                    parts = re.split(r"(?<=[.!؟。])\s+", text)
-                    text = " ".join(p.strip() for p in parts[:2] if p.strip())
-                    return text[:650].rstrip()
-
-                def _normalize_chunk(raw: str, wanted: list[str], start_index: int) -> str:
-                    lines = (raw or "").replace("\r", "").splitlines()
-                    positions = []
-                    for idx, line in enumerate(lines):
-                        for canonical in wanted:
-                            if _heading_match(line, canonical):
-                                positions.append((idx, canonical, line))
-                                break
-                    # Build a deterministic section map. If the provider omitted a
-                    # heading, we insert it instead of returning a truncated report.
-                    by_name = {}
-                    for pos, (line_idx, canonical, _line) in enumerate(positions):
-                        if canonical in by_name:
-                            continue
-                        next_idx = len(lines)
-                        for future_idx, _future_name, _future_line in positions[pos + 1:]:
-                            next_idx = future_idx
-                            break
-                        body_lines = lines[line_idx + 1:next_idx]
-                        by_name[canonical] = _clean_section_body(" ".join(body_lines))
-                    out_lines = []
-                    for offset, canonical in enumerate(wanted):
-                        body = by_name.get(canonical, "داده کافی نیست.")
-                        out_lines.append(f"{start_index + offset}. {canonical}: {body}")
-                    return "\n".join(out_lines)
-
-                # Four small calls are deliberately used instead of one 18-section
-                # generation. This is slower than one call by a small amount, but it
-                # prevents provider token caps from cutting the answer in section 1.
-                chunk_sizes = (5, 5, 4, 4)
-                chunks = []
-                cursor = 0
-                for size in chunk_sizes:
-                    wanted = sections[cursor:cursor + size]
-                    start_number = cursor + 1
-                    spec = "\n".join(
-                        f"{start_number + i}. {name}: 1 تا 2 جمله کامل"
-                        for i, name in enumerate(wanted)
-                    )
-                    prompt = (
-                        f"تو تحلیل‌گر ارشد Price Action و بازارهای مالی هستی. تایم‌فریم اصلی: {tf.upper()}.\n"
-                        "فقط از داده مرجع استفاده کن؛ قیمت، سطح، درصد، سیگنال یا رویداد عددی را حدس نزن.\n"
-                        "فقط بخش‌های فهرست‌شده را تولید کن، دقیقاً با همین شماره و تیتر. هیچ تیتر دیگری، مقدمه، نتیجه اضافه یا متن خارج از این بخش‌ها ننویس.\n"
-                        "هر بخش حداکثر دو جمله کامل و کوتاه باشد. اگر داده نداریم، صریحاً «داده کافی نیست.» بنویس.\n\n"
-                        + spec
-                        + "\n\nداده مرجع:\n"
-                        + source_data
-                    )
-                    raw = ""
-                    try:
-                        raw, _ = await ask_ai(query.from_user.id, prompt)
-                    except Exception as chunk_err:
-                        logger.warning(
-                            "crypto smart analysis chunk %s-%s failed: %s",
-                            start_number, start_number + size - 1, chunk_err,
-                        )
-
-                    normalized = _normalize_chunk(raw, wanted, start_number)
-                    # If the provider returned no recognizable heading, retry only
-                    # that small chunk; never regenerate the entire 18-section report.
-                    if all("داده کافی نیست." in line for line in normalized.splitlines()):
-                        retry_prompt = (
-                            f"فقط این {size} بخش را برای تحلیل {symbol.upper()} در تایم‌فریم {tf.upper()} بنویس.\n"
-                            "تیتر و شماره را دقیقاً کپی کن، هر بخش فقط یک جمله، بدون مقدمه و متن اضافه.\n\n"
-                            + spec
-                            + "\n\nداده:\n"
-                            + source_data
-                        )
-                        try:
-                            retry_raw, _ = await ask_ai(query.from_user.id, retry_prompt)
-                            normalized = _normalize_chunk(retry_raw, wanted, start_number)
-                        except Exception as retry_err:
-                            logger.warning(
-                                "crypto smart analysis chunk retry %s-%s failed: %s",
-                                start_number, start_number + size - 1, retry_err,
-                            )
-                    chunks.append(normalized)
-                    cursor += size
-
-                answer = "\n".join(chunks).strip()
-                # Final deterministic integrity check: exactly 18 canonical headings,
-                # exactly once, in order. No model call is needed for this step.
-                final_lines = []
-                for idx, canonical in enumerate(sections, 1):
-                    match = re.search(
-                        rf"(?m)^\s*{idx}\.\s*{re.escape(canonical)}\s*:\s*(.+?)\s*$",
-                        answer,
-                    )
-                    body = _clean_section_body(match.group(1)) if match else "داده کافی نیست."
-                    final_lines.append(f"{idx}. {canonical}: {body}")
-                answer = "\n".join(final_lines)
-
-                safe_answer = html.escape(answer or "داده کافی برای تحلیل هوشمند وجود ندارد.")
-                out = f"🧠 <b>تحلیل هوشمند حرفه‌ای — {tf.upper()}</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
-                chart_days = {"15m": 3, "1h": 7, "4h": 30, "1d": 90}[tf]
-                png, _cap = await get_crypto_chart(symbol, chart_days)
+                prompt = (
+                    "تو تحلیل‌گر ارشد Price Action و بازارهای مالی هستی. داده‌های زیر از منابع زنده سیستم آمده‌اند. "
+                    "همه داده‌های موجود را بررسی کن و هیچ قیمت، سطح یا درصدی را حدس نزن. "
+                    "خروجی را برای Telegram و به‌صورت گزارش خوانا بنویس؛ جدول Markdown نساز. "
+                    "بخش‌ها: وضعیت بازار، ساختار HH/HL/LH/LL، BOS/CHOCH، کندل‌ها و rejection، حمایت/مقاومت همان تایم‌فریم، "
+                    "عرضه/تقاضا، نقدینگی و Equal High/Low، شکست و retest، RSI/ADX/ATR، حجم، واگرایی، Funding/OI/Long-Short، "
+                    "MTF، سناریوی Long، سناریوی Short، invalidation، و نتیجه نهایی. اگر داده‌ای نیست صریح بگو. "
+                    "از عبارت‌های کوتاه و تیترهای واضح استفاده کن. در بازار ضعیف یا متناقض، ورود را تأیید نکن.\n\n" + base[:12000]
+                )
+                answer, _ = await ask_ai(query.from_user.id, prompt)
+                safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip())
+                out = "🧠 <b>تحلیل هوشمند حرفه‌ای</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
+                # تحلیل AI روی 4H است؛ نمودار هم دقیقاً 4H باشد.
+                png, _cap = await get_crypto_chart(symbol, 30)
                 await _edit_photo_caption(png, out)
-                return
-
-            if action == "ict":
-                try:
-                    from bot.features.market.finance_ict import analyze_ict
-                except Exception as imp_exc:
-                    report = f"❌ ماژول ICT در دسترس نیست: {imp_exc}"
-                    await _edit_text(report)
-                    return
-
-                context.user_data["market_timeframe"] = ict_interval
-                try:
-                    report = await analyze_ict(symbol, interval=ict_interval)
-                except Exception as exc:
-                    report = f"❌ خطا در تحلیل ICT: {exc}"
-                report = re.sub(r"\*{1,2}", "", str(report or "")).strip()
-                if not report:
-                    report = "⚠️ داده کافی برای تحلیل ICT در دسترس نیست."
-                if len(report) > 950:
-                    report = report[:950].rsplit("\n", 1)[0].rstrip() + "\n…"
-
-                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                chart_days = {"15m": 3, "1h": 7, "4h": 30, "1d": 90}[ict_interval]
-                try:
-                    png, _ = await get_crypto_chart(symbol, chart_days)
-                except Exception as chart_exc:
-                    png = None
-                    logger.warning("ICT chart generation failed for %s %s: %s", symbol, ict_interval, chart_exc)
-
-                menu = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("15M" if ict_interval != "15m" else "✅ 15M", callback_data=f"cx:ict:{symbol}:15m"),
-                        InlineKeyboardButton("1H" if ict_interval != "1h" else "✅ 1H", callback_data=f"cx:ict:{symbol}:1h"),
-                        InlineKeyboardButton("4H" if ict_interval != "4h" else "✅ 4H", callback_data=f"cx:ict:{symbol}:4h"),
-                        InlineKeyboardButton("1D" if ict_interval != "1d" else "✅ 1D", callback_data=f"cx:ict:{symbol}:1d"),
-                    ],
-                    [InlineKeyboardButton("🔙 بازگشت به تحلیل", callback_data=f"cx:ref:{symbol}")],
-                ])
-                # همان پیام/جریان بازار حفظ می‌شود؛ متن قبلی و عکس موجود هر دو به‌روز می‌شوند.
-                try:
-                    await _edit_photo_caption(
-                        png,
-                        "📐 <b>تحلیل ICT — " + html.escape(symbol.upper()) + " | " + ict_interval.upper() + "</b>\n━━━━━━━━━━━━━━━━━━━━\n" + html.escape(report),
-                    )
-                except Exception as edit_exc:
-                    logger.warning("ICT same-message edit failed for %s: %s", symbol, edit_exc)
                 return
 
             if action == "pa":
@@ -1865,7 +1592,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if action == "15m":
-                context.user_data["market_timeframe"] = "15m"
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     txt = await analyze_gold("15m")
                     png, _ = await get_gold_chart("15m")
@@ -1875,7 +1601,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if action == "day":
-                context.user_data["market_timeframe"] = "1d"
                 # برای طلا: روزانه از XAU/USD همان تایم‌فریم؛ برای کریپتو همان مسیر قبلی
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     base = await analyze_gold("1d")
@@ -1889,7 +1614,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _edit_photo_caption(png, report or "داده کافی نیست.")
 
             elif action == "hr":
-                context.user_data["market_timeframe"] = "1h"
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     base = await analyze_gold("1h")
                     png, _ = await get_gold_chart("1h")
@@ -1926,7 +1650,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _edit_text(txt)
 
             elif action == "ref":
-                context.user_data["market_timeframe"] = "4h"
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     base = await analyze_gold("4h")
                     png, _ = await get_gold_chart("4h")
@@ -1939,10 +1662,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             else:
                 await _edit_text("❌ گزینه ناشناخته")
-        except Exception:
-            logger.exception("market callback failed for user=%s action=%s", user_id, action)
+        except Exception as e:
             try:
-                await query.message.reply_text("⚠️ اجرای تحلیل ناموفق بود. لطفاً دوباره تلاش کنید.")
+                await query.message.reply_text(f"⚠️ خطا: {e}")
             except Exception as _exc:
                 logger.debug("%s: %s", __name__, _exc)
         return
