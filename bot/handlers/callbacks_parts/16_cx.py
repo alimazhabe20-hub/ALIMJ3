@@ -1,12 +1,31 @@
 async def _handle_cx(query, update, context, data, user_id):
     """Extracted callback branch; preserves original behavior."""
-    await _safe_answer(query)
     parts = data.split(":")
     if len(parts) < 3:
+        await _safe_answer(query)
         return
     action, symbol = parts[1], parts[2]
     context.user_data["crypto_symbol"] = symbol
+    _loading_labels = {
+        "ai": "🧠 در حال تحلیل هوشمند…",
+        "ict": "📐 در حال تحلیل ICT…",
+        "pa": "🧠 در حال تحلیل پرایس‌اکشن…",
+        "day": "📅 در حال آماده‌سازی تحلیل روزانه…",
+        "hr": "⏰ در حال آماده‌سازی تحلیل ساعتی…",
+        "4h": "🕓 در حال آماده‌سازی تحلیل 4 ساعته…",
+        "15m": "🕒 در حال آماده‌سازی تحلیل 15 دقیقه‌ای…",
+        "rec": "🎯 در حال تهیه توصیه معاملاتی…",
+        "der": "📡 در حال اسکن مشتقات…",
+        "risk": "🎲 در حال محاسبه ریسک…",
+        "scan": "🔍 در حال اسکن بازار…",
+        "ref": "🔄 در حال بروزرسانی…",
+        "gold": "🥇 در حال تحلیل طلا…",
+        "pos": "📐 آماده‌سازی سایز پوزیشن…",
+        "al": "🔔 آماده‌سازی هشدار…",
+    }
+    await _safe_answer(query, _loading_labels.get(action, "⏳ در حال پردازش…"))
     try:
+        from bot.logger import logger
         from bot.features.market.finance import (
             analyze_crypto, analyze_gold, get_crypto_chart, get_gold_chart, get_crypto_analysis_keyboard,
             trading_recommendation, derivatives_radar, risk_scenarios,
@@ -282,18 +301,25 @@ async def _handle_cx(query, update, context, data, user_id):
             ai_timeframe = context.user_data.get("crypto_ai_timeframe", "4h")
             if ai_timeframe not in ("15m", "1h", "4h", "1d"):
                 ai_timeframe = "4h"
-            base = await analyze_crypto(symbol, timeframe=ai_timeframe)
-            from bot.services.crypto_ai_report import build_crypto_ai_report
-            answer = await build_crypto_ai_report(
-                user_id=query.from_user.id,
-                symbol=symbol,
-                base_report=base or "",
-                timeframe=ai_timeframe.upper(),
-            )
+            try:
+                base = await analyze_crypto(symbol, timeframe=ai_timeframe)
+                from bot.services.crypto_ai_report import build_crypto_ai_report
+                answer = await build_crypto_ai_report(
+                    user_id=query.from_user.id,
+                    symbol=symbol,
+                    base_report=base or "",
+                    timeframe=ai_timeframe.upper(),
+                )
+            except Exception as exc:
+                logger.exception("smart AI analysis failed for %s/%s: %s", symbol, ai_timeframe, exc)
+                answer = f"❌ تحلیل هوشمند فعلاً در دسترس نیست.\n{html.escape(str(exc)[:200])}"
             safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip())
             out = "🧠 <b>تحلیل هوشمند حرفه‌ای</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
             chart_days = {"15m": 3, "1h": 7, "4h": 30, "1d": 90}.get(ai_timeframe, 30)
-            png, _cap = await get_crypto_chart(symbol, chart_days)
+            try:
+                png, _cap = await get_crypto_chart(symbol, chart_days)
+            except Exception:
+                png = None
             await _edit_photo_caption(png, out)
             return
 
