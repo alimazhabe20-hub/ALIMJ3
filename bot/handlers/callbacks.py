@@ -1478,45 +1478,48 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["market_analysis_chat_id"] = chat_id
 
             async def _edit_photo_caption(png: bytes | None, caption: str):
-                """نمودار را روی همان پیام به‌روزرسانی کن؛ کیبورد فقط زیر متن تحلیل باشد."""
+                """تحلیل و نمودار کاملاً مستقل‌اند: متن در پیام متنی، عکس فقط با کپشن کوتاه نمودار."""
                 msg = query.message
                 full_input = (caption or "📈 نمودار تحلیل").strip()
-                if len(full_input) > 1000 or "━━━━━━━━━━━━━━━━━━━━" in full_input or "تحلیل هوشمند" in full_input:
-                    try:
-                        await _update_market_analysis_text(full_input)
-                    except Exception as _txt_exc:
-                        logger.debug("market analysis text update: %s", _txt_exc)
-                cap = full_input.split("\n━━━━━━━━━━━━━━━━━━━━", 1)[0].strip()[:1000]
+
+                # متن تحلیل همیشه پیام جداگانه است و هرگز داخل caption عکس قرار نمی‌گیرد.
                 try:
-                    # دکمه‌ها زیر متن هستند؛ بنابراین callback معمولاً از پیام متن می‌آید.
-                    # شناسه عکس قبلاً ذخیره شده و همان عکس را ویرایش می‌کنیم.
+                    await _update_market_analysis_text(full_input)
+                except Exception as _txt_exc:
+                    logger.debug("market analysis text update: %s", _txt_exc)
+
+                # کپشن عکس فقط یک عنوان کوتاه است؛ گزارش/تحلیل/اعداد داخل عکس قرار نمی‌گیرند.
+                chart_title = full_input.split("\n━━━━━━━━━━━━━━━━━━━━", 1)[0].strip()[:200]
+                try:
                     photo_msg_id = context.user_data.get("market_chart_message_id")
                     chat_id = context.user_data.get("market_chart_chat_id") or msg.chat_id
                     if msg.photo:
                         photo_msg_id = msg.message_id
                         chat_id = msg.chat_id
-                    if photo_msg_id:
-                        # اگر نمودار همین تایم‌فریم از قبل روی پیام است، دوباره عکس را ارسال/ویرایش نکن.
-                        requested_tf = context.user_data.get("market_requested_timeframe")
-                        current_tf = context.user_data.get("market_chart_timeframe")
-                        if png and requested_tf and current_tf == requested_tf:
-                            return
-                        if png:
-                            bio = BytesIO(png)
-                            bio.name = f"{symbol}_chart.png"
-                            media = InputMediaPhoto(media=bio, caption=cap, parse_mode="HTML")
-                            await context.bot.edit_message_media(
-                                chat_id=chat_id, message_id=photo_msg_id, media=media, reply_markup=None
-                            )
-                            if requested_tf:
-                                context.user_data["market_chart_timeframe"] = requested_tf
-                        else:
-                            await context.bot.edit_message_caption(
-                                chat_id=chat_id, message_id=photo_msg_id,
-                                caption=cap, parse_mode="HTML", reply_markup=None
-                            )
+                    if not photo_msg_id or not png:
                         return
-                    # اگر عکس شناسه نداشت، متن callback را دست‌کاری نکن؛ تحلیل متن قبلاً آپدیت شده است.
+
+                    # اگر همین نماد/تایم‌فریم از قبل روی عکس است، عکس را دوباره دست‌کاری نکن.
+                    requested_tf = context.user_data.get("market_requested_timeframe")
+                    current_tf = context.user_data.get("market_chart_timeframe")
+                    if requested_tf and current_tf == requested_tf:
+                        return
+
+                    bio = BytesIO(png)
+                    bio.name = f"{symbol}_chart.png"
+                    media = InputMediaPhoto(
+                        media=bio,
+                        caption=chart_title,
+                        parse_mode="HTML",
+                    )
+                    await context.bot.edit_message_media(
+                        chat_id=chat_id,
+                        message_id=photo_msg_id,
+                        media=media,
+                        reply_markup=None,
+                    )
+                    if requested_tf:
+                        context.user_data["market_chart_timeframe"] = requested_tf
                 except Exception as exc:
                     logger.warning("market chart same-message edit failed: %s", exc)
 
@@ -1528,12 +1531,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if not chunks:
                     chunks = ["داده کافی نیست."]
                 try:
-                    if msg.photo:
-                        # عکس فقط نمودار است؛ دکمه‌ها زیر متن تحلیل قرار می‌گیرند.
-                        await msg.edit_caption(caption=msg.caption or "📈 نمودار تحلیل", parse_mode="HTML", reply_markup=None)
-                        await _update_market_analysis_text(text)
-                    else:
-                        await _update_market_analysis_text(text)
+                    # متن تحلیل همیشه مستقل از پیام عکس است؛ caption نمودار دست‌نخورده می‌ماند.
+                    await _update_market_analysis_text(text)
                 except Exception:
                     try:
                         await _send_full_text(text, reply_to=msg, reply_markup=menu)
