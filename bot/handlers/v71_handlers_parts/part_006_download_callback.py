@@ -36,7 +36,7 @@ async def download_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         loop=asyncio.get_running_loop()
         def progress_thread(p):
             asyncio.run_coroutine_threadsafe(progress(p), loop)
-        result=await download(url,mode=normalize_download_mode(mode),user_id=update.effective_user.id,progress_cb=progress_thread)
+        result=await download(url,mode=normalize_download_mode(mode),user_id=update.effective_user.id,progress_cb=progress_thread, preflight=False)
         if job_id: update_download(job_id, status="completed", progress=100)
         if notice:
             try: await notice.edit_text(f"{ux_text(_dl_lang(update), 'ready')}\n📄 {result['title']}\n📦 {result['size']/1024/1024:.1f}MB\n\n{ux_text(_dl_lang(update), 'sending')}")
