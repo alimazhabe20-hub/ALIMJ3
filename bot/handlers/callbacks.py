@@ -1591,64 +1591,72 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "Invalidation", "مدیریت ریسک / توصیه عملی", "نتیجه نهایی",
                 ]
 
-                # ai_runtime has a relatively small input budget. Passing the
-                # beginning of the long human-readable report was dropping the
-                # later sections (supply/demand, derivatives, MTF, etc.). Build
-                # one compact, data-first context instead of blindly truncating.
-                def _build_smart_source(report: str, limit: int = 4700) -> str:
+                # Keep enough market data for every chunk without allowing the
+                # prompt itself to approach the router's input ceiling.
+                def _build_smart_source(report: str, limit: int = 4300) -> str:
+                    """Build a compact, data-rich context for the 18-section AI report.
+
+                    The AI router accepts a limited prompt size. Taking the first N
+                    characters of the full report can discard the most useful later
+                    fields (supply/demand, indicators, MTF, derivatives, risk, etc.).
+                    Keep summary lines plus targeted data lines instead.
+                    """
                     text = (report or "").replace("\r", "").strip()
                     if not text:
-                        return "داده تحلیل در دسترس نیست."
-                    lines = [x.strip() for x in text.splitlines() if x.strip()]
-                    # Prefer actual data-bearing lines. These keywords cover the
-                    # complete 18-section Smart AI contract without depending on
-                    # the exact presentation order of analyze_crypto().
-                    keys = (
+                        return "داده مرجع در دسترس نیست."
+                    keywords = (
                         "قیمت", "روند", "سیگنال", "ستاپ", "اجرا", "حمایت", "مقاومت",
                         "ساختار", "BOS", "CHOCH", "کندل", "نقدینگی", "Equal",
                         "شکست", "Break", "Retest", "RSI", "ADX", "ATR", "MACD",
                         "EMA", "SMA", "حجم", "Volume", "واگرایی", "Divergence",
                         "Funding", "فاندینگ", "OI", "Open Interest", "Long", "Short",
                         "لانگ", "شورت", "MTF", "تایم", "چندتایم", "عرضه", "تقاضا",
-                        "FVG", "Order Block", "OB", "سناریو", "ابطال", "R:R",
-                        "ریسک", "BTC.D", "ETH/BTC", "Order Flow", "لیکویید", "لیکوییدیشن",
+                        "FVG", "Order Block", "OB", "سناریو", "ابطال", "R:R", "ریسک",
+                        "BTC.D", "ETH/BTC", "Order Flow", "لیکویید", "لیکوییدیشن",
                     )
+                    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
                     selected = []
                     seen = set()
-                    # Keep the short header/summary first, then every relevant
-                    # data line. Deduplication prevents repeated MTF/level lines
-                    # from consuming the context budget.
-                    for line in lines:
-                        if any(k.lower() in line.lower() for k in keys):
-                            norm = re.sub(r"\s+", " ", line).strip()
-                            if norm not in seen:
-                                selected.append(norm)
-                                seen.add(norm)
-                    if not selected:
-                        selected = lines[:80]
-                    # If there is room, include the first few summary lines so
-                    # the model still knows the asset/timeframe and headline bias.
-                    prefix = lines[:8]
-                    merged = []
-                    for line in prefix + selected:
-                        if line and line not in merged:
-                            merged.append(line)
-                    result = "\n".join(merged)
-                    if len(result) <= limit:
-                        return result
-                    # Trim by complete lines first; never cut a numeric value in
-                    # the middle.
-                    kept = []
-                    size = 0
-                    for line in merged:
-                        add = len(line) + (1 if kept else 0)
-                        if size + add > limit:
-                            continue
-                        kept.append(line)
-                        size += add
-                    return "\n".join(kept)[:limit].rstrip()
 
-                source_data = _build_smart_source(base)
+                    def add(line: str):
+                        line = re.sub(r"\s+", " ", line).strip()
+                        if not line or line in seen:
+                            return
+                        # Avoid spending the whole context on decorative separators.
+                        if len(line) > 850:
+                            line = line[:850].rstrip() + "…"
+                        seen.add(line)
+                        selected.append(line)
+
+                    # Preserve the compact top summary because it usually contains
+                    # timeframe, signal and key levels.
+                    for line in lines[:10]:
+                        add(line)
+
+                    # Then collect data-bearing lines from the entire report, not only
+                    # its beginning. This is the critical fix for "داده کافی نیست.".
+                    for line in lines:
+                        low = line.lower()
+                        if any(k.lower() in low for k in keywords):
+                            add(line)
+
+                    # If the report is still sparse, retain remaining useful lines in
+                    # order until the context budget is reached.
+                    for line in lines:
+                        if line not in seen and not set(line) <= set("━─—-=_* "):
+                            add(line)
+
+                    out = []
+                    total = 0
+                    for line in selected:
+                        extra = len(line) + (1 if out else 0)
+                        if total + extra > limit:
+                            continue
+                        out.append(line)
+                        total += extra
+                    return "\n".join(out) or "داده مرجع در دسترس نیست."
+
+                source_data = _build_smart_source(base, 4300)
 
                 def _norm_heading(value: str) -> str:
                     value = re.sub(r"[*_`#]", "", value or "")
