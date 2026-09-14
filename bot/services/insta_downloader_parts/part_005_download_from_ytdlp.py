@@ -18,10 +18,14 @@ async def download_from_ytdlp(url: str, temp_dir: str | None = None) -> str:
             "no_warnings": True,
             "noplaylist": True,
             "merge_output_format": "mp4",
-            "concurrent_fragment_downloads": max(1, min(8, int(os.getenv("DOWNLOADER_CONCURRENT_FRAGMENTS", "4")))),
-            "http_chunk_size": min(10 * 1024 * 1024, max(0, int(os.getenv("DOWNLOADER_HTTP_CHUNK_SIZE", str(10 * 1024 * 1024))))),
-            "buffersize": max(64 * 1024, int(os.getenv("DOWNLOADER_BUFFER_SIZE", str(1024 * 1024)))),
-            "retries": 5, "fragment_retries": 5,
+            # Keep the fast path responsive while allowing segmented media
+            # downloads to use several connections.
+            "concurrent_fragment_downloads": max(1, min(int(os.getenv("YTDLP_CONCURRENT_FRAGMENTS", "4")), 8)),
+            "http_chunk_size": min(max(int(os.getenv("YTDLP_HTTP_CHUNK_SIZE", str(10 * 1024 * 1024))), 0), 10 * 1024 * 1024),
+            "buffersize": 1024 * 1024,
+            "retries": 5,
+            "fragment_retries": 5,
+            "continuedl": True,
             "http_headers": {
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
