@@ -1022,8 +1022,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ───────────────── بروزرسانی منوی اصلی ─────────────────
     if data == "refresh_main":
-        from bot.logger import logger
-
+        # logger already imported at module level — do NOT re-import here
+        # (a local import makes `logger` unbound in other branches of this function).
         lock = _get_refresh_lock(user_id)
 
         if lock.locked():
@@ -1341,18 +1341,38 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── منوی تحلیل کریپتو (cx:action:symbol) — ویرایش همان پیام ──
     if data.startswith("cx:"):
-        await _safe_answer(query)
         parts = data.split(":")
         if len(parts) < 3:
+            await _safe_answer(query)
             return
         action, symbol = parts[1], parts[2]
         context.user_data["crypto_symbol"] = symbol
+        # نوتیفیکیشن بالای تلگرام: کار در حال انجام است
+        _loading_labels = {
+            "ai": "🧠 در حال تحلیل هوشمند…",
+            "ict": "📐 در حال تحلیل ICT…",
+            "pa": "🧠 در حال تحلیل پرایس‌اکشن…",
+            "day": "📅 در حال آماده‌سازی تحلیل روزانه…",
+            "hr": "⏰ در حال آماده‌سازی تحلیل ساعتی…",
+            "4h": "🕓 در حال آماده‌سازی تحلیل 4 ساعته…",
+            "15m": "🕒 در حال آماده‌سازی تحلیل 15 دقیقه‌ای…",
+            "rec": "🎯 در حال تهیه توصیه معاملاتی…",
+            "der": "📡 در حال اسکن مشتقات…",
+            "risk": "🎲 در حال محاسبه ریسک…",
+            "scan": "🔍 در حال اسکن بازار…",
+            "ref": "🔄 در حال بروزرسانی…",
+            "gold": "🥇 در حال تحلیل طلا…",
+            "pos": "📐 آماده‌سازی سایز پوزیشن…",
+            "al": "🔔 آماده‌سازی هشدار…",
+        }
+        await _safe_answer(query, _loading_labels.get(action, "⏳ در حال پردازش…"))
         try:
             from bot.features.market.finance import (
                 analyze_crypto, analyze_gold, get_crypto_chart, get_gold_chart, get_crypto_analysis_keyboard,
                 trading_recommendation, derivatives_radar, risk_scenarios,
                 position_size_guide, entry_alert_text, market_scanner,
             )
+            from bot.features.market.finance_ict import analyze_ict
             from io import BytesIO
             from telegram import InputMediaPhoto
 
@@ -1538,6 +1558,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as _exc:
                         logger.debug("%s: %s", __name__, _exc)
 
+            if action == "ict":
+                # تحلیل ICT از همان منوی تحلیل کریپتو
+                ict_timeframe = context.user_data.get("crypto_ai_timeframe", "1h")
+                if ict_timeframe not in ("15m", "1h", "4h", "1d"):
+                    ict_timeframe = "1h"
+                try:
+                    ict_report = await analyze_ict(symbol, interval=ict_timeframe)
+                except Exception as exc:
+                    logger.exception("ICT callback analysis failed for %s/%s: %s", symbol, ict_timeframe, exc)
+                    ict_report = "❌ تحلیل ICT فعلاً در دسترس نیست؛ دوباره تلاش کنید."
+                safe_ict = html.escape((ict_report or "داده کافی برای تحلیل ICT وجود ندارد.").strip())
+                out = (
+                    f"📐 <b>تحلیل ICT — {html.escape(symbol.upper())} / {ict_timeframe.upper()}</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    + safe_ict
+                )
+                await _edit_text(out)
+                return
+
             if action == "gold":
                 txt = await analyze_gold("1h")
                 try:
@@ -1569,18 +1608,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ai_timeframe = context.user_data.get("crypto_ai_timeframe", "4h")
                 if ai_timeframe not in ("15m", "1h", "4h", "1d"):
                     ai_timeframe = "4h"
-                base = await analyze_crypto(symbol, timeframe=ai_timeframe)
-                from bot.services.crypto_ai_report import build_crypto_ai_report
-                answer = await build_crypto_ai_report(
-                    user_id=query.from_user.id,
-                    symbol=symbol,
-                    base_report=base or "",
-                    timeframe=ai_timeframe.upper(),
-                )
+                try:
+                    base = await analyze_crypto(symbol, timeframe=ai_timeframe)
+                    from bot.services.crypto_ai_report import build_crypto_ai_report
+                    answer = await build_crypto_ai_report(
+                        user_id=query.from_user.id,
+                        symbol=symbol,
+                        base_report=base or "",
+                        timeframe=ai_timeframe.upper(),
+                    )
+                except Exception as exc:
+                    logger.exception("smart AI analysis failed for %s/%s: %s", symbol, ai_timeframe, exc)
+                    answer = f"❌ تحلیل هوشمند فعلاً در دسترس نیست.\n{html.escape(str(exc)[:200])}"
                 safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip())
                 out = "🧠 <b>تحلیل هوشمند حرفه‌ای</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
                 chart_days = {"15m": 3, "1h": 7, "4h": 30, "1d": 90}.get(ai_timeframe, 30)
-                png, _cap = await get_crypto_chart(symbol, chart_days)
+                try:
+                    png, _cap = await get_crypto_chart(symbol, chart_days)
+                except Exception:
+                    png = None
                 await _edit_photo_caption(png, out)
                 return
 
@@ -1596,15 +1642,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if action == "15m":
+                context.user_data["crypto_ai_timeframe"] = "15m"
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     txt = await analyze_gold("15m")
                     png, _ = await get_gold_chart("15m")
                     await _edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 15M</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
                 else:
-                    await _edit_text("⚠️ تایم‌فریم 15M در این بخش فقط برای XAU/USD فعال است.")
+                    txt = await analyze_crypto(symbol, timeframe="15m")
+                    png, _ = await get_crypto_chart(symbol, 3)
+                    await _edit_photo_caption(png, "🧠 <b>تحلیل کریپتو — 15M</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
                 return
 
             if action == "day":
+                context.user_data["crypto_ai_timeframe"] = "1d"
                 # برای طلا: روزانه از XAU/USD همان تایم‌فریم؛ برای کریپتو همان مسیر قبلی
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     base = await analyze_gold("1d")
@@ -1618,6 +1668,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _edit_photo_caption(png, report or "داده کافی نیست.")
 
             elif action == "hr":
+                context.user_data["crypto_ai_timeframe"] = "1h"
                 if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
                     base = await analyze_gold("1h")
                     png, _ = await get_gold_chart("1h")
@@ -1627,6 +1678,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 report = base
                 png, _cap = await get_crypto_chart(symbol, 7)
                 await _edit_photo_caption(png, report or "داده کافی نیست.")
+
+            elif action == "4h":
+                context.user_data["crypto_ai_timeframe"] = "4h"
+                if symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
+                    txt = await analyze_gold("4h")
+                    png, _ = await get_gold_chart("4h")
+                    await _edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 4H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
+                else:
+                    txt = await analyze_crypto(symbol, timeframe="4h")
+                    png, _ = await get_crypto_chart(symbol, 30)
+                    await _edit_photo_caption(png, "🧠 <b>تحلیل کریپتو — 4H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
+                return
 
             elif action == "rec":
                 txt = await trading_recommendation(symbol)
