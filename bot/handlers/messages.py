@@ -502,6 +502,59 @@ def _is_back(text):
     return t in ("🔙 بازگشت", "بازگشت") or "بازگشت" in t
 def _is_back_more(text):
     return "بازگشت به بیشتر" in text
+
+
+# ReplyKeyboard buttons must always win over an input/waiting state.  Without
+# this guard, a feature such as the downloader can consume a button label as
+# if it were the user's requested input (for example, "🔙 بازگشت").
+_MENU_BUTTON_PREFIXES = (
+    "➕", "🏠", "📅", "🕌", "💰", "🌤", "🛠", "🎮", "🎨", "👤",
+    "🏙", "🌍", "🔙", "💵", "💎", "🔄", "📈", "📐", "🔢", "🔐",
+    "📝", "🗺", "⏰", "📒", "📖", "😂", "🧠", "💪", "💖", "🕋",
+    "📿", "🙏", "🔔", "🌫", "📍", "🇬🇧", "🇮🇷", "🌈", "📋", "🤖", "🧹",
+    "🗓", "🥇", "📊", "📥", "🛒", "🛍",
+)
+_MENU_BUTTON_EXACT = {
+    "بیشتر", "بازار", "مذهبی", "ابزارها", "سرگرمی", "فونت", "پروفایل",
+    "تاریخ و سن", "هوا و مکان", "انتخاب شهر", "تقویم", "زبان",
+    "بازگشت", "بازگشت به بیشتر", "تحلیل طلا", "تحلیل ارز دیجیتال",
+    "تحلیل کریپتو", "نمودار کریپتو", "نمودار قیمت کریپتو",
+    "نمودار و تحلیل ارز دیجیتال", "تحلیل هوشمند حرفه‌ای", "دستیار خرید",
+}
+
+def _is_menu_button(text: str) -> bool:
+    t = (text or "").strip()
+    return bool(t) and (t in _MENU_BUTTON_EXACT or t.startswith(_MENU_BUTTON_PREFIXES))
+
+
+def _cancel_previous_operation_if_menu_button(context, text: str) -> bool:
+    """Cancel per-user transient state before routing a new menu button.
+
+    This is intentionally limited to the current user's transient state; it
+    never touches global/background workers belonging to other users.
+    """
+    if not _is_menu_button(text):
+        return False
+
+    data = context.user_data
+    # Cancel an explicitly registered foreground task if a feature created one.
+    for key in ("_active_task", "active_task", "operation_task", "_operation_task"):
+        task = data.pop(key, None)
+        if task is not None and hasattr(task, "cancel") and not task.done():
+            task.cancel()
+
+    # Clear all known conversation/input modes.  Feature handlers can then
+    # process the button normally instead of seeing stale waiting_for data.
+    for key in (
+        "waiting_for", "ai_mode", "ai_voice_chat", "_ai_already_sent",
+        "downloader_url", "downloader_mode", "pending_url", "pending_download",
+        "pending_action", "pending_input", "pending_operation",
+    ):
+        data.pop(key, None)
+
+    return True
+
+
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -524,7 +577,14 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = update.message.text.strip()
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name or "کاربر"
-    # V70 downloader: handle a URL immediately after the downloader button, before generic AI/menu routing.
+
+    # Global navigation rule: a real ReplyKeyboard button always cancels the
+    # previous input mode first. This MUST run before downloader/AI/waiting
+    # handlers so no feature can consume a menu label as user input.
+    _cancel_previous_operation_if_menu_button(context, text)
+
+    # V70 downloader: handle a URL only when it is actual input, never a menu
+    # button.
     if await handle_downloader_url_v71(update, context, text):
         return
     # City lookup is used by several unrelated menus. A broken/locked SQLite
