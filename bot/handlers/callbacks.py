@@ -1574,8 +1574,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if action == "ai":
-                # تایم‌فریم انتخاب‌شده توسط کاربر حفظ می‌شود تا تحلیل AI و نمودار
-                # دقیقاً روی همان تایم‌فریم باشند.
+                # Smart AI: generate the 18 sections in small independent chunks.
+                # A single long generation can be cut by provider output limits;
+                # chunking makes the final report deterministic and complete.
                 tf = str(context.user_data.get("market_timeframe") or "4h").lower()
                 if tf not in {"15m", "1h", "4h", "1d"}:
                     tf = "4h"
@@ -1589,120 +1590,155 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "Funding / OI / Long-Short", "MTF", "سناریوی Long", "سناریوی Short",
                     "Invalidation", "مدیریت ریسک / توصیه عملی", "نتیجه نهایی",
                 ]
-                section_spec = "\n".join(f"{i}. {name}: 1 تا 2 جمله کامل" for i, name in enumerate(sections, 1))
-                prompt = (
-                    f"تو تحلیل‌گر ارشد Price Action و بازارهای مالی هستی. تایم‌فریم اصلی تحلیل: {tf.upper()}.\n"
-                    "فقط از داده مرجع استفاده کن و هیچ قیمت، سطح، درصد یا سیگنال عددی را حدس نزن.\n"
-                    "گزارش برای Telegram است؛ کوتاه، حرفه‌ای و فارسی باشد و جدول Markdown نساز.\n"
-                    "قوانین ساختاری بسیار مهم: دقیقاً همین 18 بخش را دقیقاً یک‌بار و دقیقاً به همین ترتیب بنویس؛ "
-                    "هیچ تیتر تکراری، «ادامه»، بخش خارج از فهرست، یا محتوایی بعد از «نتیجه نهایی» ننویس. "
-                    "هر بخش حداکثر 2 جمله کامل باشد. اگر داده‌ای وجود ندارد، همان‌جا «داده کافی نیست» بنویس. "
-                    "در بازار ضعیف یا متناقض ورود را تأیید نکن.\n\n"
-                    + section_spec + "\n\nداده مرجع:\n" + (base or "")[:14000]
-                )
-                answer, _ = await ask_ai(query.from_user.id, prompt)
-                answer = (answer or "").strip()
 
-                def _norm_heading(x: str) -> str:
-                    x = re.sub(r"[*_`#]", "", x or "")
-                    x = re.sub(r"\s+", " ", x).strip().lower()
-                    return x.replace("ـ", "-")
+                # Keep enough market data for every chunk without allowing the
+                # prompt itself to approach the router's input ceiling.
+                source_data = (base or "").strip()
+                if len(source_data) > 10500:
+                    source_data = source_data[:10500]
 
-                aliases = [
-                    ("وضعیت بازار", ("وضعیت بازار", "وضعیت کلی")),
-                    ("ساختار قیمت", ("ساختار قیمت", "ساختار", "hh/hl/lh/ll")),
-                    ("BOS / CHOCH", ("bos / choch", "bos/choch", "bos", "choch")),
-                    ("کندل‌ها / Rejection", ("کندل‌ها / rejection", "کندل و rejection", "کندل‌ها", "rejection")),
-                    ("حمایت / مقاومت", ("حمایت / مقاومت", "حمایت/مقاومت", "حمایت", "مقاومت")),
-                    ("عرضه / تقاضا", ("عرضه / تقاضا", "عرضه/تقاضا", "عرضه", "تقاضا")),
-                    ("نقدینگی / Equal High-Low", ("نقدینگی / equal high-low", "نقدینگی", "equal high", "equal low")),
-                    ("شکست / Retest", ("شکست / retest", "شکست/retest", "breakout", "retest")),
-                    ("شاخص‌های تکنیکال", ("شاخص‌های تکنیکال", "شاخص های تکنیکال", "rsi", "adx", "atr")),
-                    ("حجم", ("حجم", "volume")),
-                    ("واگرایی", ("واگرایی", "divergence")),
-                    ("Funding / OI / Long-Short", ("funding / oi / long-short", "funding", "oi", "long-short")),
-                    ("MTF", ("mtf", "multi timeframe", "چندتایم‌فریمی")),
-                    ("سناریوی Long", ("سناریوی long", "سناریو long", "long")),
-                    ("سناریوی Short", ("سناریوی short", "سناریو short", "short")),
-                    ("Invalidation", ("invalidation", "ابطال سناریو", "حد ابطال")),
-                    ("مدیریت ریسک / توصیه عملی", ("مدیریت ریسک / توصیه عملی", "مدیریت ریسک", "توصیه عملی", "توصیه‌های عملی")),
-                    ("نتیجه نهایی", ("نتیجه نهایی", "جمع‌بندی نهایی", "جمع بندی نهایی", "نتیجه‌گیری", "نتیجه گیری")),
-                ]
+                def _norm_heading(value: str) -> str:
+                    value = re.sub(r"[*_`#]", "", value or "")
+                    value = re.sub(r"\s+", " ", value).strip().lower()
+                    return value.replace("ـ", "-")
 
-                def _section_positions(text: str):
-                    lines = (text or "").splitlines()
-                    found=[]
-                    for idx,line in enumerate(lines):
-                        n=_norm_heading(line)
-                        if len(n)>140:
-                            continue
-                        for pos,(canonical, als) in enumerate(aliases):
-                            if any(n == _norm_heading(a) or n.startswith(_norm_heading(a)+":") or n.startswith(_norm_heading(a)+"-") for a in als):
-                                found.append((pos, idx, canonical, line))
+                aliases = {
+                    "وضعیت بازار": ("وضعیت بازار", "وضعیت کلی"),
+                    "ساختار قیمت": ("ساختار قیمت", "ساختار", "hh/hl/lh/ll"),
+                    "BOS / CHOCH": ("bos / choch", "bos/choch", "bos", "choch"),
+                    "کندل‌ها / Rejection": ("کندل‌ها / rejection", "کندل و rejection", "کندل‌ها", "rejection"),
+                    "حمایت / مقاومت": ("حمایت / مقاومت", "حمایت/مقاومت", "حمایت", "مقاومت"),
+                    "عرضه / تقاضا": ("عرضه / تقاضا", "عرضه/تقاضا", "عرضه", "تقاضا"),
+                    "نقدینگی / Equal High-Low": ("نقدینگی / equal high-low", "نقدینگی", "equal high", "equal low"),
+                    "شکست / Retest": ("شکست / retest", "شکست/retest", "breakout", "retest"),
+                    "شاخص‌های تکنیکال": ("شاخص‌های تکنیکال", "شاخص های تکنیکال", "rsi", "adx", "atr"),
+                    "حجم": ("حجم", "volume"),
+                    "واگرایی": ("واگرایی", "divergence"),
+                    "Funding / OI / Long-Short": ("funding / oi / long-short", "funding", "oi", "long-short"),
+                    "MTF": ("mtf", "multi timeframe", "چندتایم‌فریمی"),
+                    "سناریوی Long": ("سناریوی long", "سناریو long", "long"),
+                    "سناریوی Short": ("سناریوی short", "سناریو short", "short"),
+                    "Invalidation": ("invalidation", "ابطال سناریو", "حد ابطال"),
+                    "مدیریت ریسک / توصیه عملی": ("مدیریت ریسک / توصیه عملی", "مدیریت ریسک", "توصیه عملی", "توصیه‌های عملی"),
+                    "نتیجه نهایی": ("نتیجه نهایی", "جمع‌بندی نهایی", "جمع بندی نهایی", "نتیجه‌گیری", "نتیجه گیری"),
+                }
+
+                def _heading_match(line: str, canonical: str) -> bool:
+                    n = _norm_heading(line)
+                    if len(n) > 180:
+                        return False
+                    # Remove list numbering such as "1." before comparing.
+                    n = re.sub(r"^\s*\d+\s*[.)-]?\s*", "", n)
+                    for alias in aliases[canonical]:
+                        a = _norm_heading(alias)
+                        if n == a or n.startswith(a + ":") or n.startswith(a + "-"):
+                            return True
+                    return False
+
+                def _clean_section_body(text: str) -> str:
+                    text = re.sub(r"[*_`#]", "", text or "")
+                    text = re.sub(r"<[^>]*>", "", text)
+                    text = html.unescape(text)
+                    text = re.sub(r"\s+", " ", text).strip(" -:؛")
+                    if not text:
+                        return "داده کافی نیست."
+                    # Keep the Telegram report compact: at most two sentences.
+                    parts = re.split(r"(?<=[.!؟。])\s+", text)
+                    text = " ".join(p.strip() for p in parts[:2] if p.strip())
+                    return text[:650].rstrip()
+
+                def _normalize_chunk(raw: str, wanted: list[str], start_index: int) -> str:
+                    lines = (raw or "").replace("\r", "").splitlines()
+                    positions = []
+                    for idx, line in enumerate(lines):
+                        for canonical in wanted:
+                            if _heading_match(line, canonical):
+                                positions.append((idx, canonical, line))
                                 break
-                    return found
+                    # Build a deterministic section map. If the provider omitted a
+                    # heading, we insert it instead of returning a truncated report.
+                    by_name = {}
+                    for pos, (line_idx, canonical, _line) in enumerate(positions):
+                        if canonical in by_name:
+                            continue
+                        next_idx = len(lines)
+                        for future_idx, _future_name, _future_line in positions[pos + 1:]:
+                            next_idx = future_idx
+                            break
+                        body_lines = lines[line_idx + 1:next_idx]
+                        by_name[canonical] = _clean_section_body(" ".join(body_lines))
+                    out_lines = []
+                    for offset, canonical in enumerate(wanted):
+                        body = by_name.get(canonical, "داده کافی نیست.")
+                        out_lines.append(f"{start_index + offset}. {canonical}: {body}")
+                    return "\n".join(out_lines)
 
-                def _valid_structure(text: str) -> bool:
-                    found=_section_positions(text)
-                    if not found:
-                        return False
-                    positions=[x[0] for x in found]
-                    # همه بخش‌ها باید حضور داشته باشند، ترتیب افزایشی باشد و هیچ بخش تکرار نشود.
-                    if set(positions) != set(range(len(sections))):
-                        return False
-                    if len(positions) != len(set(positions)):
-                        return False
-                    if positions != sorted(positions):
-                        return False
-                    final_idx = max(i for i,p,_,_ in found if p == len(sections)-1)
-                    # هیچ تیتر شناخته‌شده‌ای بعد از نتیجه نهایی نباشد.
-                    if any(i > final_idx for _,i,_,_ in found):
-                        return False
-                    low=_norm_heading(text)
-                    if "عرضه/" in low or "عرضه /" in low or "تقاضا/" in low:
-                        return False
-                    if "توصیه‌های عملی (ادامه)" in low or "توصیه های عملی (ادامه)" in low:
-                        return False
-                    return True
-
-                # به‌جای چسباندن ادامه‌های نامنظم، اگر ساختار خراب باشد کل گزارش
-                # یک‌بار از روی همان داده بازنویسی می‌شود؛ بنابراین تیترها تکراری
-                # یا بعد از نتیجه نهایی قرار نمی‌گیرند.
-                if not _valid_structure(answer):
-                    repair_prompt = (
-                        f"گزارش زیر از نظر ساختار خراب است. آن را از صفر بازنویسی کن. تایم‌فریم: {tf.upper()}.\n"
-                        "فقط داده مرجع را استفاده کن. دقیقاً 18 بخش زیر را یک‌بار، به همین ترتیب، کوتاه و کامل بنویس. "
-                        "هیچ بخش یا تیتر دیگری اضافه نکن و هیچ چیزی بعد از «نتیجه نهایی» ننویس. "
-                        "هر بخش 1 تا 2 جمله کامل؛ عدد جعلی ممنوع؛ جدول Markdown ممنوع.\n\n"
-                        + section_spec + "\n\nگزارش خراب:\n" + answer[-9000:] +
-                        "\n\nداده مرجع:\n" + (base or "")[:14000]
+                # Four small calls are deliberately used instead of one 18-section
+                # generation. This is slower than one call by a small amount, but it
+                # prevents provider token caps from cutting the answer in section 1.
+                chunk_sizes = (5, 5, 4, 4)
+                chunks = []
+                cursor = 0
+                for size in chunk_sizes:
+                    wanted = sections[cursor:cursor + size]
+                    start_number = cursor + 1
+                    spec = "\n".join(
+                        f"{start_number + i}. {name}: 1 تا 2 جمله کامل"
+                        for i, name in enumerate(wanted)
                     )
-                    try:
-                        repaired, _ = await ask_ai(query.from_user.id, repair_prompt)
-                        repaired = (repaired or "").strip()
-                        if repaired:
-                            answer = repaired
-                    except Exception as repair_err:
-                        logger.warning("crypto smart analysis structural repair failed: %s", repair_err)
-
-                # اگر مدل باز هم ساختار ناقص داد، گزارش را همان‌طور ناقص رها نمی‌کنیم؛
-                # یک تلاش نهایی کوتاه برای بازنویسی ساختاری انجام می‌دهیم.
-                if not _valid_structure(answer):
-                    final_prompt = (
-                        f"فقط یک گزارش نهایی معتبر بساز. تایم‌فریم {tf.upper()}.\n"
-                        "18 تیتر دقیقاً به ترتیب زیر، هرکدام یک جمله کوتاه، بدون تکرار و بدون هیچ متن اضافه بعد از نتیجه نهایی:\n"
-                        + "\n".join(f"{i}. {x}" for i,x in enumerate(sections,1)) +
-                        "\n\nداده:\n" + (base or "")[:10000]
+                    prompt = (
+                        f"تو تحلیل‌گر ارشد Price Action و بازارهای مالی هستی. تایم‌فریم اصلی: {tf.upper()}.\n"
+                        "فقط از داده مرجع استفاده کن؛ قیمت، سطح، درصد، سیگنال یا رویداد عددی را حدس نزن.\n"
+                        "فقط بخش‌های فهرست‌شده را تولید کن، دقیقاً با همین شماره و تیتر. هیچ تیتر دیگری، مقدمه، نتیجه اضافه یا متن خارج از این بخش‌ها ننویس.\n"
+                        "هر بخش حداکثر دو جمله کامل و کوتاه باشد. اگر داده نداریم، صریحاً «داده کافی نیست.» بنویس.\n\n"
+                        + spec
+                        + "\n\nداده مرجع:\n"
+                        + source_data
                     )
+                    raw = ""
                     try:
-                        repaired, _ = await ask_ai(query.from_user.id, final_prompt)
-                        if repaired and _valid_structure(repaired.strip()):
-                            answer = repaired.strip()
-                    except Exception as final_err:
-                        logger.warning("crypto smart analysis final structural repair failed: %s", final_err)
+                        raw, _ = await ask_ai(query.from_user.id, prompt)
+                    except Exception as chunk_err:
+                        logger.warning(
+                            "crypto smart analysis chunk %s-%s failed: %s",
+                            start_number, start_number + size - 1, chunk_err,
+                        )
 
-                # Markdown ستاره‌ای مدل را برای خروجی HTML حذف می‌کنیم.
-                answer = re.sub(r"\*{1,2}", "", answer or "").strip()
+                    normalized = _normalize_chunk(raw, wanted, start_number)
+                    # If the provider returned no recognizable heading, retry only
+                    # that small chunk; never regenerate the entire 18-section report.
+                    if all("داده کافی نیست." in line for line in normalized.splitlines()):
+                        retry_prompt = (
+                            f"فقط این {size} بخش را برای تحلیل {symbol.upper()} در تایم‌فریم {tf.upper()} بنویس.\n"
+                            "تیتر و شماره را دقیقاً کپی کن، هر بخش فقط یک جمله، بدون مقدمه و متن اضافه.\n\n"
+                            + spec
+                            + "\n\nداده:\n"
+                            + source_data
+                        )
+                        try:
+                            retry_raw, _ = await ask_ai(query.from_user.id, retry_prompt)
+                            normalized = _normalize_chunk(retry_raw, wanted, start_number)
+                        except Exception as retry_err:
+                            logger.warning(
+                                "crypto smart analysis chunk retry %s-%s failed: %s",
+                                start_number, start_number + size - 1, retry_err,
+                            )
+                    chunks.append(normalized)
+                    cursor += size
+
+                answer = "\n".join(chunks).strip()
+                # Final deterministic integrity check: exactly 18 canonical headings,
+                # exactly once, in order. No model call is needed for this step.
+                final_lines = []
+                for idx, canonical in enumerate(sections, 1):
+                    match = re.search(
+                        rf"(?m)^\s*{idx}\.\s*{re.escape(canonical)}\s*:\s*(.+?)\s*$",
+                        answer,
+                    )
+                    body = _clean_section_body(match.group(1)) if match else "داده کافی نیست."
+                    final_lines.append(f"{idx}. {canonical}: {body}")
+                answer = "\n".join(final_lines)
+
                 safe_answer = html.escape(answer or "داده کافی برای تحلیل هوشمند وجود ندارد.")
                 out = f"🧠 <b>تحلیل هوشمند حرفه‌ای — {tf.upper()}</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
                 chart_days = {"15m": 3, "1h": 7, "4h": 30, "1d": 90}[tf]
