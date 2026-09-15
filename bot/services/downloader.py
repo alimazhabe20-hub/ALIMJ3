@@ -425,7 +425,6 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
     )
 
     def _format_for(mode_name: str) -> str:
-        # Progressive-first so Telegram gets a single playable file even without perfect merge.
         return {
             "best": "b[ext=mp4]/best[ext=mp4]/bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b",
             "1080p": "b[height<=1080][ext=mp4]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080]/bv*[height<=1080]+ba/b",
@@ -433,21 +432,6 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
             "480p": "b[height<=480][ext=mp4]/bv*[height<=480][ext=mp4]+ba[ext=m4a]/b[height<=480]/bv*[height<=480]+ba/b",
             "audio": "bestaudio[ext=m4a]/bestaudio/best",
         }.get(mode_name, "b[ext=mp4]/best")
-
-    # Strategies for "The page needs to be reloaded" (yt-dlp#17389):
-    # With cookies, default tv_downgraded often returns UNPLAYABLE.
-    # Prefer web_embedded/default with cookies; try no-cookie tv/android for public videos.
-    youtube_client_strategies = [
-        # Public / no-cookie friendly first
-        {"player_client": ["tv"], "player_skip": ["webpage"], "use_cookies": False},
-        {"player_client": ["android_vr", "tv"], "player_skip": ["webpage"], "use_cookies": False},
-        {"player_client": ["web_embedded", "default"], "player_skip": ["webpage"], "use_cookies": False},
-        # With cookies (avoid tv_downgraded-only path)
-        {"player_client": ["web_embedded", "default"], "player_skip": ["webpage"], "use_cookies": True},
-        {"player_client": ["web", "mweb"], "player_skip": ["webpage"], "use_cookies": True},
-        {"player_client": ["default", "web_embedded", "web"], "use_cookies": True},
-        {"player_client": ["mweb", "web"], "use_cookies": True},
-    ]
 
     def work():
         progress = {"path": None, "downloaded": 0, "total": 0, "last": 0.0}
@@ -475,120 +459,118 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                     except Exception:
                         pass
 
-        base_opts = {
-            "format": _format_for(mode),
-            "outtmpl": outtmpl,
-            "noplaylist": True,
-            "quiet": True,
-            "no_warnings": True,
-            "retries": 10,
-            "fragment_retries": 10,
-            "socket_timeout": int(TIMEOUT),
-            "max_filesize": MAX_BYTES,
-            "concurrent_fragment_downloads": YTDLP_CONCURRENT_FRAGMENTS,
-            "http_chunk_size": YTDLP_HTTP_CHUNK_SIZE or None,
-            "buffersize": YTDLP_BUFFER_SIZE,
-            "restrictfilenames": True,
-            "progress_hooks": [hook],
-            "http_headers": {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-            "merge_output_format": "mp4",
-            "continuedl": True,
-            "overwrites": True,
-            "ignoreerrors": False,
-        }
-
-        cookie = _resolve_cookies_file()
-        if cookie:
-            base_opts["cookiefile"] = cookie
+        cookie_path = _resolve_cookies_file()
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
-        if proxy:
-            base_opts["proxy"] = proxy
 
-        if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
-            base_opts["http_headers"]["Referer"] = "https://www.instagram.com/"
-            base_opts["extractor_args"] = {"instagram": {"app_id": "web"}}
-
-        if mode == "audio":
-            base_opts["postprocessors"] = [
-                {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}
-            ]
-
-        strategies = youtube_client_strategies if is_youtube else [None]
-        last_exc: Exception | None = None
-
-        cookie_path = base_opts.get("cookiefile")
-        for clients in strategies:
-            opts = dict(base_opts)
-            if clients is not None:
-                use_cookies = True
-                if isinstance(clients, dict):
-                    use_cookies = bool(clients.get("use_cookies", True))
-                    yt_args = {}
-                    for k, v in clients.items():
-                        if k == "use_cookies":
-                            continue
-                        yt_args[k] = list(v) if isinstance(v, (list, tuple)) else v
-                else:
-                    yt_args = {"player_client": list(clients)}
-                opts["extractor_args"] = {"youtube": yt_args}
-                if use_cookies and cookie_path:
-                    opts["cookiefile"] = cookie_path
-                else:
-                    opts.pop("cookiefile", None)
-            try:
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    if not info:
-                        raise DownloadError("failed")
-                    path = Path(ydl.prepare_filename(info))
-                    if mode == "audio":
-                        mp3 = path.with_suffix(".mp3")
-                        if mp3.exists():
-                            path = mp3
-                    if not path.exists():
-                        vid = str(info.get("id") or "")
-                        candidates = list(outdir.glob(f"*{vid}*")) if vid else list(outdir.glob("*"))
-                        candidates = [p for p in candidates if p.is_file()]
-                        if candidates:
-                            path = max(candidates, key=lambda p: p.stat().st_mtime)
-                    if not path.exists():
-                        raise DownloadError("failed")
-                    size = path.stat().st_size
-                    if size <= 0:
-                        path.unlink(missing_ok=True)
-                        raise DownloadError("failed")
-                    if size > MAX_BYTES:
-                        path.unlink(missing_ok=True)
-                        raise DownloadError("too_large")
-                    return {
-                        "path": str(path),
-                        "title": _safe_name(info.get("title") or path.stem),
-                        "size": size,
-                        "content_type": info.get("ext", ""),
-                        "method": "yt-dlp",
-                        "duration": info.get("duration"),
-                        "thumbnail": info.get("thumbnail"),
-                        "webpage_url": info.get("webpage_url"),
-                        "uploader": info.get("uploader"),
-                        "mode": mode,
+        def _run_once(label: str, *, clients: list[str] | None, use_cookies: bool) -> dict:
+            opts = {
+                "format": _format_for(mode),
+                "outtmpl": outtmpl,
+                "noplaylist": True,
+                "quiet": True,
+                "no_warnings": True,
+                "retries": 5,
+                "fragment_retries": 5,
+                "socket_timeout": int(TIMEOUT),
+                "max_filesize": MAX_BYTES,
+                "concurrent_fragment_downloads": YTDLP_CONCURRENT_FRAGMENTS,
+                "http_chunk_size": YTDLP_HTTP_CHUNK_SIZE or None,
+                "buffersize": YTDLP_BUFFER_SIZE,
+                "restrictfilenames": True,
+                "progress_hooks": [hook],
+                "http_headers": {
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
+                "merge_output_format": "mp4",
+                "continuedl": True,
+                "overwrites": True,
+                "ignoreerrors": False,
+            }
+            if proxy:
+                opts["proxy"] = proxy
+            if use_cookies and cookie_path:
+                opts["cookiefile"] = cookie_path
+            if clients:
+                opts["extractor_args"] = {
+                    "youtube": {
+                        "player_client": list(clients),
+                        "player_skip": ["webpage", "configs"],
                     }
+                }
+            if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
+                opts["http_headers"]["Referer"] = "https://www.instagram.com/"
+                opts["extractor_args"] = {"instagram": {"app_id": "web"}}
+            if mode == "audio":
+                opts["postprocessors"] = [
+                    {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}
+                ]
+
+            logger.info("yt-dlp try label=%s clients=%s cookies=%s", label, clients, bool(opts.get("cookiefile")))
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                if not info:
+                    raise DownloadError("failed")
+                path = Path(ydl.prepare_filename(info))
+                if mode == "audio":
+                    mp3 = path.with_suffix(".mp3")
+                    if mp3.exists():
+                        path = mp3
+                if not path.exists():
+                    vid = str(info.get("id") or "")
+                    candidates = list(outdir.glob(f"*{vid}*")) if vid else list(outdir.glob("*"))
+                    candidates = [p for p in candidates if p.is_file()]
+                    if candidates:
+                        path = max(candidates, key=lambda p: p.stat().st_mtime)
+                if not path.exists():
+                    raise DownloadError("failed")
+                size = path.stat().st_size
+                if size <= 0:
+                    path.unlink(missing_ok=True)
+                    raise DownloadError("failed")
+                if size > MAX_BYTES:
+                    path.unlink(missing_ok=True)
+                    raise DownloadError("too_large")
+                return {
+                    "path": str(path),
+                    "title": _safe_name(info.get("title") or path.stem),
+                    "size": size,
+                    "content_type": info.get("ext", ""),
+                    "method": "yt-dlp",
+                    "duration": info.get("duration"),
+                    "thumbnail": info.get("thumbnail"),
+                    "webpage_url": info.get("webpage_url"),
+                    "uploader": info.get("uploader"),
+                    "mode": mode,
+                }
+
+        attempts: list[tuple[str, list[str] | None, bool]]
+        if is_youtube:
+            # Order matters: public no-cookie first (avoids tv_downgraded + cookies bug).
+            attempts = [
+                ("nocookie-tv", ["tv"], False),
+                ("nocookie-android_vr", ["android_vr", "tv"], False),
+                ("nocookie-web_embedded", ["web_embedded"], False),
+                ("cookie-web_embedded", ["web_embedded", "default"], True),
+                ("cookie-web-mweb", ["web", "mweb"], True),
+                ("cookie-default", ["default", "web_embedded", "web"], True),
+            ]
+        else:
+            attempts = [("default", None, True)]
+
+        last_exc: Exception | None = None
+        for label, clients, use_cookies in attempts:
+            try:
+                return _run_once(label, clients=clients, use_cookies=use_cookies)
             except DownloadError:
                 raise
             except Exception as exc:
                 last_exc = exc
-                logger.warning(
-                    "yt-dlp strategy failed clients=%s err=%s",
-                    clients,
-                    str(exc)[:240],
-                )
-                # Clean partial files before next strategy
+                logger.warning("yt-dlp try failed label=%s err=%s", label, str(exc)[:240])
                 try:
                     for p in outdir.glob("*"):
                         if p.is_file():
