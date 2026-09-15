@@ -434,15 +434,19 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
             "audio": "bestaudio[ext=m4a]/bestaudio/best",
         }.get(mode_name, "b[ext=mp4]/best")
 
-    # Try several YouTube client strategies; first success wins.
-    # "The page needs to be reloaded" often needs player_skip=webpage + mobile/TV clients.
+    # Strategies for "The page needs to be reloaded" (yt-dlp#17389):
+    # With cookies, default tv_downgraded often returns UNPLAYABLE.
+    # Prefer web_embedded/default with cookies; try no-cookie tv/android for public videos.
     youtube_client_strategies = [
-        {"player_client": ["android"], "player_skip": ["webpage", "configs"]},
-        {"player_client": ["android", "ios"], "player_skip": ["webpage"]},
-        {"player_client": ["tv"], "player_skip": ["webpage"]},
-        {"player_client": ["mweb"], "player_skip": ["webpage"]},
-        {"player_client": ["web"], "player_skip": ["webpage"]},
-        {"player_client": ["tv", "android", "ios", "mweb"]},
+        # Public / no-cookie friendly first
+        {"player_client": ["tv"], "player_skip": ["webpage"], "use_cookies": False},
+        {"player_client": ["android_vr", "tv"], "player_skip": ["webpage"], "use_cookies": False},
+        {"player_client": ["web_embedded", "default"], "player_skip": ["webpage"], "use_cookies": False},
+        # With cookies (avoid tv_downgraded-only path)
+        {"player_client": ["web_embedded", "default"], "player_skip": ["webpage"], "use_cookies": True},
+        {"player_client": ["web", "mweb"], "player_skip": ["webpage"], "use_cookies": True},
+        {"player_client": ["default", "web_embedded", "web"], "use_cookies": True},
+        {"player_client": ["mweb", "web"], "use_cookies": True},
     ]
 
     def work():
@@ -519,14 +523,25 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
         strategies = youtube_client_strategies if is_youtube else [None]
         last_exc: Exception | None = None
 
+        cookie_path = base_opts.get("cookiefile")
         for clients in strategies:
             opts = dict(base_opts)
             if clients is not None:
+                use_cookies = True
                 if isinstance(clients, dict):
-                    yt_args = {k: list(v) if isinstance(v, (list, tuple)) else v for k, v in clients.items()}
+                    use_cookies = bool(clients.get("use_cookies", True))
+                    yt_args = {}
+                    for k, v in clients.items():
+                        if k == "use_cookies":
+                            continue
+                        yt_args[k] = list(v) if isinstance(v, (list, tuple)) else v
                 else:
                     yt_args = {"player_client": list(clients)}
                 opts["extractor_args"] = {"youtube": yt_args}
+                if use_cookies and cookie_path:
+                    opts["cookiefile"] = cookie_path
+                else:
+                    opts.pop("cookiefile", None)
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url, download=True)
