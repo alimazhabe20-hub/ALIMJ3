@@ -374,6 +374,7 @@ async def probe(url: str) -> dict:
             "no_warnings": True,
             "skip_download": True,
             "socket_timeout": int(TIMEOUT),
+            "extractor_retries": 4,
             "noplaylist": True,
             "http_headers": {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -382,11 +383,16 @@ async def probe(url: str) -> dict:
         }
         host = (urlparse(url).hostname or "").lower().rstrip(".")
         if "youtube.com" in host or host == "youtu.be" or host.endswith(".youtube.com"):
-            # Modern YouTube often blocks the default web client; try mobile/TV clients.
+            # Keep probing on player clients that do not depend on the normal
+            # YouTube webpage/config path.  This mirrors the download cascade.
+            clients = [
+                c.strip()
+                for c in os.getenv("YTDLP_YOUTUBE_CLIENTS", "mweb,ios,tv,android_vr").split(",")
+                if c.strip()
+            ]
             opts["extractor_args"] = {
                 "youtube": {
-                    "player_client": ["android", "ios", "tv", "mweb"],
-                    "player_skip": ["webpage", "configs"],
+                    "player_client": clients,
                 }
             }
         cookie = _resolve_cookies_file()
@@ -469,10 +475,12 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 "noplaylist": True,
                 "quiet": True,
                 "no_warnings": True,
-                "retries": 5,
-                "fragment_retries": 5,
+                "retries": 8,
+                "fragment_retries": 8,
+                "extractor_retries": 4,
                 "socket_timeout": int(TIMEOUT),
                 "max_filesize": MAX_BYTES,
+                "sleep_interval_requests": 0.5,
                 "concurrent_fragment_downloads": YTDLP_CONCURRENT_FRAGMENTS,
                 "http_chunk_size": YTDLP_HTTP_CHUNK_SIZE or None,
                 "buffersize": YTDLP_BUFFER_SIZE,
@@ -495,11 +503,10 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 opts["proxy"] = proxy
             if use_cookies and cookie_path:
                 opts["cookiefile"] = cookie_path
-            if clients:
+            if clients and is_youtube:
                 opts["extractor_args"] = {
                     "youtube": {
                         "player_client": list(clients),
-                        "player_skip": ["webpage", "configs"],
                     }
                 }
             if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
@@ -550,15 +557,27 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
 
         attempts: list[tuple[str, list[str] | None, bool]]
         if is_youtube:
-            # Order matters: public no-cookie first (avoids tv_downgraded + cookies bug).
-            attempts = [
-                ("nocookie-tv", ["tv"], False),
-                ("nocookie-android_vr", ["android_vr", "tv"], False),
-                ("nocookie-web_embedded", ["web_embedded"], False),
-                ("cookie-web_embedded", ["web_embedded", "default"], True),
-                ("cookie-web-mweb", ["web", "mweb"], True),
-                ("cookie-default", ["default", "web_embedded", "web"], True),
-            ]
+            # YouTube changes its anti-bot/player behaviour frequently.  Keep
+            # each client isolated so a failed client cannot poison the next
+            # extraction attempt.  Do not force the web page/config endpoints:
+            # errors such as "The page needs to be reloaded" are commonly
+            # emitted by those endpoints while a player client can still work.
+            env_clients = os.getenv("YTDLP_YOUTUBE_CLIENTS", "").strip()
+            if env_clients:
+                configured = [c.strip() for c in env_clients.split(",") if c.strip()]
+                client_groups = [(f"env-{i}-{c}", [c], True) for i, c in enumerate(configured)]
+            else:
+                client_groups = [
+                    ("nocookie-mweb", ["mweb"], False),
+                    ("nocookie-ios", ["ios"], False),
+                    ("nocookie-tv", ["tv"], False),
+                    ("nocookie-android-vr", ["android_vr"], False),
+                    ("cookie-web-safari", ["web_safari"], True),
+                    ("cookie-mweb", ["mweb"], True),
+                    ("cookie-web", ["web"], True),
+                    ("cookie-tv", ["tv"], True),
+                ]
+            attempts = client_groups
         else:
             attempts = [("default", None, True)]
 
