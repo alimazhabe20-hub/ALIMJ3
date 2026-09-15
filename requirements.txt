@@ -14,7 +14,7 @@ edge-tts
 matplotlib
 Pillow
 pytest
-yt-dlp
+yt-dlp>=2025.8.27
 ruff
 openpyxl
 reportlab
