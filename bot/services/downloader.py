@@ -582,8 +582,16 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
             # web_embedded is especially useful because it avoids the
             # tv_downgraded cookie path that produces `The page needs to be reloaded`.
             attempts = [
+                # Public clients first: never attach account cookies to the first
+                # request, because current YouTube can downgrade logged-in
+                # sessions to tv_downgraded and return "page needs to be reloaded".
                 ("nocookie-web_embedded", ["web_embedded"], False),
                 ("nocookie-android_vr", ["android_vr"], False),
+                ("nocookie-ios", ["ios"], False),
+                ("nocookie-web_safari", ["web_safari"], False),
+                # A clean default-client attempt is useful for videos for which
+                # web_embedded/android_vr are unavailable. No cookies are attached.
+                ("nocookie-default", ["default"], False),
             ]
             if yt_po_token:
                 # If the operator explicitly supplied a PO token, allow the
@@ -595,6 +603,7 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 # Cookies are kept only as a final fallback.  Never combine them
                 # with tv/tv_downgraded/mweb automatically.
                 attempts.append(("cookie-web_embedded", ["web_embedded"], True))
+                attempts.append(("cookie-default", ["default"], True))
         else:
             attempts = [("default", None, True)]
 
