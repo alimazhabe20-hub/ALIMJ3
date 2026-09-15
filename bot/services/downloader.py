@@ -31,7 +31,56 @@ PER_USER_CONCURRENCY = max(1, int(os.getenv("DOWNLOADER_PER_USER_CONCURRENCY", "
 CACHE_TTL = max(0, int(os.getenv("DOWNLOADER_CACHE_TTL", "3600")))
 CACHE_MAX_BYTES = max(MAX_BYTES, int(os.getenv("DOWNLOADER_CACHE_MAX_BYTES", str(1024 * 1024 * 1024))))
 CACHE_DIR = Path(os.getenv("DOWNLOADER_CACHE_DIR", str(Path(tempfile.gettempdir()) / "alimj3_downloader_cache")))
+
 UA = "Mozilla/5.0 (compatible; ALIMJ3-Downloader/2.0)"
+
+_COOKIES_PATH_CACHE: str | None = None
+
+
+def _resolve_cookies_file() -> str | None:
+    """Return a cookies.txt path for yt-dlp.
+
+    Supports:
+    - DOWNLOADER_COOKIES_FILE=/path/to/cookies.txt
+    - DOWNLOADER_COOKIES or DOWNLOADER_COOKIES_CONTENT = full Netscape cookies text (for Render env)
+    """
+    global _COOKIES_PATH_CACHE
+    if _COOKIES_PATH_CACHE and Path(_COOKIES_PATH_CACHE).is_file():
+        return _COOKIES_PATH_CACHE
+
+    path = os.getenv("DOWNLOADER_COOKIES_FILE", "").strip()
+    if path and Path(path).is_file():
+        _COOKIES_PATH_CACHE = path
+        return path
+
+    content = (
+        os.getenv("DOWNLOADER_COOKIES", "").strip()
+        or os.getenv("DOWNLOADER_COOKIES_CONTENT", "").strip()
+    )
+    if not content:
+        return None
+    # Allow users to paste with escaped newlines from some dashboards
+    content = content.replace("\\n", "\n")
+    if (
+        "youtube.com" not in content
+        and ".youtube.com" not in content
+        and "google.com" not in content
+    ):
+        logger.warning("DOWNLOADER_COOKIES set but no youtube/google domains found in content")
+    out = Path(tempfile.gettempdir()) / "alimj3_yt_cookies.txt"
+    try:
+        if not content.endswith("\n"):
+            content = content + "\n"
+        out.write_text(content, encoding="utf-8")
+        out.chmod(0o600)
+        _COOKIES_PATH_CACHE = str(out)
+        logger.info("YouTube cookies loaded from environment -> %s", out)
+        return _COOKIES_PATH_CACHE
+    except Exception as exc:
+        logger.warning("failed to write cookies from env: %s", exc)
+        return None
+
+
 # Conservative defaults: enough parallelism to improve DASH/HLS throughput
 # without creating the bursty request pattern that can trigger upstream 401/429s.
 YTDLP_CONCURRENT_FRAGMENTS = max(1, min(8, int(os.getenv("DOWNLOADER_CONCURRENT_FRAGMENTS", "4"))))
@@ -151,6 +200,8 @@ def _classify_error(exc: str) -> str:
         return "too_large"
     if any(x in s for x in ("name or service not known", "temporary failure in name resolution", "nodename nor servname")):
         return "dns_error"
+    if "sign in to confirm" in s or "not a bot" in s:
+        return "site_blocked"
     return "failed"
 
 
@@ -335,8 +386,8 @@ async def probe(url: str) -> dict:
                     "player_client": ["android", "ios", "mweb", "web", "tv"],
                 }
             }
-        cookie = os.getenv("DOWNLOADER_COOKIES_FILE", "").strip()
-        if cookie and Path(cookie).is_file():
+        cookie = _resolve_cookies_file()
+        if cookie:
             opts["cookiefile"] = cookie
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
         if proxy:
@@ -444,8 +495,8 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
             "ignoreerrors": False,
         }
 
-        cookie = os.getenv("DOWNLOADER_COOKIES_FILE", "").strip()
-        if cookie and Path(cookie).is_file():
+        cookie = _resolve_cookies_file()
+        if cookie:
             base_opts["cookiefile"] = cookie
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
         if proxy:
@@ -635,8 +686,8 @@ def user_message(code: str) -> str:
         "too_large": f"📦 فایل برای ارسال مستقیم بیش از حد بزرگ است. سقف ربات {MAX_BYTES // (1024*1024)}MB است.",
         "yt_dlp_missing": "⚠️ موتور yt-dlp نصب نشده است. requirements را نصب کنید.",
         "gallery_dl_missing": "⚠️ موتور gallery-dl نصب نشده است.\nدستور: pip install -U gallery-dl",
-        "failed": "❌ دانلود ناموفق بود. لینک عمومی باشد و دوباره تلاش کنید.\nبرای اینستاگرام اگر مکرر خطا می‌گیرید، کوکی مرورگر را در DOWNLOADER_COOKIES_FILE قرار دهید.",
-        "site_blocked": "🚫 سایت دسترسی دانلود را مسدود کرده یا CAPTCHA/ورود لازم دارد.\nبرای اینستاگرام فایل کوکی (DOWNLOADER_COOKIES_FILE) تنظیم کنید.",
+        "failed": "❌ دانلود ناموفق بود.\nیوتیوب IP سرور را محدود کرده. در Render مقدار DOWNLOADER_COOKIES (متن cookies.txt) یا DOWNLOADER_PROXY را تنظیم کنید.",
+        "site_blocked": "🚫 یوتیوب درخواست را ربات تشخیص داد.\nراه‌حل: کوکی مرورگر را در متغیر DOWNLOADER_COOKIES بگذارید یا پروکسی واقعی در DOWNLOADER_PROXY.",
     }.get(code, "❌ دانلود ناموفق بود.")
 
 # Regression-contract marker: if _is_instagram_url(current):
