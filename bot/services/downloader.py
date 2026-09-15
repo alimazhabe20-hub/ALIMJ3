@@ -202,6 +202,8 @@ def _classify_error(exc: str) -> str:
         return "dns_error"
     if "sign in to confirm" in s or "not a bot" in s:
         return "site_blocked"
+    if "page needs to be reloaded" in s or "reload" in s and "youtube" in s:
+        return "site_blocked"
     return "failed"
 
 
@@ -383,7 +385,8 @@ async def probe(url: str) -> dict:
             # Modern YouTube often blocks the default web client; try mobile/TV clients.
             opts["extractor_args"] = {
                 "youtube": {
-                    "player_client": ["android", "ios", "mweb", "web", "tv"],
+                    "player_client": ["android", "ios", "tv", "mweb"],
+                    "player_skip": ["webpage", "configs"],
                 }
             }
         cookie = _resolve_cookies_file()
@@ -432,12 +435,14 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
         }.get(mode_name, "b[ext=mp4]/best")
 
     # Try several YouTube client strategies; first success wins.
+    # "The page needs to be reloaded" often needs player_skip=webpage + mobile/TV clients.
     youtube_client_strategies = [
-        ["android"],
-        ["android", "ios"],
-        ["mweb", "tv"],
-        ["web", "mweb"],
-        ["tv", "android", "ios", "mweb", "web"],
+        {"player_client": ["android"], "player_skip": ["webpage", "configs"]},
+        {"player_client": ["android", "ios"], "player_skip": ["webpage"]},
+        {"player_client": ["tv"], "player_skip": ["webpage"]},
+        {"player_client": ["mweb"], "player_skip": ["webpage"]},
+        {"player_client": ["web"], "player_skip": ["webpage"]},
+        {"player_client": ["tv", "android", "ios", "mweb"]},
     ]
 
     def work():
@@ -517,7 +522,11 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
         for clients in strategies:
             opts = dict(base_opts)
             if clients is not None:
-                opts["extractor_args"] = {"youtube": {"player_client": list(clients)}}
+                if isinstance(clients, dict):
+                    yt_args = {k: list(v) if isinstance(v, (list, tuple)) else v for k, v in clients.items()}
+                else:
+                    yt_args = {"player_client": list(clients)}
+                opts["extractor_args"] = {"youtube": yt_args}
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url, download=True)
