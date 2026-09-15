@@ -429,6 +429,14 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = update.message.text.strip()
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name or "کاربر"
+    # اگر کاربر در حالت دانلودر است و لینک فرستاده، همان‌جا پردازش شود
+    try:
+        from bot.handlers.v71_handlers import handle_downloader_url_v71
+        if await handle_downloader_url_v71(update, context, text):
+            return
+    except Exception as _dl_exc:
+        from bot.logger import logger as _lg
+        _lg.debug("downloader url hook: %s", _dl_exc)
     city = get_user_city(user_id)
     waiting = context.user_data.get("waiting_for")
     # AI chat mode
@@ -603,6 +611,10 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("🌍 زبان:", reply_markup=get_language_keyboard()); return
     if text in ("➕ بیشتر", "بیشتر"):
         await update.message.reply_text("➕ بخش را انتخاب کنید:", reply_markup=get_more_keyboard()); return
+    if text in ("📥 دانلودر فایل", "دانلودر فایل", "دانلودر"):
+        from bot.handlers.v71_handlers import downloader_entry_v71
+        await downloader_entry_v71(update, context)
+        return
     if text == "🤖 دستیار هوشمند":
         providers = enabled_providers()
         context.user_data["ai_mode"] = True
