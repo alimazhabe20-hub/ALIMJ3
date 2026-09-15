@@ -191,7 +191,7 @@ async def _handle_cx(query, update, context, data, user_id):
                 context.user_data["market_analysis_chat_id"] = chat_id
 
         async def _edit_photo_caption(png: bytes | None, caption: str):
-            """نمودار را روی همان پیام به‌روزرسانی کن؛ کیبورد فقط زیر متن تحلیل باشد."""
+            """نمودار را روی همان پیام به‌روزرسانی کن؛ اگر عکسی نبود، نمودار جدید بفرست."""
             msg = query.message
             full_input = (caption or "📈 نمودار تحلیل").strip()
             if len(full_input) > 1000 or "━━━━━━━━━━━━━━━━━━━━" in full_input or "تحلیل هوشمند" in full_input:
@@ -205,30 +205,59 @@ async def _handle_cx(query, update, context, data, user_id):
                         logger.warning("market analysis fallback send failed: %s", _fb)
             cap = full_input.split("\n━━━━━━━━━━━━━━━━━━━━", 1)[0].strip()[:1000]
             try:
-                # دکمه‌ها زیر متن هستند؛ بنابراین callback معمولاً از پیام متن می‌آید.
-                # شناسه عکس قبلاً ذخیره شده و همان عکس را ویرایش می‌کنیم.
                 photo_msg_id = context.user_data.get("market_chart_message_id")
                 chat_id = context.user_data.get("market_chart_chat_id") or msg.chat_id
                 if msg.photo:
                     photo_msg_id = msg.message_id
                     chat_id = msg.chat_id
-                if photo_msg_id:
-                    if png:
+                if photo_msg_id and png:
+                    try:
                         bio = BytesIO(png)
                         bio.name = f"{symbol}_chart.png"
                         media = InputMediaPhoto(media=bio, caption=cap, parse_mode="HTML")
                         await context.bot.edit_message_media(
                             chat_id=chat_id, message_id=photo_msg_id, media=media, reply_markup=None
                         )
-                    else:
+                        return
+                    except Exception as edit_exc:
+                        logger.warning("market chart edit failed, will send new photo: %s", edit_exc)
+                        photo_msg_id = None
+                if photo_msg_id and not png:
+                    try:
                         await context.bot.edit_message_caption(
                             chat_id=chat_id, message_id=photo_msg_id,
                             caption=cap, parse_mode="HTML", reply_markup=None
                         )
+                    except Exception as cap_exc:
+                        logger.warning("market chart caption edit failed: %s", cap_exc)
                     return
-                # اگر عکس شناسه نداشت، متن callback را دست‌کاری نکن؛ تحلیل متن قبلاً آپدیت شده است.
+                if png:
+                    bio = BytesIO(png)
+                    bio.name = f"{symbol}_chart.png"
+                    sent = await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=bio,
+                        caption=cap,
+                        parse_mode="HTML",
+                    )
+                    context.user_data["market_chart_message_id"] = sent.message_id
+                    context.user_data["market_chart_chat_id"] = chat_id
             except Exception as exc:
                 logger.warning("market chart same-message edit failed: %s", exc)
+                if png:
+                    try:
+                        bio = BytesIO(png)
+                        bio.name = f"{symbol}_chart.png"
+                        chat_id = (context.user_data.get("market_chart_chat_id")
+                                   or (msg.chat_id if msg else None)
+                                   or query.message.chat_id)
+                        sent = await context.bot.send_photo(
+                            chat_id=chat_id, photo=bio, caption=cap[:1000], parse_mode="HTML",
+                        )
+                        context.user_data["market_chart_message_id"] = sent.message_id
+                        context.user_data["market_chart_chat_id"] = chat_id
+                    except Exception as send_exc:
+                        logger.warning("market chart send fallback failed: %s", send_exc)
 
         async def _edit_text(txt: str):
             """Edit first message and send remaining chunks; never truncate at 4000."""
