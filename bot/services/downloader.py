@@ -202,8 +202,10 @@ def _classify_error(exc: str) -> str:
         return "dns_error"
     if "sign in to confirm" in s or "not a bot" in s:
         return "site_blocked"
-    if "page needs to be reloaded" in s or "reload" in s and "youtube" in s:
-        return "site_blocked"
+    if "page needs to be reloaded" in s or ("reload" in s and "youtube" in s):
+        # This is a transient/client-selection failure in current yt-dlp/YouTube
+        # versions, not proof that the site is permanently blocked.
+        return "failed"
     return "failed"
 
 
@@ -374,7 +376,6 @@ async def probe(url: str) -> dict:
             "no_warnings": True,
             "skip_download": True,
             "socket_timeout": int(TIMEOUT),
-            "extractor_retries": 4,
             "noplaylist": True,
             "http_headers": {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -383,16 +384,15 @@ async def probe(url: str) -> dict:
         }
         host = (urlparse(url).hostname or "").lower().rstrip(".")
         if "youtube.com" in host or host == "youtu.be" or host.endswith(".youtube.com"):
-            # Keep probing on player clients that do not depend on the normal
-            # YouTube webpage/config path.  This mirrors the download cascade.
-            clients = [
-                c.strip()
-                for c in os.getenv("YTDLP_YOUTUBE_CLIENTS", "mweb,ios,tv,android_vr").split(",")
-                if c.strip()
-            ]
+            # Modern YouTube often blocks the default web client; try mobile/TV clients.
+            # Do not force tv/android_vr/mweb here. In 2026 YouTube has
+            # repeatedly returned `tv_downgraded ... UNPLAYABLE` /
+            # `The page needs to be reloaded` for those clients, especially
+            # when cookies are present. Keep the stable clients explicit and
+            # let yt-dlp perform its normal webpage/config initialization.
             opts["extractor_args"] = {
                 "youtube": {
-                    "player_client": clients,
+                    "player_client": ["default", "web_embedded"],
                 }
             }
         cookie = _resolve_cookies_file()
@@ -440,6 +440,10 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
         }.get(mode_name, "b[ext=mp4]/best")
 
     def work():
+        try:
+            logger.info("yt-dlp version=%s youtube=%s cookies=%s", getattr(yt_dlp, "version", None).__version__, is_youtube, bool(_resolve_cookies_file()))
+        except Exception:
+            pass
         progress = {"path": None, "downloaded": 0, "total": 0, "last": 0.0}
         outtmpl = str(outdir / "%(title).80s-%(id)s.%(ext)s")
 
@@ -475,12 +479,10 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 "noplaylist": True,
                 "quiet": True,
                 "no_warnings": True,
-                "retries": 8,
-                "fragment_retries": 8,
-                "extractor_retries": 4,
+                "retries": 5,
+                "fragment_retries": 5,
                 "socket_timeout": int(TIMEOUT),
                 "max_filesize": MAX_BYTES,
-                "sleep_interval_requests": 0.5,
                 "concurrent_fragment_downloads": YTDLP_CONCURRENT_FRAGMENTS,
                 "http_chunk_size": YTDLP_HTTP_CHUNK_SIZE or None,
                 "buffersize": YTDLP_BUFFER_SIZE,
@@ -503,7 +505,13 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 opts["proxy"] = proxy
             if use_cookies and cookie_path:
                 opts["cookiefile"] = cookie_path
-            if clients and is_youtube:
+            if clients:
+                # IMPORTANT: never set player_skip for YouTube here.
+                # Skipping webpage/config initialization can leave the player
+                # response in a state where YouTube answers with
+                # `The page needs to be reloaded`.  Also avoid tv_downgraded,
+                # android_vr and mweb in the primary cascade; these clients
+                # currently have intermittent PO-token/SABR failures.
                 opts["extractor_args"] = {
                     "youtube": {
                         "player_client": list(clients),
@@ -557,27 +565,21 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
 
         attempts: list[tuple[str, list[str] | None, bool]]
         if is_youtube:
-            # YouTube changes its anti-bot/player behaviour frequently.  Keep
-            # each client isolated so a failed client cannot poison the next
-            # extraction attempt.  Do not force the web page/config endpoints:
-            # errors such as "The page needs to be reloaded" are commonly
-            # emitted by those endpoints while a player client can still work.
-            env_clients = os.getenv("YTDLP_YOUTUBE_CLIENTS", "").strip()
-            if env_clients:
-                configured = [c.strip() for c in env_clients.split(",") if c.strip()]
-                client_groups = [(f"env-{i}-{c}", [c], True) for i, c in enumerate(configured)]
-            else:
-                client_groups = [
-                    ("nocookie-mweb", ["mweb"], False),
-                    ("nocookie-ios", ["ios"], False),
-                    ("nocookie-tv", ["tv"], False),
-                    ("nocookie-android-vr", ["android_vr"], False),
-                    ("cookie-web-safari", ["web_safari"], True),
-                    ("cookie-mweb", ["mweb"], True),
-                    ("cookie-web", ["web"], True),
-                    ("cookie-tv", ["tv"], True),
-                ]
-            attempts = client_groups
+            # 2026 YouTube client changes make tv_downgraded/android_vr/mweb
+            # unreliable. In particular, authenticated cookies can make the
+            # default client resolve to tv_downgraded and produce:
+            #   The page needs to be reloaded (tv_downgraded ... UNPLAYABLE)
+            # The supported fallback documented by yt-dlp is
+            # default + web_embedded. Keep the cascade small and deterministic.
+            attempts = [
+                ("nocookie-default-embedded", ["default", "web_embedded"], False),
+                ("nocookie-embedded", ["web_embedded"], False),
+            ]
+            if cookie_path:
+                attempts.extend([
+                    ("cookie-default-embedded", ["default", "web_embedded"], True),
+                    ("cookie-embedded", ["web_embedded"], True),
+                ])
         else:
             attempts = [("default", None, True)]
 
