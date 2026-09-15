@@ -440,10 +440,6 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
         }.get(mode_name, "b[ext=mp4]/best")
 
     def work():
-        try:
-            logger.info("yt-dlp version=%s youtube=%s cookies=%s", getattr(yt_dlp, "version", None).__version__, is_youtube, bool(_resolve_cookies_file()))
-        except Exception:
-            pass
         progress = {"path": None, "downloaded": 0, "total": 0, "last": 0.0}
         outtmpl = str(outdir / "%(title).80s-%(id)s.%(ext)s")
 
@@ -471,6 +467,20 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
 
         cookie_path = _resolve_cookies_file()
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
+        # Optional externally-provided YouTube PO tokens.  These are not generated
+        # or bypassed by the bot; if supplied, yt-dlp can use them for the client
+        # selected below.  A token may be configured as: web+TOKEN or mweb.gvs+TOKEN.
+        yt_po_token = os.getenv("DOWNLOADER_YT_PO_TOKEN", "").strip()
+        try:
+            logger.info(
+                "yt-dlp version=%s youtube=%s cookies=%s po_token=%s",
+                getattr(getattr(yt_dlp, "version", None), "__version__", "unknown"),
+                is_youtube,
+                bool(cookie_path),
+                bool(yt_po_token),
+            )
+        except Exception:
+            pass
 
         def _run_once(label: str, *, clients: list[str] | None, use_cookies: bool) -> dict:
             opts = {
@@ -500,6 +510,9 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 "continuedl": True,
                 "overwrites": True,
                 "ignoreerrors": False,
+                # Do not let a host-level yt-dlp config silently re-enable
+                # tv_downgraded or another client after we explicitly selected one.
+                "ignoreconfig": True,
             }
             if proxy:
                 opts["proxy"] = proxy
@@ -509,14 +522,13 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 # IMPORTANT: never set player_skip for YouTube here.
                 # Skipping webpage/config initialization can leave the player
                 # response in a state where YouTube answers with
-                # `The page needs to be reloaded`.  Also avoid tv_downgraded,
-                # android_vr and mweb in the primary cascade; these clients
-                # currently have intermittent PO-token/SABR failures.
-                opts["extractor_args"] = {
-                    "youtube": {
-                        "player_client": list(clients),
-                    }
-                }
+                # `The page needs to be reloaded`.  In particular, do not use
+                # tv/tv_downgraded with account cookies: current yt-dlp docs
+                # note that this path can become UNPLAYABLE/DRM.
+                yt_args = {"player_client": list(clients)}
+                if yt_po_token:
+                    yt_args["po_token"] = yt_po_token
+                opts["extractor_args"] = {"youtube": yt_args}
             if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
                 opts["http_headers"]["Referer"] = "https://www.instagram.com/"
                 opts["extractor_args"] = {"instagram": {"app_id": "web"}}
@@ -565,21 +577,24 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
 
         attempts: list[tuple[str, list[str] | None, bool]]
         if is_youtube:
-            # 2026 YouTube client changes make tv_downgraded/android_vr/mweb
-            # unreliable. In particular, authenticated cookies can make the
-            # default client resolve to tv_downgraded and produce:
-            #   The page needs to be reloaded (tv_downgraded ... UNPLAYABLE)
-            # The supported fallback documented by yt-dlp is
-            # default + web_embedded. Keep the cascade small and deterministic.
+            # YouTube's current client matrix is changing frequently.  Start with
+            # clients that do not need a PO token and do not pass account cookies.
+            # web_embedded is especially useful because it avoids the
+            # tv_downgraded cookie path that produces `The page needs to be reloaded`.
             attempts = [
-                ("nocookie-default-embedded", ["default", "web_embedded"], False),
-                ("nocookie-embedded", ["web_embedded"], False),
+                ("nocookie-web_embedded", ["web_embedded"], False),
+                ("nocookie-android_vr", ["android_vr"], False),
             ]
-            if cookie_path:
-                attempts.extend([
-                    ("cookie-default-embedded", ["default", "web_embedded"], True),
-                    ("cookie-embedded", ["web_embedded"], True),
-                ])
+            if yt_po_token:
+                # If the operator explicitly supplied a PO token, allow the
+                # web client as the higher-format fallback.
+                attempts.append(("nocookie-web-po", ["web"], False))
+                if cookie_path:
+                    attempts.append(("cookie-web-po", ["web"], True))
+            elif cookie_path:
+                # Cookies are kept only as a final fallback.  Never combine them
+                # with tv/tv_downgraded/mweb automatically.
+                attempts.append(("cookie-web_embedded", ["web_embedded"], True))
         else:
             attempts = [("default", None, True)]
 
@@ -591,7 +606,7 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 raise
             except Exception as exc:
                 last_exc = exc
-                logger.warning("yt-dlp try failed label=%s err=%s", label, str(exc)[:240])
+                logger.warning("yt-dlp try failed label=%s code=%s err=%s", label, _classify_error(str(exc)), str(exc)[:320])
                 try:
                     for p in outdir.glob("*"):
                         if p.is_file():
@@ -713,7 +728,7 @@ def user_message(code: str) -> str:
         "too_large": f"📦 فایل برای ارسال مستقیم بیش از حد بزرگ است. سقف ربات {MAX_BYTES // (1024*1024)}MB است.",
         "yt_dlp_missing": "⚠️ موتور yt-dlp نصب نشده است. requirements را نصب کنید.",
         "gallery_dl_missing": "⚠️ موتور gallery-dl نصب نشده است.\nدستور: pip install -U gallery-dl",
-        "failed": "❌ دانلود ناموفق بود.\nیوتیوب IP سرور را محدود کرده. در Render مقدار DOWNLOADER_COOKIES (متن cookies.txt) یا DOWNLOADER_PROXY را تنظیم کنید.",
+        "failed": "❌ دانلود ناموفق بود.\nیوتیوب پاسخ قابل دریافت برای این ویدئو برنگرداند. اگر این خطا تکرار شد، DOWNLOADER_YT_PO_TOKEN یا یک پروکسی مجاز و پایدار را در Render تنظیم کنید.",
         "site_blocked": "🚫 یوتیوب درخواست را ربات تشخیص داد.\nراه‌حل: کوکی مرورگر را در متغیر DOWNLOADER_COOKIES بگذارید یا پروکسی واقعی در DOWNLOADER_PROXY.",
     }.get(code, "❌ دانلود ناموفق بود.")
 
