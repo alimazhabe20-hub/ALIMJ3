@@ -316,7 +316,31 @@ async def probe(url: str) -> dict:
         return {"supported": False, "direct": True, "url": url, "formats": []}
     loop = asyncio.get_running_loop()
     def work():
-        opts = {"quiet": True, "no_warnings": True, "skip_download": True, "socket_timeout": int(TIMEOUT), "noplaylist": True, "http_headers": {"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"}}
+        opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "socket_timeout": int(TIMEOUT),
+            "noplaylist": True,
+            "http_headers": {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        }
+        host = (urlparse(url).hostname or "").lower().rstrip(".")
+        if "youtube.com" in host or host == "youtu.be" or host.endswith(".youtube.com"):
+            # Modern YouTube often blocks the default web client; try mobile/TV clients.
+            opts["extractor_args"] = {
+                "youtube": {
+                    "player_client": ["android", "ios", "mweb", "web", "tv"],
+                }
+            }
+        cookie = os.getenv("DOWNLOADER_COOKIES_FILE", "").strip()
+        if cookie and Path(cookie).is_file():
+            opts["cookiefile"] = cookie
+        proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
+        if proxy:
+            opts["proxy"] = proxy
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
         formats = []
@@ -358,31 +382,59 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 if progress_cb:
                     try: progress_cb({**progress, "finished": True})
                     except Exception: pass
+        # Prefer progressive mp4 when possible so Telegram can play without remux issues.
+        fmt = {
+            "best": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
+            "1080p": "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
+            "720p": "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/b",
+            "480p": "bv*[height<=480][ext=mp4]+ba[ext=m4a]/b[height<=480][ext=mp4]/bv*[height<=480]+ba/b",
+            "audio": "bestaudio[ext=m4a]/bestaudio/best",
+        }.get(mode, "bv*+ba/b")
         opts = {
-            "format": fmt, "outtmpl": outtmpl, "noplaylist": True, "quiet": True, "no_warnings": True,
-            "retries": 5, "fragment_retries": 5, "socket_timeout": int(TIMEOUT), "max_filesize": MAX_BYTES,
+            "format": fmt,
+            "outtmpl": outtmpl,
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+            "retries": 8,
+            "fragment_retries": 8,
+            "socket_timeout": int(TIMEOUT),
+            "max_filesize": MAX_BYTES,
             "concurrent_fragment_downloads": YTDLP_CONCURRENT_FRAGMENTS,
             "http_chunk_size": YTDLP_HTTP_CHUNK_SIZE or None,
             "buffersize": YTDLP_BUFFER_SIZE,
-            "restrictfilenames": True, "progress_hooks": [hook],
+            "restrictfilenames": True,
+            "progress_hooks": [hook],
             "http_headers": {
-                "User-Agent": UA,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                 "Accept-Language": "en-US,en;q=0.9",
             },
-            "merge_output_format": "mp4", "continuedl": True, "overwrites": False,
+            "merge_output_format": "mp4",
+            "continuedl": True,
+            "overwrites": False,
+            # Helps with some age-gated / region edge cases when cookies are provided.
+            "age_limit": None,
         }
         parsed_host = (urlparse(url).hostname or "").lower().rstrip(".")
+        if "youtube.com" in parsed_host or parsed_host == "youtu.be" or parsed_host.endswith(".youtube.com"):
+            opts["extractor_args"] = {
+                "youtube": {
+                    # android/ios clients are currently the most reliable for many regions.
+                    "player_client": ["android", "ios", "mweb", "web", "tv"],
+                }
+            }
+            # Keep Shorts URLs as-is; yt-dlp handles /shorts/ paths.
         if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
             opts["http_headers"]["Referer"] = "https://www.instagram.com/"
-            # Explicitly use Instagram's public web app ID; this is a normal
-            # extractor setting, not an authentication or CAPTCHA bypass.
             opts["extractor_args"] = {"instagram": {"app_id": "web"}}
         if mode == "audio":
             opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
         cookie = os.getenv("DOWNLOADER_COOKIES_FILE", "").strip()
-        if cookie and Path(cookie).is_file(): opts["cookiefile"] = cookie
+        if cookie and Path(cookie).is_file():
+            opts["cookiefile"] = cookie
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
-        if proxy: opts["proxy"] = proxy
+        if proxy:
+            opts["proxy"] = proxy
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             path = Path(ydl.prepare_filename(info))
