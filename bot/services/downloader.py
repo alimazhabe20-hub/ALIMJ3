@@ -360,44 +360,69 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
         import yt_dlp
     except ImportError:
         raise DownloadError("yt_dlp_missing")
+
     loop = asyncio.get_running_loop()
+    parsed_host = (urlparse(url).hostname or "").lower().rstrip(".")
+    is_youtube = (
+        "youtube.com" in parsed_host
+        or parsed_host == "youtu.be"
+        or parsed_host.endswith(".youtube.com")
+        or "youtube-nocookie.com" in parsed_host
+    )
+
+    def _format_for(mode_name: str) -> str:
+        # Progressive-first so Telegram gets a single playable file even without perfect merge.
+        return {
+            "best": "b[ext=mp4]/best[ext=mp4]/bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b",
+            "1080p": "b[height<=1080][ext=mp4]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080]/bv*[height<=1080]+ba/b",
+            "720p": "b[height<=720][ext=mp4]/bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720]/bv*[height<=720]+ba/b",
+            "480p": "b[height<=480][ext=mp4]/bv*[height<=480][ext=mp4]+ba[ext=m4a]/b[height<=480]/bv*[height<=480]+ba/b",
+            "audio": "bestaudio[ext=m4a]/bestaudio/best",
+        }.get(mode_name, "b[ext=mp4]/best")
+
+    # Try several YouTube client strategies; first success wins.
+    youtube_client_strategies = [
+        ["android"],
+        ["android", "ios"],
+        ["mweb", "tv"],
+        ["web", "mweb"],
+        ["tv", "android", "ios", "mweb", "web"],
+    ]
+
     def work():
         progress = {"path": None, "downloaded": 0, "total": 0, "last": 0.0}
-        fmt = {"best": "bv*+ba/b", "1080p": "bv*[height<=1080]+ba/b[height<=1080]/b", "720p": "bv*[height<=720]+ba/b[height<=720]/b", "480p": "bv*[height<=480]+ba/b[height<=480]/b", "audio": "bestaudio/best"}.get(mode, "bv*+ba/b")
-        outtmpl = str(outdir / "%(title).100s-%(id)s.%(ext)s")
+        outtmpl = str(outdir / "%(title).80s-%(id)s.%(ext)s")
+
         def hook(d):
             status = d.get("status")
             if status == "downloading":
                 progress["downloaded"] = int(d.get("downloaded_bytes") or 0)
                 progress["total"] = int(d.get("total_bytes") or d.get("total_bytes_estimate") or 0)
-                if progress["downloaded"] > MAX_BYTES or progress["total"] > MAX_BYTES:
+                if progress["downloaded"] > MAX_BYTES or (progress["total"] and progress["total"] > MAX_BYTES):
                     raise DownloadError("too_large")
                 now = time.monotonic()
                 if progress_cb and now - progress["last"] >= 1.5:
                     progress["last"] = now
-                    try: progress_cb(progress.copy())
-                    except Exception: pass
+                    try:
+                        progress_cb(progress.copy())
+                    except Exception:
+                        pass
             elif status == "finished":
                 progress["path"] = d.get("filename")
                 if progress_cb:
-                    try: progress_cb({**progress, "finished": True})
-                    except Exception: pass
-        # Prefer progressive mp4 when possible so Telegram can play without remux issues.
-        fmt = {
-            "best": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
-            "1080p": "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
-            "720p": "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/b",
-            "480p": "bv*[height<=480][ext=mp4]+ba[ext=m4a]/b[height<=480][ext=mp4]/bv*[height<=480]+ba/b",
-            "audio": "bestaudio[ext=m4a]/bestaudio/best",
-        }.get(mode, "bv*+ba/b")
-        opts = {
-            "format": fmt,
+                    try:
+                        progress_cb({**progress, "finished": True})
+                    except Exception:
+                        pass
+
+        base_opts = {
+            "format": _format_for(mode),
             "outtmpl": outtmpl,
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
-            "retries": 8,
-            "fragment_retries": 8,
+            "retries": 10,
+            "fragment_retries": 10,
             "socket_timeout": int(TIMEOUT),
             "max_filesize": MAX_BYTES,
             "concurrent_fragment_downloads": YTDLP_CONCURRENT_FRAGMENTS,
@@ -406,49 +431,101 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
             "restrictfilenames": True,
             "progress_hooks": [hook],
             "http_headers": {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
                 "Accept-Language": "en-US,en;q=0.9",
             },
             "merge_output_format": "mp4",
             "continuedl": True,
-            "overwrites": False,
-            # Helps with some age-gated / region edge cases when cookies are provided.
-            "age_limit": None,
+            "overwrites": True,
+            "ignoreerrors": False,
         }
-        parsed_host = (urlparse(url).hostname or "").lower().rstrip(".")
-        if "youtube.com" in parsed_host or parsed_host == "youtu.be" or parsed_host.endswith(".youtube.com"):
-            opts["extractor_args"] = {
-                "youtube": {
-                    # android/ios clients are currently the most reliable for many regions.
-                    "player_client": ["android", "ios", "mweb", "web", "tv"],
-                }
-            }
-            # Keep Shorts URLs as-is; yt-dlp handles /shorts/ paths.
-        if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
-            opts["http_headers"]["Referer"] = "https://www.instagram.com/"
-            opts["extractor_args"] = {"instagram": {"app_id": "web"}}
-        if mode == "audio":
-            opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
+
         cookie = os.getenv("DOWNLOADER_COOKIES_FILE", "").strip()
         if cookie and Path(cookie).is_file():
-            opts["cookiefile"] = cookie
+            base_opts["cookiefile"] = cookie
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
         if proxy:
-            opts["proxy"] = proxy
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            path = Path(ydl.prepare_filename(info))
-            if mode == "audio":
-                mp3 = path.with_suffix(".mp3")
-                if mp3.exists(): path = mp3
-            if not path.exists():
-                candidates = list(outdir.glob(f"*{info.get('id','')}*"))
-                if candidates: path = max(candidates, key=lambda p: p.stat().st_mtime)
-            if not path.exists(): raise DownloadError("failed")
-            size = path.stat().st_size
-            if size > MAX_BYTES:
-                path.unlink(missing_ok=True); raise DownloadError("too_large")
-            return {"path": str(path), "title": _safe_name(info.get("title") or path.stem), "size": size, "content_type": info.get("ext", ""), "method": "yt-dlp", "duration": info.get("duration"), "thumbnail": info.get("thumbnail"), "webpage_url": info.get("webpage_url"), "uploader": info.get("uploader"), "mode": mode}
+            base_opts["proxy"] = proxy
+
+        if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
+            base_opts["http_headers"]["Referer"] = "https://www.instagram.com/"
+            base_opts["extractor_args"] = {"instagram": {"app_id": "web"}}
+
+        if mode == "audio":
+            base_opts["postprocessors"] = [
+                {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}
+            ]
+
+        strategies = youtube_client_strategies if is_youtube else [None]
+        last_exc: Exception | None = None
+
+        for clients in strategies:
+            opts = dict(base_opts)
+            if clients is not None:
+                opts["extractor_args"] = {"youtube": {"player_client": list(clients)}}
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    if not info:
+                        raise DownloadError("failed")
+                    path = Path(ydl.prepare_filename(info))
+                    if mode == "audio":
+                        mp3 = path.with_suffix(".mp3")
+                        if mp3.exists():
+                            path = mp3
+                    if not path.exists():
+                        vid = str(info.get("id") or "")
+                        candidates = list(outdir.glob(f"*{vid}*")) if vid else list(outdir.glob("*"))
+                        candidates = [p for p in candidates if p.is_file()]
+                        if candidates:
+                            path = max(candidates, key=lambda p: p.stat().st_mtime)
+                    if not path.exists():
+                        raise DownloadError("failed")
+                    size = path.stat().st_size
+                    if size <= 0:
+                        path.unlink(missing_ok=True)
+                        raise DownloadError("failed")
+                    if size > MAX_BYTES:
+                        path.unlink(missing_ok=True)
+                        raise DownloadError("too_large")
+                    return {
+                        "path": str(path),
+                        "title": _safe_name(info.get("title") or path.stem),
+                        "size": size,
+                        "content_type": info.get("ext", ""),
+                        "method": "yt-dlp",
+                        "duration": info.get("duration"),
+                        "thumbnail": info.get("thumbnail"),
+                        "webpage_url": info.get("webpage_url"),
+                        "uploader": info.get("uploader"),
+                        "mode": mode,
+                    }
+            except DownloadError:
+                raise
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "yt-dlp strategy failed clients=%s err=%s",
+                    clients,
+                    str(exc)[:240],
+                )
+                # Clean partial files before next strategy
+                try:
+                    for p in outdir.glob("*"):
+                        if p.is_file():
+                            p.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                continue
+
+        if last_exc is not None:
+            raise DownloadError(_classify_error(str(last_exc))) from last_exc
+        raise DownloadError("failed")
+
     try:
         return await loop.run_in_executor(None, work)
     except DownloadError:
