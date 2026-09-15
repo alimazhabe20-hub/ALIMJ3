@@ -482,9 +482,9 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
         except Exception:
             pass
 
-        def _run_once(label: str, *, clients: list[str] | None, use_cookies: bool) -> dict:
+        def _run_once(label: str, *, clients: list[str] | None, use_cookies: bool, format_override: str | None = None) -> dict:
             opts = {
-                "format": _format_for(mode),
+                "format": format_override or _format_for(mode),
                 "outtmpl": outtmpl,
                 "noplaylist": True,
                 "quiet": True,
@@ -585,32 +585,36 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 # Public clients first: never attach account cookies to the first
                 # request, because current YouTube can downgrade logged-in
                 # sessions to tv_downgraded and return "page needs to be reloaded".
-                ("nocookie-web_embedded", ["web_embedded"], False),
-                ("nocookie-android_vr", ["android_vr"], False),
-                ("nocookie-ios", ["ios"], False),
-                ("nocookie-web_safari", ["web_safari"], False),
+                ("nocookie-web_embedded", ["web_embedded"], False, None),
+                ("nocookie-android_vr", ["android_vr"], False, None),
+                ("nocookie-ios", ["ios"], False, None),
+                # web_safari can expose HLS formats that currently avoid GVS PO-token
+                # enforcement. Prefer an explicit HLS-only attempt before the generic
+                # web_safari format selection.
+                ("nocookie-web_safari-hls", ["web_safari"], False, "best[protocol^=m3u8]/best[protocol=m3u8_native]/bestaudio[protocol^=m3u8]/best"),
+                ("nocookie-web_safari", ["web_safari"], False, None),
                 # A clean default-client attempt is useful for videos for which
                 # web_embedded/android_vr are unavailable. No cookies are attached.
-                ("nocookie-default", ["default"], False),
+                ("nocookie-default", ["default"], False, None),
             ]
             if yt_po_token:
                 # If the operator explicitly supplied a PO token, allow the
                 # web client as the higher-format fallback.
-                attempts.append(("nocookie-web-po", ["web"], False))
+                attempts.append(("nocookie-web-po", ["web"], False, None))
                 if cookie_path:
-                    attempts.append(("cookie-web-po", ["web"], True))
+                    attempts.append(("cookie-web-po", ["web"], True, None))
             elif cookie_path:
                 # Cookies are kept only as a final fallback.  Never combine them
                 # with tv/tv_downgraded/mweb automatically.
-                attempts.append(("cookie-web_embedded", ["web_embedded"], True))
-                attempts.append(("cookie-default", ["default"], True))
+                attempts.append(("cookie-web_embedded", ["web_embedded"], True, None))
+                attempts.append(("cookie-default", ["default"], True, None))
         else:
-            attempts = [("default", None, True)]
+            attempts = [("default", None, True, None)]
 
         last_exc: Exception | None = None
-        for label, clients, use_cookies in attempts:
+        for label, clients, use_cookies, format_override in attempts:
             try:
-                return _run_once(label, clients=clients, use_cookies=use_cookies)
+                return _run_once(label, clients=clients, use_cookies=use_cookies, format_override=format_override)
             except DownloadError:
                 raise
             except Exception as exc:
