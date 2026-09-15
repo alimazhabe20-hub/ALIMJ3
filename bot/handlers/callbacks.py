@@ -94,6 +94,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = update.effective_user.id
 
+    # ───────────────── دانلودر فایل (dl:q / dl:cancel) ─────────────────
+    if data and data.startswith("dl:"):
+        try:
+            from bot.handlers.v71_handlers import download_callback
+            handled = await download_callback(update, context, data)
+            if handled:
+                return
+        except Exception as exc:
+            logger.exception("download callback failed: %s", exc)
+            try:
+                await query.answer("⚠️ خطا در دانلود", show_alert=True)
+            except Exception:
+                pass
+            try:
+                await query.message.reply_text("⚠️ دانلود ناموفق بود؛ دوباره لینک را بفرستید.")
+            except Exception:
+                pass
+            return
+
     # ───────────────── تقویم اقتصادی بازار ─────────────────
     if data and data.startswith("ec:"):
         from bot.features.market.economic_calendar import (

@@ -429,7 +429,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = update.message.text.strip()
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name or "کاربر"
-    # اگر کاربر در حالت دانلودر است و لینک فرستاده، همان‌جا پردازش شود
     try:
         from bot.handlers.v71_handlers import handle_downloader_url_v71
         if await handle_downloader_url_v71(update, context, text):
