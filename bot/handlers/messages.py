@@ -761,10 +761,12 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             track_usage(user_id, "gold_analysis")
             notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…")
             report = await analyze_gold("1h")
+            chart_note = ""
             try:
-                png, _ = await get_gold_chart("1h")
-            except Exception:
-                png = None
+                png, chart_note = await get_gold_chart("1h")
+            except Exception as chart_exc:
+                logger.warning("get_gold_chart failed: %s", chart_exc)
+                png, chart_note = None, str(chart_exc)
             try:
                 await notice.delete()
             except Exception:
@@ -774,15 +776,24 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             menu = get_crypto_analysis_keyboard("gold")
             if png:
                 from io import BytesIO
-                bio = BytesIO(png)
-                bio.name = "gold_xauusd_1h.png"
-                chart_msg = await update.message.reply_photo(
-                    photo=bio,
-                    caption="🥇 <b>تحلیل طلا / XAUUSD — 1H</b>",
-                    parse_mode="HTML",
-                )
-                context.user_data["market_chart_message_id"] = chart_msg.message_id
-                context.user_data["market_chart_chat_id"] = update.effective_chat.id
+                try:
+                    bio = BytesIO(png)
+                    bio.name = "gold_xauusd_1h.png"
+                    chart_msg = await update.message.reply_photo(
+                        photo=bio,
+                        caption="🥇 <b>تحلیل طلا / XAUUSD — 1H</b>",
+                        parse_mode="HTML",
+                    )
+                    context.user_data["market_chart_message_id"] = chart_msg.message_id
+                    context.user_data["market_chart_chat_id"] = update.effective_chat.id
+                except Exception as send_exc:
+                    logger.warning("gold chart send failed: %s", send_exc)
+                    chart_note = chart_note or str(send_exc)
+            elif chart_note:
+                try:
+                    await update.message.reply_text(f"⚠️ نمودار طلا در دسترس نیست: {chart_note[:300]}")
+                except Exception:
+                    pass
             chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
             text_ids = []
             for i, chunk in enumerate(chunks):
@@ -811,30 +822,46 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             track_usage(user_id, "gold_analysis")
             notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…")
             report = await analyze_gold("1h")
+            chart_note = ""
             try:
-                png, _ = await get_gold_chart("1h")
-            except Exception:
-                png = None
+                png, chart_note = await get_gold_chart("1h")
+            except Exception as chart_exc:
+                logger.warning("get_gold_chart (alias) failed: %s", chart_exc)
+                png, chart_note = None, str(chart_exc)
             try:
                 await notice.delete()
             except Exception:
                 pass
+            menu = get_crypto_analysis_keyboard("gold")
             if png:
                 from io import BytesIO
-                bio = BytesIO(png)
-                bio.name = "gold_xauusd_1h.png"
-                chart_msg = await update.message.reply_photo(
-                    photo=bio,
-                    caption="🥇 Gold / XAUUSD — 1H",
-                )
-                context.user_data["market_chart_message_id"] = chart_msg.message_id
-                context.user_data["market_chart_chat_id"] = update.effective_chat.id
+                try:
+                    bio = BytesIO(png)
+                    bio.name = "gold_xauusd_1h.png"
+                    chart_msg = await update.message.reply_photo(
+                        photo=bio,
+                        caption="🥇 Gold / XAUUSD — 1H",
+                        parse_mode="HTML",
+                    )
+                    context.user_data["market_chart_message_id"] = chart_msg.message_id
+                    context.user_data["market_chart_chat_id"] = update.effective_chat.id
+                except Exception as send_exc:
+                    logger.warning("gold chart send (alias) failed: %s", send_exc)
+                    chart_note = chart_note or str(send_exc)
+            elif chart_note:
+                try:
+                    await update.message.reply_text(f"⚠️ نمودار طلا در دسترس نیست: {chart_note[:300]}")
+                except Exception:
+                    pass
             # گزارش کامل را به‌صورت پیام متنی می‌فرستیم تا محدودیت 1024 کاراکتری کپشن باعث ناقص شدن تحلیل نشود.
             chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
             text_ids = []
-            for chunk in chunks:
+            for i, chunk in enumerate(chunks):
                 try:
-                    mtxt = await update.message.reply_text(chunk, parse_mode="HTML")
+                    mtxt = await update.message.reply_text(
+                        chunk, parse_mode="HTML",
+                        reply_markup=menu if i == len(chunks) - 1 else None,
+                    )
                 except Exception:
                     mtxt = await update.message.reply_text(re.sub(r"<[^>]+>", "", chunk)[:3500])
                 text_ids.append(mtxt.message_id)
