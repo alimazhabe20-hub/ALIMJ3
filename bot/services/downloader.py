@@ -392,7 +392,7 @@ async def probe(url: str) -> dict:
             # let yt-dlp perform its normal webpage/config initialization.
             yt_args = {"player_client": ["mweb", "web_embedded"]}
             opts["extractor_args"] = {"youtube": yt_args}
-            pot_script = os.getenv("DOWNLOADER_YT_POT_SCRIPT", "/opt/bgutil/server/build/generate_once.js").strip()
+            pot_script = os.getenv("DOWNLOADER_YT_POT_SCRIPT", str(Path.cwd() / ".render" / "bgutil-ytdlp-pot-provider" / "server" / "build" / "generate_once.js")).strip()
             if pot_script and Path(pot_script).is_file():
                 opts["extractor_args"]["youtubepot-bgutilscript"] = {"script_path": pot_script}
             opts["js_runtimes"] = {"node": "node"}
@@ -467,7 +467,7 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                         pass
 
         cookie_path = _resolve_cookies_file()
-        pot_script = os.getenv("DOWNLOADER_YT_POT_SCRIPT", "/opt/bgutil/server/build/generate_once.js").strip()
+        pot_script = os.getenv("DOWNLOADER_YT_POT_SCRIPT", str(Path.cwd() / ".render" / "bgutil-ytdlp-pot-provider" / "server" / "build" / "generate_once.js")).strip()
         pot_script_available = bool(pot_script and Path(pot_script).is_file())
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
         # Optional externally-provided YouTube PO tokens.  These are not generated
