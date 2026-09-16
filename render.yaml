@@ -72,6 +72,9 @@ services:
       - key: STARTUP_CHECK
         value: "true"
       - key: RELEASE_VERSION
-        value: "78.0.0"
-    buildCommand: python -c "from bot.release import version_string; print('Building', version_string())" && pip install -r requirements.txt
+        value: "79.0.0"
+      - key: DOWNLOADER_YT_POT_SCRIPT
+        value: /opt/render/project/src/.render/bgutil-ytdlp-pot-provider/server/build/generate_once.js
+    buildCommand: >-
+      python -c "from bot.release import version_string; print('Building', version_string())" && pip install -r requirements.txt && pip install -U "yt-dlp[default]" bgutil-ytdlp-pot-provider && rm -rf .render/bgutil-ytdlp-pot-provider && git clone --depth 1 --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git .render/bgutil-ytdlp-pot-provider && cd .render/bgutil-ytdlp-pot-provider/server && npm ci && npx tsc
     startCommand: python -m bot.main
