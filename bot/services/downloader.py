@@ -390,11 +390,12 @@ async def probe(url: str) -> dict:
             # `The page needs to be reloaded` for those clients, especially
             # when cookies are present. Keep the stable clients explicit and
             # let yt-dlp perform its normal webpage/config initialization.
-            opts["extractor_args"] = {
-                "youtube": {
-                    "player_client": ["default", "web_embedded"],
-                }
-            }
+            yt_args = {"player_client": ["mweb", "web_embedded"]}
+            opts["extractor_args"] = {"youtube": yt_args}
+            pot_script = os.getenv("DOWNLOADER_YT_POT_SCRIPT", "/opt/bgutil/server/build/generate_once.js").strip()
+            if pot_script and Path(pot_script).is_file():
+                opts["extractor_args"]["youtubepot-bgutilscript"] = {"script_path": pot_script}
+            opts["js_runtimes"] = {"node": "node"}
         cookie = _resolve_cookies_file()
         if cookie:
             opts["cookiefile"] = cookie
@@ -466,6 +467,8 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                         pass
 
         cookie_path = _resolve_cookies_file()
+        pot_script = os.getenv("DOWNLOADER_YT_POT_SCRIPT", "/opt/bgutil/server/build/generate_once.js").strip()
+        pot_script_available = bool(pot_script and Path(pot_script).is_file())
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
         # Optional externally-provided YouTube PO tokens.  These are not generated
         # or bypassed by the bot; if supplied, yt-dlp can use them for the client
@@ -479,6 +482,7 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 bool(cookie_path),
                 bool(yt_po_token),
             )
+            logger.info("YouTube POT provider script=%s available=%s node=%s", pot_script, pot_script_available, shutil.which("node"))
         except Exception:
             pass
 
@@ -513,6 +517,7 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 # Do not let a host-level yt-dlp config silently re-enable
                 # tv_downgraded or another client after we explicitly selected one.
                 "ignoreconfig": True,
+                "js_runtimes": {"node": "node"},
             }
             if proxy:
                 opts["proxy"] = proxy
@@ -526,9 +531,11 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 # tv/tv_downgraded with account cookies: current yt-dlp docs
                 # note that this path can become UNPLAYABLE/DRM.
                 yt_args = {"player_client": list(clients)}
-                if yt_po_token:
+                if yt_po_token and not pot_script_available:
                     yt_args["po_token"] = yt_po_token
                 opts["extractor_args"] = {"youtube": yt_args}
+                if pot_script_available and is_youtube:
+                    opts["extractor_args"]["youtubepot-bgutilscript"] = {"script_path": pot_script}
             if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
                 opts["http_headers"]["Referer"] = "https://www.instagram.com/"
                 opts["extractor_args"] = {"instagram": {"app_id": "web"}}
@@ -575,39 +582,28 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                     "mode": mode,
                 }
 
-        attempts: list[tuple[str, list[str] | None, bool]]
+        attempts: list[tuple[str, list[str] | None, bool, str | None]]
         if is_youtube:
-            # YouTube's current client matrix is changing frequently.  Start with
-            # clients that do not need a PO token and do not pass account cookies.
-            # web_embedded is especially useful because it avoids the
-            # tv_downgraded cookie path that produces `The page needs to be reloaded`.
-            attempts = [
-                # Public clients first: never attach account cookies to the first
-                # request, because current YouTube can downgrade logged-in
-                # sessions to tv_downgraded and return "page needs to be reloaded".
+            # Current yt-dlp guidance recommends mweb + an automatic PO-token
+            # provider for GVS.  The provider is installed in the Docker image
+            # and falls back to the older no-token clients when unavailable.
+            attempts = []
+            if pot_script_available:
+                attempts.append(("mweb-bgutil", ["mweb"], False, None))
+                if cookie_path:
+                    attempts.append(("cookie-mweb-bgutil", ["mweb"], True, None))
+            attempts.extend([
                 ("nocookie-web_embedded", ["web_embedded"], False, None),
                 ("nocookie-android_vr", ["android_vr"], False, None),
-                ("nocookie-ios", ["ios"], False, None),
-                # web_safari can expose HLS formats that currently avoid GVS PO-token
-                # enforcement. Prefer an explicit HLS-only attempt before the generic
-                # web_safari format selection.
                 ("nocookie-web_safari-hls", ["web_safari"], False, "best[protocol^=m3u8]/best[protocol=m3u8_native]/bestaudio[protocol^=m3u8]/best"),
                 ("nocookie-web_safari", ["web_safari"], False, None),
-                # A clean default-client attempt is useful for videos for which
-                # web_embedded/android_vr are unavailable. No cookies are attached.
                 ("nocookie-default", ["default"], False, None),
-            ]
-            if yt_po_token:
-                # If the operator explicitly supplied a PO token, allow the
-                # web client as the higher-format fallback.
-                attempts.append(("nocookie-web-po", ["web"], False, None))
-                if cookie_path:
-                    attempts.append(("cookie-web-po", ["web"], True, None))
-            elif cookie_path:
-                # Cookies are kept only as a final fallback.  Never combine them
-                # with tv/tv_downgraded/mweb automatically.
-                attempts.append(("cookie-web_embedded", ["web_embedded"], True, None))
-                attempts.append(("cookie-default", ["default"], True, None))
+            ])
+            if cookie_path:
+                attempts.extend([
+                    ("cookie-web_embedded", ["web_embedded"], True, None),
+                    ("cookie-default", ["default"], True, None),
+                ])
         else:
             attempts = [("default", None, True, None)]
 
@@ -741,7 +737,7 @@ def user_message(code: str) -> str:
         "too_large": f"📦 فایل برای ارسال مستقیم بیش از حد بزرگ است. سقف ربات {MAX_BYTES // (1024*1024)}MB است.",
         "yt_dlp_missing": "⚠️ موتور yt-dlp نصب نشده است. requirements را نصب کنید.",
         "gallery_dl_missing": "⚠️ موتور gallery-dl نصب نشده است.\nدستور: pip install -U gallery-dl",
-        "failed": "❌ دانلود ناموفق بود.\nیوتیوب پاسخ قابل دریافت برای این ویدئو برنگرداند. اگر این خطا تکرار شد، DOWNLOADER_YT_PO_TOKEN یا یک پروکسی مجاز و پایدار را در Render تنظیم کنید.",
+        "failed": "❌ دانلود ناموفق بود.\nیوتیوب پاسخ قابل دریافت برای این ویدئو برنگرداند. موتور PO Token خودکار فعال است؛ اگر این خطا تکرار شد، یک DOWNLOADER_PROXY مجاز و پایدار تنظیم کنید.",
         "site_blocked": "🚫 یوتیوب درخواست را ربات تشخیص داد.\nراه‌حل: کوکی مرورگر را در متغیر DOWNLOADER_COOKIES بگذارید یا پروکسی واقعی در DOWNLOADER_PROXY.",
     }.get(code, "❌ دانلود ناموفق بود.")
 
