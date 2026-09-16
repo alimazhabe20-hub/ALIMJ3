@@ -466,7 +466,11 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                     except Exception:
                         pass
 
-        cookie_path = _resolve_cookies_file()
+        # YouTube on cloud/Render: deliberately DO NOT use browser cookies.
+        # Cookies exported from another IP/session can trigger YouTube's
+        # "The page needs to be reloaded" / playability protection.
+        # Cookies remain available for non-YouTube sites.
+        cookie_path = None if is_youtube else _resolve_cookies_file()
         pot_script = os.getenv("DOWNLOADER_YT_POT_SCRIPT", str(Path.cwd() / ".render" / "bgutil-ytdlp-pot-provider" / "server" / "build" / "generate_once.js")).strip()
         pot_script_available = bool(pot_script and Path(pot_script).is_file())
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
@@ -545,6 +549,10 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 ]
 
             logger.info("yt-dlp try label=%s clients=%s cookies=%s", label, clients, bool(opts.get("cookiefile")))
+            if is_youtube and opts.get("cookiefile"):
+                # Defensive guard: YouTube must never receive cookies on Render.
+                opts.pop("cookiefile", None)
+                logger.warning("YouTube cookie use blocked by Render safety policy label=%s", label)
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 if not info:
@@ -585,25 +593,21 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
         attempts: list[tuple[str, list[str] | None, bool, str | None]]
         if is_youtube:
             # Current yt-dlp guidance recommends mweb + an automatic PO-token
-            # provider for GVS.  The provider is installed in the Docker image
-            # and falls back to the older no-token clients when unavailable.
+            # provider for GVS. On Render we intentionally keep every YouTube
+            # attempt cookie-free and use client fallbacks when needed.
             attempts = []
+            # YouTube attempts are intentionally 100% cookie-free.
+            # Primary path: mweb + bgutil PO-token provider.
             if pot_script_available:
-                attempts.append(("mweb-bgutil", ["mweb"], False, None))
-                if cookie_path:
-                    attempts.append(("cookie-mweb-bgutil", ["mweb"], True, None))
+                attempts.append(("mweb-bgutil-nocookie", ["mweb"], False, None))
             attempts.extend([
                 ("nocookie-web_embedded", ["web_embedded"], False, None),
                 ("nocookie-android_vr", ["android_vr"], False, None),
+                ("nocookie-tv", ["tv"], False, None),
                 ("nocookie-web_safari-hls", ["web_safari"], False, "best[protocol^=m3u8]/best[protocol=m3u8_native]/bestaudio[protocol^=m3u8]/best"),
                 ("nocookie-web_safari", ["web_safari"], False, None),
                 ("nocookie-default", ["default"], False, None),
             ])
-            if cookie_path:
-                attempts.extend([
-                    ("cookie-web_embedded", ["web_embedded"], True, None),
-                    ("cookie-default", ["default"], True, None),
-                ])
         else:
             attempts = [("default", None, True, None)]
 
