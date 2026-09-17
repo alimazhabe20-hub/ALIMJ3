@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 APP_NAME = "Rooze Ziba / ALIMJ"
-VERSION = "78.0.0"
+VERSION = "80.2.0"
 RELEASE_CHANNEL = "production"
 PRODUCT_CODE = "ALIMJ"
 
