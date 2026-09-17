@@ -23,7 +23,7 @@ from urllib.parse import unquote, urljoin, urlparse
 
 from bot.logger import logger
 
-YOUTUBE_DOWNLOADER_FIX = "81.0"
+YOUTUBE_DOWNLOADER_FIX = "82.0-no-youtube"
 logger.info("YOUTUBE_DOWNLOADER_FIX=%s loaded from %s", YOUTUBE_DOWNLOADER_FIX, __file__)
 
 MAX_BYTES = max(1, int(os.getenv("DOWNLOADER_MAX_BYTES", str(1024 * 1024 * 1024))))
@@ -779,6 +779,15 @@ async def _direct(url: str, out: Path) -> dict:
 
 async def probe(url: str) -> dict:
     url = _preflight_redirects(url)
+    if _is_youtube_url(url):
+        return {
+            "supported": False,
+            "direct": False,
+            "url": url,
+            "formats": [],
+            "error": "youtube_disabled",
+            "title": None,
+        }
     try:
         import yt_dlp
     except ImportError:
@@ -1054,6 +1063,10 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
     if mode not in {"best", "1080p", "720p", "480p", "audio"}:
         mode = "best"
     url = _normalize_media_url(url)
+    # YouTube deliberately disabled (Render/datacenter IPs are routinely blocked).
+    # Instagram / TikTok / other social remain available via existing cascade.
+    if _is_youtube_url(url):
+        raise DownloadError("youtube_disabled")
     if preflight:
         url = _preflight_redirects(url)
     if use_cache:
