@@ -41,7 +41,7 @@ async def _post_json(url: str, *, headers=None, json=None, params=None) -> tuple
     client = _get_http()
     response = await client.post(
         url, headers=headers, json=json, params=params,
-        timeout=httpx.Timeout(TIMEOUT, connect=5.0),
+        timeout=httpx.Timeout(TIMEOUT, connect=3.0),
     )
     try:
         data = response.json()
@@ -153,13 +153,32 @@ async def _gemini(
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
+    # Fast lane: keep ordinary chats small. Full tool schemas + long history are
+    # reserved for requests that actually need tools. This is a major latency
+    # win on Render while retaining recent conversational memory.
+    simple = not use_tools
+    history_items = 4 if simple else 8
+    recent_history = list(_HISTORY[user_id])[-history_items:]
     contents = []
-    for role, content in _HISTORY[user_id]:
+    for role, content in recent_history:
         contents.append({
             "role": "model" if role == "assistant" else "user",
             "parts": [{"text": content}],
         })
     contents.append({"role": "user", "parts": [{"text": prompt}]})
+
+    system_text = _legacy_ai_context()[0]
+    if simple:
+        # Do not perform database retrieval for greetings/short chat.
+        system_text = system_text[:900]
+    else:
+        try:
+            from bot.services.ai_service import _memory_block
+            mem = _memory_block(user_id, prompt)
+            if mem:
+                system_text += "\n\n" + mem[:3000]
+        except Exception as exc:
+            logger.debug("gemini memory context skipped: %s", exc)
 
     # OpenAI-style registry -> Gemini functionDeclarations
     gemini_tools = []
@@ -189,9 +208,9 @@ async def _gemini(
 
             for _round in range(max_tool_rounds + 2 if tools_enabled else 1):
                 payload = {
-                    "systemInstruction": {"parts": [{"text": _legacy_ai_context()[0]}]},
+                    "systemInstruction": {"parts": [{"text": system_text}]},
                     "contents": working_contents,
-                    "generationConfig": {"maxOutputTokens": min(MAX_OUTPUT, 3072 if len(prompt) < 900 else 6144)},
+                    "generationConfig": {"maxOutputTokens": 1024 if simple else MAX_OUTPUT},
                     "safetySettings": GEMINI_SAFETY_SETTINGS,
                 }
                 if tools_enabled and gemini_tools and _round < max_tool_rounds:
@@ -611,7 +630,7 @@ async def _emergency_plain_completion(provider: str, prompt: str, model: str) ->
             "contents": [{"role": "user", "parts": [{"text": user_text}]}],
             "generationConfig": {"maxOutputTokens": 512},
         }
-        r = await _get_http().post(url, params={"key": key}, json=payload, timeout=10.0)
+        r = await _get_http().post(url, params={"key": key}, json=payload, timeout=25.0)
         data = r.json() if r.content else {}
         if r.status_code >= 400:
             raise RuntimeError(f"gemini emergency HTTP {r.status_code}: {str(data)[:400]}")
@@ -640,7 +659,7 @@ async def _emergency_plain_completion(provider: str, prompt: str, model: str) ->
         "max_tokens": 512,
         "temperature": 0.7,
     }
-    r = await _get_http().post(endpoints[provider], headers=headers, json=payload, timeout=10.0)
+    r = await _get_http().post(endpoints[provider], headers=headers, json=payload, timeout=25.0)
     data = r.json() if r.content else {}
     if r.status_code >= 400:
         raise RuntimeError(f"{provider} emergency HTTP {r.status_code}: {str(data)[:400]}")
@@ -663,8 +682,6 @@ async def _call_provider(
 ) -> str:
     if use_tools is None:
         use_tools = True
-    # Fast path: ordinary chat should not pay for tool schemas or extra tool rounds.
-    # Tool-capable routing remains enabled for requests that actually need tools.
     # Never send tool schemas for greetings/very short conversational prompts.
     # This also protects the normal chat path when an outer layer has appended
     # runtime context to an otherwise simple user message.
@@ -704,21 +721,13 @@ async def _call_provider(
                 first = second
                 msg = str(second)
 
-        # A 5xx/503 means provider capacity/transient service trouble.
-        # Do NOT make a second emergency request to the same overloaded Gemini
-        # endpoint: that only adds several seconds before fallback can run.
-        transient_upstream = any(x in low for x in (
-            "http 500", "http 502", "http 503", "http 504",
-            "service unavailable", "currently experiencing high demand",
-            "temporarily unavailable", "deadline exceeded",
-        ))
-        if transient_upstream:
-            logger.warning("%s/%s transient upstream failure; fast fallback: %s", provider, model, msg[:180])
-            raise first
-
-        if provider in {"gemini", "groq", "cerebras", "openrouter"}:
+        # Never make a second 25s emergency request after a transient 5xx/503.
+        # Those requests are routed immediately to the next provider/model.
+        # Emergency plain calls are kept only for tool/protocol failures where
+        # the original provider is otherwise healthy.
+        if provider in {"gemini", "groq", "cerebras", "openrouter"} and tool_related:
             try:
-                logger.warning("%s/%s emergency plain call after: %s", provider, model, msg[:120])
+                logger.warning("%s/%s emergency plain call after tool failure: %s", provider, model, msg[:120])
                 return await _emergency_plain_completion(provider, prompt, model)
             except Exception as em:
                 if _is_invalid_key_error(str(em)):

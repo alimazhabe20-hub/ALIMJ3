@@ -22,10 +22,10 @@ GEMINI_SAFETY_SETTINGS = [
 
 MAX_INPUT = int(os.getenv("AI_MAX_INPUT", "6000"))
 # سقف خروجی بالاتر تا جواب‌ها کامل و مفصل باشند
-MAX_OUTPUT = int(os.getenv("AI_MAX_OUTPUT", "8192"))
-HISTORY_ITEMS = max(4, int(os.getenv("AI_HISTORY_ITEMS", "16")))
+MAX_OUTPUT = int(os.getenv("AI_MAX_OUTPUT", "4096"))
+HISTORY_ITEMS = max(4, int(os.getenv("AI_HISTORY_ITEMS", "12")))
 # timeout کمی بالاتر چون جواب‌های کامل‌تر زمان بیشتری می‌گیرند
-TIMEOUT = float(os.getenv("AI_TIMEOUT", "24"))
+TIMEOUT = float(os.getenv("AI_TIMEOUT", "18"))
 
 # مدت خاموشی کلید بعد از محدودیت روزانه (ثانیه) — پیش‌فرض ۱۲ ساعت
 KEY_COOLDOWN_SEC = int(os.getenv("AI_KEY_COOLDOWN_SEC", str(12 * 3600)))
@@ -229,7 +229,7 @@ def _get_http() -> httpx.AsyncClient:
     global _HTTP
     if _HTTP is None or _HTTP.is_closed:
         _HTTP = httpx.AsyncClient(
-            timeout=httpx.Timeout(TIMEOUT, connect=5.0),
+            timeout=httpx.Timeout(TIMEOUT, connect=3.0),
             limits=httpx.Limits(max_keepalive_connections=20, max_connections=40),
             http2=False,
         )
@@ -446,13 +446,6 @@ def _env_models(env_name: str, default: List[str]) -> List[str]:
         value = replacements.get(value, value)
         if value not in normalized:
             normalized.append(value)
-    # Gemini 3.8 Flash is the current stable Flash generation. When both 3.8
-    # and the older 3.7 are configured, prefer 3.8 and leave 3.7 as fallback.
-    if env_name == "GEMINI_MODELS" and "gemini-3.8-flash" in normalized and "gemini-3.7-flash" in normalized:
-        normalized.remove("gemini-3.8-flash")
-        normalized.insert(0, "gemini-3.8-flash")
-        normalized.remove("gemini-3.7-flash")
-        normalized.append("gemini-3.7-flash")
     return normalized or default
 
 
@@ -465,7 +458,7 @@ def available_model_options() -> List[Tuple[str, str, str]]:
         # مدل‌های پایدار جدید؛ Lite برای سرعت، 3.6 برای کیفیت
         for model in _env_models(
             "GEMINI_MODELS",
-            ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.7-flash"],
+            ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-3.8-flash"],
         ):
             label = "Gemini • " + model.replace("gemini-", "Gemini ")
             items.append(("gemini", label, model))
