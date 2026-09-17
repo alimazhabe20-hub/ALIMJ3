@@ -23,15 +23,15 @@ GEMINI_SAFETY_SETTINGS = [
 MAX_INPUT = int(os.getenv("AI_MAX_INPUT", "6000"))
 # سقف خروجی بالاتر تا جواب‌ها کامل و مفصل باشند
 MAX_OUTPUT = int(os.getenv("AI_MAX_OUTPUT", "8192"))
-HISTORY_ITEMS = max(2, int(os.getenv("AI_HISTORY_ITEMS", "8")))
+HISTORY_ITEMS = max(4, int(os.getenv("AI_HISTORY_ITEMS", "12")))
 # timeout کمی بالاتر چون جواب‌های کامل‌تر زمان بیشتری می‌گیرند
-TIMEOUT = float(os.getenv("AI_TIMEOUT", "40"))
+TIMEOUT = float(os.getenv("AI_TIMEOUT", "25"))
 
 # مدت خاموشی کلید بعد از محدودیت روزانه (ثانیه) — پیش‌فرض ۱۲ ساعت
 KEY_COOLDOWN_SEC = int(os.getenv("AI_KEY_COOLDOWN_SEC", str(12 * 3600)))
 # خاموشی کوتاه برای rate-limit لحظه‌ای (ثانیه)
 KEY_SHORT_COOLDOWN_SEC = int(os.getenv("AI_KEY_SHORT_COOLDOWN_SEC", "90"))
-AI_RETRY_COUNT = max(0, int(os.getenv("AI_RETRY_COUNT", "2")))
+AI_RETRY_COUNT = max(0, int(os.getenv("AI_RETRY_COUNT", "1")))
 AI_RETRY_BASE_SEC = float(os.getenv("AI_RETRY_BASE_SEC", "0.25"))
 AI_SIMPLE_MAX_CHARS = int(os.getenv("AI_SIMPLE_MAX_CHARS", "220"))
 AI_COMPLEX_MIN_CHARS = int(os.getenv("AI_COMPLEX_MIN_CHARS", "1200"))

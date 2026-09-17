@@ -135,7 +135,7 @@ async def _gemini(
     model: str,
     *,
     use_tools: bool = True,
-    max_tool_rounds: int = 2,
+    max_tool_rounds: int = 1,
 ) -> str:
     """
     Gemini REST caller with real function-calling support.
@@ -153,13 +153,28 @@ async def _gemini(
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
+    # Reuse the facade's full context builder so Gemini receives:
+    # system prompt + relevant long-term memory + persistent older context
+    # + the bounded live conversation. Previously Gemini used only _HISTORY,
+    # so older turns disappeared as soon as the deque rotated.
+    system_prompt, build_messages = _legacy_ai_context()
+    context_messages = build_messages(user_id, prompt)
+    if context_messages:
+        system_prompt = context_messages[0].get("content") or system_prompt
+        source_messages = context_messages[1:]
+    else:
+        source_messages = []
+
     contents = []
-    for role, content in _HISTORY[user_id]:
+    for message in source_messages:
+        role = message.get("role")
+        content = message.get("content", "")
+        if role not in {"user", "assistant"}:
+            continue
         contents.append({
             "role": "model" if role == "assistant" else "user",
             "parts": [{"text": content}],
         })
-    contents.append({"role": "user", "parts": [{"text": prompt}]})
 
     # OpenAI-style registry -> Gemini functionDeclarations
     gemini_tools = []
@@ -189,7 +204,7 @@ async def _gemini(
 
             for _round in range(max_tool_rounds + 2 if tools_enabled else 1):
                 payload = {
-                    "systemInstruction": {"parts": [{"text": _legacy_ai_context()[0]}]},
+                    "systemInstruction": {"parts": [{"text": system_prompt}]},
                     "contents": working_contents,
                     "generationConfig": {"maxOutputTokens": MAX_OUTPUT},
                     "safetySettings": GEMINI_SAFETY_SETTINGS,

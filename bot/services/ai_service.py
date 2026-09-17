@@ -139,7 +139,33 @@ def _messages(user_id: int, prompt: str) -> List[dict]:
 
 
 def _save_turn(user_id: int, prompt: str, answer: str) -> None:
+    """Keep short in-memory context plus a persistent rolling context.
+
+    The old implementation only kept the bounded deque. Once it overflowed,
+    Gemini/OpenAI-compatible providers literally had no access to earlier
+    turns. We now persist only the turns that are about to be evicted, so the
+    persistent summary complements (rather than duplicates) the live history.
+    """
     history = _HISTORY[user_id]
+    try:
+        from bot.database import get_ai_history_summary, set_ai_history_summary
+
+        # Two entries (one user + one assistant) are normally evicted when a
+        # complete turn is appended to a full deque. Persist exactly those old
+        # entries before they disappear.
+        if len(history) >= HISTORY_ITEMS:
+            evicted = list(history)[:2]
+            previous = get_ai_history_summary(user_id) or ""
+            chunks = []
+            if previous:
+                chunks.append(previous[-3000:])
+            for role, content in evicted:
+                label = "کاربر" if role == "user" else "دستیار"
+                chunks.append(f"{label}: {str(content)[:900]}")
+            set_ai_history_summary(user_id, "\n".join(chunks)[-3800:])
+    except Exception as exc:
+        logger.debug("persistent history update skipped: %s", exc)
+
     history.append(("user", prompt))
     history.append(("assistant", answer))
 

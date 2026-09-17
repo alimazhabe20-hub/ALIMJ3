@@ -23,6 +23,9 @@ from urllib.parse import unquote, urljoin, urlparse
 
 from bot.logger import logger
 
+YOUTUBE_DOWNLOADER_FIX = "80.2"
+logger.info("YOUTUBE_DOWNLOADER_FIX=%s loaded from %s", YOUTUBE_DOWNLOADER_FIX, __file__)
+
 MAX_BYTES = max(1, int(os.getenv("DOWNLOADER_MAX_BYTES", str(1024 * 1024 * 1024))))
 TIMEOUT = max(5.0, float(os.getenv("DOWNLOADER_TIMEOUT", "60")))
 MAX_REDIRECTS = max(1, int(os.getenv("DOWNLOADER_MAX_REDIRECTS", "5")))
@@ -383,7 +386,13 @@ async def probe(url: str) -> dict:
             },
         }
         host = (urlparse(url).hostname or "").lower().rstrip(".")
-        if "youtube.com" in host or host == "youtu.be" or host.endswith(".youtube.com"):
+        is_youtube = (
+            "youtube.com" in host
+            or host == "youtu.be"
+            or host.endswith(".youtube.com")
+            or "youtube-nocookie.com" in host
+        )
+        if is_youtube:
             # Modern YouTube often blocks the default web client; try mobile/TV clients.
             # Do not force tv/android_vr/mweb here. In 2026 YouTube has
             # repeatedly returned `tv_downgraded ... UNPLAYABLE` /
@@ -396,9 +405,11 @@ async def probe(url: str) -> dict:
             if pot_script and Path(pot_script).is_file():
                 opts["extractor_args"]["youtubepot-bgutilscript"] = {"script_path": pot_script}
             opts["js_runtimes"] = {"node": "node"}
-        cookie = _resolve_cookies_file()
-        if cookie:
-            opts["cookiefile"] = cookie
+        # YouTube is intentionally cookie-free; retain cookies for other sites.
+        if not is_youtube:
+            cookie = _resolve_cookies_file()
+            if cookie:
+                opts["cookiefile"] = cookie
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
         if proxy:
             opts["proxy"] = proxy
@@ -625,7 +636,9 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 continue
 
         if last_exc is not None:
-            raise DownloadError(_classify_error(str(last_exc))) from last_exc
+            code = _classify_error(str(last_exc))
+            logger.warning("YouTube/download exhausted all yt-dlp attempts code=%s err=%s", code, str(last_exc)[:500])
+            raise DownloadError(code) from last_exc
         raise DownloadError("failed")
 
     try:
