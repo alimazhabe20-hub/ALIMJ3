@@ -23,7 +23,7 @@ from urllib.parse import unquote, urljoin, urlparse
 
 from bot.logger import logger
 
-YOUTUBE_DOWNLOADER_FIX = "80.2"
+YOUTUBE_DOWNLOADER_FIX = "81.0"
 logger.info("YOUTUBE_DOWNLOADER_FIX=%s loaded from %s", YOUTUBE_DOWNLOADER_FIX, __file__)
 
 MAX_BYTES = max(1, int(os.getenv("DOWNLOADER_MAX_BYTES", str(1024 * 1024 * 1024))))
@@ -89,6 +89,417 @@ def _resolve_cookies_file() -> str | None:
 YTDLP_CONCURRENT_FRAGMENTS = max(1, min(8, int(os.getenv("DOWNLOADER_CONCURRENT_FRAGMENTS", "4"))))
 YTDLP_HTTP_CHUNK_SIZE = max(0, min(10 * 1024 * 1024, int(os.getenv("DOWNLOADER_HTTP_CHUNK_SIZE", str(10 * 1024 * 1024)))))
 YTDLP_BUFFER_SIZE = max(64 * 1024, int(os.getenv("DOWNLOADER_BUFFER_SIZE", str(1024 * 1024))))
+
+
+# ── External downloader providers (Cobalt / yt-dlp REST) ─────────────────────
+# Primary path for YouTube when self-hosted instances are configured.
+# Local yt-dlp remains the automatic fallback so the bot never depends solely
+# on an external service.
+COBALT_URL = (os.getenv("DOWNLOADER_COBALT_URL") or os.getenv("COBALT_API_URL") or "").strip().rstrip("/")
+COBALT_API_KEY = (os.getenv("DOWNLOADER_COBALT_API_KEY") or os.getenv("COBALT_API_KEY") or "").strip()
+YTDLP_API_URL = (os.getenv("DOWNLOADER_YTDLP_API_URL") or os.getenv("YTDLP_API_URL") or "").strip().rstrip("/")
+YTDLP_API_KEY = (os.getenv("DOWNLOADER_YTDLP_API_KEY") or os.getenv("YTDLP_API_KEY") or "").strip()
+EXTERNAL_TIMEOUT = max(15.0, float(os.getenv("DOWNLOADER_EXTERNAL_TIMEOUT", "90")))
+EXTERNAL_ENABLED = os.getenv("DOWNLOADER_EXTERNAL_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _is_youtube_url(url: str) -> bool:
+    host = (urlparse(url or "").hostname or "").lower().rstrip(".")
+    return (
+        "youtube.com" in host
+        or host == "youtu.be"
+        or host.endswith(".youtube.com")
+        or "youtube-nocookie.com" in host
+    )
+
+
+def _quality_for_cobalt(mode: str) -> str:
+    return {
+        "best": "1080",
+        "1080p": "1080",
+        "720p": "720",
+        "480p": "480",
+        "audio": "720",
+    }.get(mode, "1080")
+
+
+def _external_providers_configured() -> bool:
+    return EXTERNAL_ENABLED and bool(COBALT_URL or YTDLP_API_URL)
+
+
+async def _http_download_to_file(file_url: str, out: Path, *, headers: dict | None = None) -> dict:
+    """Download a direct/tunnel URL into *out* (async via thread pool)."""
+    import requests
+
+    loop = asyncio.get_running_loop()
+    hdrs = {"User-Agent": UA, "Accept": "*/*"}
+    if headers:
+        hdrs.update(headers)
+
+    def work():
+        session = requests.Session()
+        current = file_url
+        for _ in range(MAX_REDIRECTS + 1):
+            current = _validate_url(current)
+            r = session.get(
+                current,
+                stream=True,
+                timeout=EXTERNAL_TIMEOUT,
+                headers=hdrs,
+                allow_redirects=False,
+            )
+            if r.is_redirect or r.status_code in {301, 302, 303, 307, 308}:
+                location = r.headers.get("Location")
+                r.close()
+                if not location:
+                    raise DownloadError("failed")
+                current = urljoin(current, location)
+                continue
+            if r.status_code == 429:
+                r.close()
+                raise DownloadError("rate_limited")
+            if r.status_code in {401, 403}:
+                r.close()
+                raise DownloadError("site_blocked")
+            r.raise_for_status()
+            length = int(r.headers.get("content-length") or 0)
+            if length > MAX_BYTES:
+                r.close()
+                raise DownloadError("too_large")
+            ctype = (r.headers.get("content-type") or "").lower()
+            name = _content_disposition_name(r.headers.get("content-disposition", ""))
+            if not name:
+                name = _safe_name(Path(urlparse(current).path).name or "download.bin")
+            part = out.with_suffix(out.suffix + ".part")
+            total = 0
+            with part.open("wb") as f:
+                for chunk in r.iter_content(YTDLP_BUFFER_SIZE):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > MAX_BYTES:
+                        r.close()
+                        part.unlink(missing_ok=True)
+                        raise DownloadError("too_large")
+                    f.write(chunk)
+            r.close()
+            if total <= 0:
+                part.unlink(missing_ok=True)
+                raise DownloadError("failed")
+            part.replace(out)
+            return {
+                "path": str(out),
+                "title": name,
+                "size": total,
+                "content_type": ctype,
+                "method": "external-http",
+            }
+        raise DownloadError("failed")
+
+    try:
+        return await loop.run_in_executor(None, work)
+    except DownloadError:
+        raise
+    except Exception as exc:
+        raise DownloadError(_classify_error(str(exc))) from exc
+
+
+async def _download_via_cobalt(url: str, outdir: Path, mode: str = "best") -> dict:
+    """Use a self-hosted Cobalt instance (POST /). Public instances are not used."""
+    if not COBALT_URL:
+        raise DownloadError("unsupported")
+
+    import requests
+
+    loop = asyncio.get_running_loop()
+    quality = _quality_for_cobalt(mode)
+    body = {
+        "url": url,
+        "videoQuality": quality,
+        "filenameStyle": "basic",
+        "disableMetadata": False,
+        "alwaysProxy": True,
+        "youtubeVideoCodec": "h264",
+        "youtubeVideoContainer": "mp4",
+    }
+    if mode == "audio":
+        body["downloadMode"] = "audio"
+        body["audioFormat"] = "mp3"
+        body["audioBitrate"] = "128"
+    else:
+        body["downloadMode"] = "auto"
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": UA,
+    }
+    if COBALT_API_KEY:
+        headers["Authorization"] = f"Api-Key {COBALT_API_KEY}"
+        # Some instances use Bearer
+        headers["X-Api-Key"] = COBALT_API_KEY
+
+    def work():
+        r = requests.post(
+            COBALT_URL + "/",
+            json=body,
+            headers=headers,
+            timeout=min(EXTERNAL_TIMEOUT, 45),
+        )
+        if r.status_code == 429:
+            raise DownloadError("rate_limited")
+        if r.status_code in {401, 403}:
+            raise DownloadError("site_blocked")
+        try:
+            data = r.json()
+        except Exception:
+            raise DownloadError("failed")
+        status = (data.get("status") or "").lower()
+        if status == "error":
+            err = data.get("error") or {}
+            code = str(err.get("code") or "")
+            logger.warning("cobalt error code=%s body=%s", code, str(data)[:400])
+            if "rate" in code.lower():
+                raise DownloadError("rate_limited")
+            if any(x in code.lower() for x in ("auth", "login", "private", "age")):
+                raise DownloadError("access_restricted")
+            raise DownloadError("failed")
+        if status in {"tunnel", "redirect"}:
+            file_url = data.get("url") or ""
+            filename = data.get("filename") or "cobalt_media.bin"
+            if not file_url:
+                raise DownloadError("failed")
+            return {"file_url": file_url, "filename": filename, "raw": data}
+        if status == "local-processing":
+            tunnels = data.get("tunnel") or []
+            if not tunnels:
+                raise DownloadError("failed")
+            filename = ((data.get("output") or {}).get("filename")) or "cobalt_media.bin"
+            return {"file_url": tunnels[0], "filename": filename, "raw": data}
+        if status == "picker":
+            # Prefer first video item
+            for item in data.get("picker") or []:
+                if (item.get("type") or "").lower() in {"video", "gif"} and item.get("url"):
+                    return {
+                        "file_url": item["url"],
+                        "filename": data.get("filename") or "cobalt_media.bin",
+                        "raw": data,
+                    }
+            raise DownloadError("unsupported")
+        raise DownloadError("failed")
+
+    meta = await loop.run_in_executor(None, work)
+    out = outdir / _safe_name(meta["filename"])
+    result = await _http_download_to_file(meta["file_url"], out)
+    result["method"] = "cobalt"
+    result["mode"] = mode
+    result["title"] = _safe_name(Path(meta["filename"]).stem or result.get("title") or "media")
+    logger.info("cobalt ok size=%s path=%s", result.get("size"), result.get("path"))
+    return result
+
+
+async def _download_via_ytdlp_api(url: str, outdir: Path, mode: str = "best") -> dict:
+    """Generic support for common yt-dlp REST APIs (sync download or job+poll).
+
+    Supported patterns (tried in order):
+    1) POST {base}/api/v1/download  with {"url","format"} → file or job
+    2) POST {base}/download         with {"url"}
+    3) POST {base}/                 with {"url"}
+    """
+    if not YTDLP_API_URL:
+        raise DownloadError("unsupported")
+
+    import requests
+
+    loop = asyncio.get_running_loop()
+    format_map = {
+        "best": "best[ext=mp4]/best",
+        "1080p": "best[height<=1080][ext=mp4]/best[height<=1080]",
+        "720p": "best[height<=720][ext=mp4]/best[height<=720]",
+        "480p": "best[height<=480][ext=mp4]/best[height<=480]",
+        "audio": "bestaudio/best",
+    }
+    fmt = format_map.get(mode, "best")
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": UA,
+    }
+    if YTDLP_API_KEY:
+        headers["X-API-Key"] = YTDLP_API_KEY
+        headers["Authorization"] = f"Bearer {YTDLP_API_KEY}"
+
+    endpoints = [
+        f"{YTDLP_API_URL}/api/v1/download",
+        f"{YTDLP_API_URL}/download",
+        f"{YTDLP_API_URL}/",
+    ]
+    body = {"url": url, "format": fmt, "format_id": fmt}
+
+    def submit():
+        last_err = None
+        for ep in endpoints:
+            try:
+                r = requests.post(ep, json=body, headers=headers, timeout=min(EXTERNAL_TIMEOUT, 30))
+                if r.status_code in {404, 405}:
+                    continue
+                if r.status_code == 429:
+                    raise DownloadError("rate_limited")
+                if r.status_code in {401, 403}:
+                    raise DownloadError("site_blocked")
+                if r.status_code >= 400:
+                    last_err = f"HTTP {r.status_code}"
+                    continue
+                # Direct file?
+                ctype = (r.headers.get("content-type") or "").lower()
+                if "application/json" not in ctype and r.content:
+                    return {"kind": "bytes", "content": r.content, "headers": dict(r.headers)}
+                data = r.json()
+                return {"kind": "json", "data": data, "endpoint": ep}
+            except DownloadError:
+                raise
+            except Exception as exc:
+                last_err = str(exc)
+                continue
+        raise DownloadError(_classify_error(last_err or "failed"))
+
+    submitted = await loop.run_in_executor(None, submit)
+
+    if submitted["kind"] == "bytes":
+        name = _content_disposition_name(submitted["headers"].get("content-disposition", "")) or "ytdlp_api.bin"
+        out = outdir / _safe_name(name)
+        out.write_bytes(submitted["content"])
+        size = out.stat().st_size
+        if size <= 0:
+            out.unlink(missing_ok=True)
+            raise DownloadError("failed")
+        if size > MAX_BYTES:
+            out.unlink(missing_ok=True)
+            raise DownloadError("too_large")
+        return {
+            "path": str(out),
+            "title": _safe_name(out.stem),
+            "size": size,
+            "content_type": submitted["headers"].get("content-type", ""),
+            "method": "ytdlp-api",
+            "mode": mode,
+        }
+
+    data = submitted["data"]
+    # Common job/sync shapes
+    file_url = (
+        data.get("url")
+        or data.get("download_url")
+        or data.get("file_url")
+        or (data.get("result") or {}).get("url")
+        or (data.get("result") or {}).get("download_url")
+    )
+    job_id = data.get("job_id") or data.get("task_id") or data.get("id")
+    filename = data.get("filename") or data.get("title") or "ytdlp_api.bin"
+
+    if file_url and not job_id:
+        out = outdir / _safe_name(filename)
+        result = await _http_download_to_file(file_url, out)
+        result["method"] = "ytdlp-api"
+        result["mode"] = mode
+        return result
+
+    if job_id:
+        # Poll job status
+        status_urls = [
+            f"{YTDLP_API_URL}/api/v1/jobs/{job_id}",
+            f"{YTDLP_API_URL}/status/{job_id}",
+            f"{YTDLP_API_URL}/jobs/{job_id}",
+            f"{YTDLP_API_URL}/api/v1/jobs/{job_id}/status",
+        ]
+
+        def poll():
+            import time as _t
+            deadline = _t.monotonic() + EXTERNAL_TIMEOUT
+            while _t.monotonic() < deadline:
+                for su in status_urls:
+                    try:
+                        rr = requests.get(su, headers=headers, timeout=15)
+                        if rr.status_code in {404, 405}:
+                            continue
+                        if rr.status_code >= 400:
+                            continue
+                        js = rr.json()
+                        st = str(js.get("status") or js.get("state") or "").lower()
+                        if st in {"failed", "error"}:
+                            raise DownloadError("failed")
+                        if st in {"completed", "done", "success", "finished"}:
+                            return js
+                    except DownloadError:
+                        raise
+                    except Exception:
+                        continue
+                _t.sleep(1.5)
+            raise DownloadError("failed")
+
+        job = await loop.run_in_executor(None, poll)
+        file_url = (
+            job.get("url")
+            or job.get("download_url")
+            or job.get("file_url")
+            or (job.get("result") or {}).get("url")
+            or (job.get("result") or {}).get("download_url")
+            or (job.get("result") or {}).get("filepath")
+        )
+        filename = job.get("filename") or (job.get("result") or {}).get("filename") or filename
+        if not file_url:
+            raise DownloadError("failed")
+        # If filepath is local to the API server, try as HTTP under /files/
+        if not str(file_url).startswith("http"):
+            file_url = f"{YTDLP_API_URL}/files/{file_url.lstrip('/')}"
+        out = outdir / _safe_name(str(filename))
+        result = await _http_download_to_file(str(file_url), out)
+        result["method"] = "ytdlp-api"
+        result["mode"] = mode
+        return result
+
+    raise DownloadError("failed")
+
+
+async def _try_external_providers(url: str, outdir: Path, mode: str) -> dict | None:
+    """Try configured external providers in order. Return result or None."""
+    if not _external_providers_configured():
+        return None
+    providers = []
+    if COBALT_URL:
+        providers.append(("cobalt", _download_via_cobalt))
+    if YTDLP_API_URL:
+        providers.append(("ytdlp-api", _download_via_ytdlp_api))
+    for name, fn in providers:
+        try:
+            logger.info("external provider try=%s url=%s mode=%s", name, url[:120], mode)
+            result = await fn(url, outdir, mode)
+            if result and result.get("path") and Path(result["path"]).is_file():
+                size = int(result.get("size") or Path(result["path"]).stat().st_size)
+                if size > 0:
+                    result["size"] = size
+                    return result
+        except DownloadError as exc:
+            logger.warning("external provider %s failed: %s", name, exc)
+            # clean partials
+            try:
+                for p in outdir.glob("*"):
+                    if p.is_file():
+                        p.unlink(missing_ok=True)
+            except Exception:
+                pass
+            continue
+        except Exception as exc:
+            logger.warning("external provider %s error: %s", name, str(exc)[:300])
+            try:
+                for p in outdir.glob("*"):
+                    if p.is_file():
+                        p.unlink(missing_ok=True)
+            except Exception:
+                pass
+            continue
+    return None
+
 
 class DownloadError(Exception):
     pass
@@ -693,6 +1104,22 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
 
             outdir = Path(tempfile.mkdtemp(prefix="alimj3_dl_"))
             try:
+                # ── Multi-provider router ──────────────────────────────────
+                # YouTube (and optionally any URL when external is configured):
+                #   1) Cobalt self-hosted
+                #   2) yt-dlp REST API
+                #   3) Local yt-dlp + PO Token (existing)
+                # Non-YouTube keeps previous behaviour (local first).
+                used_external = False
+                if _is_youtube_url(url) and _external_providers_configured():
+                    ext = await _try_external_providers(url, outdir, mode)
+                    if ext:
+                        used_external = True
+                        result = ext
+                        _cache_put(result, url, mode)
+                        return result
+                    logger.info("all external providers failed for YouTube; falling back to local yt-dlp")
+
                 try:
                     result = await _ytdlp(url, outdir, mode=mode, progress_cb=progress_cb)
                 except DownloadError as first:
@@ -701,7 +1128,15 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
                             filename = _safe_name(Path(urlparse(url).path).name or "download.bin")
                             result = await _direct(url, outdir / filename)
                         else:
-                            raise
+                            # Last chance: try external even for non-YouTube if configured
+                            if not used_external and _external_providers_configured():
+                                ext = await _try_external_providers(url, outdir, mode)
+                                if ext:
+                                    result = ext
+                                else:
+                                    raise
+                            else:
+                                raise
                     else:
                         filename = _safe_name(Path(urlparse(url).path).name or "download.bin")
                         result = await _direct(url, outdir / filename)
@@ -740,7 +1175,7 @@ def user_message(code: str) -> str:
         "too_large": f"📦 فایل برای ارسال مستقیم بیش از حد بزرگ است. سقف ربات {MAX_BYTES // (1024*1024)}MB است.",
         "yt_dlp_missing": "⚠️ موتور yt-dlp نصب نشده است. requirements را نصب کنید.",
         "gallery_dl_missing": "⚠️ موتور gallery-dl نصب نشده است.\nدستور: pip install -U gallery-dl",
-        "failed": "❌ دانلود ناموفق بود.\nیوتیوب پاسخ قابل دریافت برای این ویدئو برنگرداند. موتور PO Token خودکار فعال است؛ اگر این خطا تکرار شد، یک DOWNLOADER_PROXY مجاز و پایدار تنظیم کنید.",
+        "failed": "❌ دانلود ناموفق بود.\nیوتیوب پاسخ قابل دریافت برنگرداند.\nاگر DOWNLOADER_COBALT_URL یا DOWNLOADER_YTDLP_API_URL تنظیم شده باشد اول از آن‌ها استفاده می‌شود؛ وگرنه yt-dlp محلی + PO Token.\nدر صورت تکرار: instance اختصاصی Cobalt یا پروکسی پایدار (DOWNLOADER_PROXY) اضافه کنید.",
         "site_blocked": "🚫 یوتیوب درخواست را ربات تشخیص داد.\nراه‌حل: کوکی مرورگر را در متغیر DOWNLOADER_COOKIES بگذارید یا پروکسی واقعی در DOWNLOADER_PROXY.",
     }.get(code, "❌ دانلود ناموفق بود.")
 
