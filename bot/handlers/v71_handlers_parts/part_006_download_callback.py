@@ -68,7 +68,7 @@ async def download_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         return True
     except Exception as exc:
         code=str(exc)
-        if code not in {"invalid_url","blocked_host","dns_error","rate_limited","site_blocked","access_restricted","unsupported","too_large","yt_dlp_missing","failed"}: code="failed"
+        if code not in {"invalid_url","blocked_host","dns_error","rate_limited","site_blocked","access_restricted","unsupported","too_large","yt_dlp_missing","youtube_disabled","failed"}: code="failed"
         if job_id: update_download(job_id, status="failed", error_code=code)
         logger.warning("downloader callback failed: %s",code)
         await q.message.reply_text(user_message(code))

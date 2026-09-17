@@ -9,6 +9,13 @@ async def _start_probe(update, context, url: str):
     notice = await update.message.reply_text(ux_text(lang, "checking"))
     try:
         info = await probe(url)
+        if info.get("error") == "youtube_disabled" or (not info.get("supported") and info.get("error") == "youtube_disabled"):
+            from bot.services.downloader import user_message
+            try:
+                await notice.edit_text(user_message("youtube_disabled"))
+            except Exception:
+                await update.message.reply_text(user_message("youtube_disabled"))
+            return
         token = secrets.token_urlsafe(9)
         context.user_data[f"dl:{token}"] = {"url": url, "info": info}
         title = str(info.get("title") or "فایل")[:100]
