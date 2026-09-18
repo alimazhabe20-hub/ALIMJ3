@@ -14,6 +14,7 @@ from bot.handlers.market_handlers import (
 )
 from bot.handlers.tools_handlers import _h_calc, _h_distance, _h_count_text
 from bot.handlers.profile_handlers import _h_birth_save
+from bot.handlers.reminder_handlers import _h_reminder_manager, _h_reminder_input
 from bot.handlers.font_handlers import _h_font_text, _h_font_all
 
 __all__ = [name for name in globals() if name.startswith("_h_")]

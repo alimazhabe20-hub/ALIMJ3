@@ -94,6 +94,43 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = update.effective_user.id
 
+    # ───────────────── مدیریت حرفه‌ای یادآوری‌ها ─────────────────
+    if data and data.startswith("rem:"):
+        from bot.handlers.reminder_handlers import reminder_manager_text, reminder_manager_keyboard, _find, detail_text, detail_keyboard
+        from bot.database import set_reminder_active, delete_reminder
+        await _safe_answer(query)
+        try:
+            action,*parts=data.split(":")
+            rid=int(parts[1]) if len(parts)>1 and parts[1].isdigit() else None
+            if action=="rem" and parts and parts[0]=="list":
+                txt,rows=reminder_manager_text(user_id); await query.edit_message_text(txt,reply_markup=reminder_manager_keyboard(rows)); return
+            if action=="rem" and parts and parts[0]=="profile":
+                await query.message.reply_text("👤 پروفایل:",reply_markup=get_profile_keyboard()); return
+            if action=="rem" and parts and parts[0]=="add":
+                context.user_data["waiting_for"]="reminder_new"
+                await query.message.reply_text("➕ یادآوری جدید را طبیعی بنویس؛ مثلاً:\n«یادآوری کن فردا ساعت ۹ جلسه دارم»\n\nبرای لغو: لغو")
+                return
+            if rid is None: return
+            row=_find(user_id,rid)
+            if not row:
+                await query.message.reply_text("❌ یادآوری پیدا نشد."); return
+            if parts[0]=="view":
+                await query.edit_message_text(detail_text(row),reply_markup=detail_keyboard(row)); return
+            if parts[0]=="toggle":
+                set_reminder_active(user_id,rid,not bool(int(row[6] or 0)))
+                row=_find(user_id,rid); await query.edit_message_text(detail_text(row),reply_markup=detail_keyboard(row)); return
+            if parts[0]=="delete":
+                delete_reminder(user_id,rid); txt,rows=reminder_manager_text(user_id); await query.edit_message_text("✅ یادآوری حذف شد.\n\n"+txt,reply_markup=reminder_manager_keyboard(rows)); return
+            if parts[0] in ("time","text","edit"):
+                context.user_data["reminder_edit"]={"rid":rid,"mode":"time" if parts[0] in ("time","edit") else "text"}
+                prompt="🕐 زمان جدید را بنویس؛ مثلاً «فردا ساعت ۹» یا «هر روز ساعت ۸»." if parts[0] != "text" else "📝 متن جدید یادآوری را بفرست."
+                await query.message.reply_text(prompt+"\n\nبرای لغو: لغو")
+                return
+        except Exception as exc:
+            logger.exception("reminder callback failed: %s",exc)
+            await query.message.reply_text("⚠️ خطا در مدیریت یادآوری.")
+        return
+
     # ───────────────── دانلودر فایل (dl:q / dl:cancel) ─────────────────
     if data and data.startswith("dl:"):
         try:

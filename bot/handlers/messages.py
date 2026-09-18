@@ -23,7 +23,7 @@ from bot.handlers.feature_handlers import (
     _h_date_diff, _h_age_diff, _h_event_search, _h_countdown, _h_calc,
     _h_profit, _h_currency, _h_crypto_full, _h_crypto_pos, _h_crypto_chart,
     _h_crypto_analyze, _h_economic_calendar, _h_distance, _h_birth_save, _h_count_text,
-    _h_font_text, _h_font_all,
+    _h_font_text, _h_font_all, _h_reminder_manager, _h_reminder_input,
 )
 from bot.utils.motivation import get_motivation
 from bot.features.date.date_tools import (
@@ -438,6 +438,8 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         _lg.debug("downloader url hook: %s", _dl_exc)
     city = get_user_city(user_id)
     waiting = context.user_data.get("waiting_for")
+    if await _h_reminder_input(update, context, user_id, text):
+        return
     # AI chat mode
     if context.user_data.get("ai_mode"):
         if _is_back(text) or _is_back_more(text):
@@ -1050,6 +1052,9 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("💖 جمله انگیزشی", "جمله انگیزشی"):
         track_usage(user_id, "motivation"); await update.message.reply_text(f"💖 {get_motivation()}", reply_markup=get_fun_keyboard()); return
     # پروفایل
+    if text in ("⏰ مدیریت یادآوری‌ها", "مدیریت یادآوری‌ها"):
+        await _h_reminder_manager(update, context, user_id)
+        return
     if text in ("⚙️ تنظیمات هوشمند", "تنظیمات هوشمند"):
         from bot.database import get_user_preferences
         prefs = get_user_preferences(user_id)
