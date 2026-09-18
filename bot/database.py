@@ -227,3 +227,7 @@ load_modular_part(__file__, 'database_parts/part_062_economic_calendar_alert_was
 
 
 load_modular_part(__file__, 'database_parts/part_063_mark_economic_calendar_alert_sent.py')
+
+load_modular_part(__file__, 'database_parts/part_064_set_reminder_active.py')
+load_modular_part(__file__, 'database_parts/part_065_update_reminder.py')
+load_modular_part(__file__, 'database_parts/part_066_delete_reminder.py')
