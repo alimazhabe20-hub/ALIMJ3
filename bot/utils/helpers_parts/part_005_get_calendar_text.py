@@ -14,7 +14,8 @@ def get_calendar_text(year, month, day, user_id):
         shamsi = get_shamsi_events(year, month, day)
         shamsi_text = chr(10).join([f"• {e}" for e in shamsi]) if shamsi else "• هیچ مناسبت خاصی ثبت نشده است."
 
-        hijri = get_hijri_date(target.togregorian())
+        country = get_user_country(user_id) or "Iran"
+        hijri = get_hijri_date(target.togregorian(), country=country)
         hijri_events_list = get_hijri_events(hijri['month'], hijri['day'])
         hijri_text = chr(10).join([f"• {e}" for e in hijri_events_list]) if hijri_events_list else "• هیچ مناسبت قمری خاصی ثبت نشده است."
 
@@ -42,11 +43,12 @@ def get_calendar_text(year, month, day, user_id):
             from datetime import timedelta as _td
             end_d = g + _td(days=6)
             end = f"{end_d.year:04d}-{end_d.month:02d}-{end_d.day:02d}"
+            timezone_name = get_country_timezone(country)
             params = {
                 "latitude": lat,
                 "longitude": lon,
                 "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max",
-                "timezone": "Asia/Tehran",
+                "timezone": timezone_name,
                 "start_date": start,
                 "end_date": end,
             }

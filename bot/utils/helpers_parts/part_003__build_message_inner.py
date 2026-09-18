@@ -28,7 +28,12 @@ async def _build_message_inner(user_id, user_name, city):
 
     try:
         now = datetime.now(pytz.timezone(config.TIMEZONE))
-        today = get_today_tehran()
+        country = "Iran"
+        try:
+            country = get_user_country(user_id) or "Iran"
+        except Exception:
+            pass
+        today = get_today_local(country)
     except Exception:
         now = datetime.now()
         today = jdatetime.date.today()
@@ -57,7 +62,7 @@ async def _build_message_inner(user_id, user_name, city):
     hijri_date = "—"
     hijri_events_text = "• —"
     try:
-        hijri = get_hijri_date(greg) or {}
+        hijri = get_hijri_date(greg, country=country) or {}
         hy = to_persian_num(hijri.get("year", 0))
         hm = to_persian_num(f"{int(hijri.get('month', 0) or 0):02d}")
         hd = to_persian_num(f"{int(hijri.get('day', 0) or 0):02d}")
@@ -75,7 +80,7 @@ async def _build_message_inner(user_id, user_name, city):
     shamsi_text = "• —"
     try:
         tomorrow = today + jdatetime.timedelta(days=1)
-        hijri_tomorrow = get_hijri_date(tomorrow.togregorian()) or {}
+        hijri_tomorrow = get_hijri_date(tomorrow.togregorian(), country=country) or {}
         hijri_tomorrow_events = get_hijri_events(
             hijri_tomorrow.get("month", 0), hijri_tomorrow.get("day", 0)
         ) or []
@@ -84,12 +89,6 @@ async def _build_message_inner(user_id, user_name, city):
         shamsi_tomorrow_text = chr(10).join([f"• {e}" for e in shamsi_tomorrow]) or "• —"
         shamsi_events_list = get_shamsi_events(today.year, today.month, today.day) or []
         shamsi_text = chr(10).join([f"• {e}" for e in shamsi_events_list]) or "• —"
-    except Exception:
-        pass
-
-    country = "Iran"
-    try:
-        country = get_user_country(user_id) or "Iran"
     except Exception:
         pass
 
