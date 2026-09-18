@@ -218,7 +218,8 @@ def get_profile_keyboard():
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("👤 پروفایل من"), KeyboardButton("📊 آمار من")],
-            [KeyboardButton("🎂 ذخیره تاریخ تولد"), KeyboardButton("⚙️ تنظیمات هوشمند")],
+            [KeyboardButton("🎂 ذخیره تاریخ تولد"), KeyboardButton("⏰ مدیریت یادآوری‌ها")],
+            [KeyboardButton("⚙️ تنظیمات هوشمند")],
             [KeyboardButton("🔙 بازگشت به بیشتر")],
         ],
         resize_keyboard=True,
