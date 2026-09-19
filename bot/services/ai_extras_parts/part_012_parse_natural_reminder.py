@@ -1,4 +1,5 @@
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from typing import Optional
 from typing import Tuple
 
@@ -80,8 +81,13 @@ def parse_natural_reminder(text: str) -> Optional[Tuple[str, datetime, str, int]
         if re.search(r"(?:صبح|بامداد)", context, re.I):
             if hour == 12:
                 hour = 0
-        elif re.search(r"(?:ظهر|عصر|شب)", context, re.I):
+        elif re.search(r"(?:ظهر|عصر)", context, re.I):
             if hour < 12:
+                hour += 12
+        elif re.search(r"شب", context, re.I):
+            if hour == 12:
+                hour = 0
+            elif hour < 12:
                 hour += 12
         return min(23, hour), min(59, minute)
 
@@ -120,7 +126,7 @@ def parse_natural_reminder(text: str) -> Optional[Tuple[str, datetime, str, int]
         return None
 
     body = normalized
-    body = re.sub(r"یادآوری(?:\s*کن)?|یادم\s*(?:بیار|باشه|بنداز)|ریمایندر|آلارم|خبرم\s*کن|یاد\s*بده", "", body, flags=re.I)
+    body = re.sub(r"یادآوری(?:\s*کن)?|یادم\s*(?:بیار|باشه|بنداز)|ریمایندر|آلارم|خبرم\s*کن|یاد\s*بده|بیدارم\s*کن|منو\s*بیدار\s*کن", "", body, flags=re.I)
     body = re.sub(
         r"(?:\d+\s*دقیقه\s*(?:دیگه|دیگر)|\d+\s*ساعت\s*(?:دیگه|دیگر)|فردا|پس\s*فردا|امروز|ساعت\s*(?:\d{1,2}(?:\s*[:：]\s*\d{1,2})?|یک|یه|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پانزده|شانزده|هفده|هجده|نوزده|بیست)(?:\s*و\s*نیم)?|(?:صبح|بامداد|ظهر|عصر|شب)|هر\s*روز|روزانه|هر\s*هفته|هفتگی|هر\s*ماه|ماهانه|هر\s*\d+\s*دقیقه|هر\s*\d+\s*ساعت|daily|weekly|monthly)",
         "", body, flags=re.I,
