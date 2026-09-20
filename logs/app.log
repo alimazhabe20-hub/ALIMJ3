@@ -1,0 +1,274 @@
+2026-09-19 20:40:45 | INFO     | rooze_ziba | YOUTUBE_DOWNLOADER_FIX=82.0-no-youtube loaded from /tmp/final/ALIMJ3-main/bot/services/downloader.py
+2026-09-19 20:41:09 | INFO     | rooze_ziba | YOUTUBE_DOWNLOADER_FIX=82.0-no-youtube loaded from /tmp/final/ALIMJ3-main/bot/services/downloader.py
+2026-09-19 20:41:16 | INFO     | rooze_ziba | YOUTUBE_DOWNLOADER_FIX=82.0-no-youtube loaded from /tmp/final/ALIMJ3-main/bot/services/downloader.py
+2026-09-19 20:41:16 | ERROR    | rooze_ziba | auto_restore_if_empty Telegram restore failed
+Traceback (most recent call last):
+  File "/tmp/final/ALIMJ3-main/bot/db_persist_parts/part_019_auto_restore_if_empty.py", line 30, in auto_restore_if_empty
+    ok, msg = telegram_download_pinned_db()
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <lambda>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+                                                                   ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <genexpr>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+RuntimeError: network down
+2026-09-19 20:41:16 | INFO     | rooze_ziba | DB OK — local=7
+2026-09-19 20:41:16 | INFO     | rooze_ziba | Initializing database at /tmp/tmp46ve6lra/test.db ...
+2026-09-19 20:41:16 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmp46ve6lra/test.db
+2026-09-19 20:41:16 | INFO     | rooze_ziba | Pre-migration DB backup created: test.pre_migration_v1.db
+2026-09-19 20:41:16 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:41:16 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:41:16 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:41:16 | WARNING  | rooze_ziba | AI provider __v11_test_provider__ circuit-open for 45.0s after 3 consecutive failures
+2026-09-19 20:41:17 | INFO     | rooze_ziba | Initializing database at /tmp/tmp8fj18xzd/bot.db ...
+2026-09-19 20:41:17 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmp8fj18xzd/bot.db
+2026-09-19 20:41:17 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-09-19 20:41:17 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:41:17 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:41:17 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:41:17 | INFO     | rooze_ziba | Initializing database at /tmp/tmp5x4_3m4e/bot.db ...
+2026-09-19 20:41:17 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmp5x4_3m4e/bot.db
+2026-09-19 20:41:17 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-09-19 20:41:17 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:41:17 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:41:17 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:41:17 | INFO     | rooze_ziba | Initializing database at /tmp/tmp5x4_3m4e/bot.db ...
+2026-09-19 20:41:17 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmp5x4_3m4e/bot.db
+2026-09-19 20:41:17 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:41:17 | WARNING  | rooze_ziba | web_search failed: SECRET_API_KEY_123
+Traceback (most recent call last):
+  File "/tmp/final/ALIMJ3-main/bot/services/ai_extras_parts/part_011_web_search.py", line 12, in web_search
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+               ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/final/ALIMJ3-main/tests/test_v60_links_and_error_privacy.py", line 28, in __aenter__
+    raise RuntimeError("SECRET_API_KEY_123")
+RuntimeError: SECRET_API_KEY_123
+2026-09-19 20:41:48 | INFO     | rooze_ziba | YOUTUBE_DOWNLOADER_FIX=82.0-no-youtube loaded from /tmp/final/ALIMJ3-main/bot/services/downloader.py
+2026-09-19 20:41:48 | ERROR    | rooze_ziba | auto_restore_if_empty Telegram restore failed
+Traceback (most recent call last):
+  File "/tmp/final/ALIMJ3-main/bot/db_persist_parts/part_019_auto_restore_if_empty.py", line 30, in auto_restore_if_empty
+    ok, msg = telegram_download_pinned_db()
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <lambda>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+                                                                   ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <genexpr>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+RuntimeError: network down
+2026-09-19 20:41:48 | INFO     | rooze_ziba | DB OK — local=7
+2026-09-19 20:41:49 | INFO     | rooze_ziba | Initializing database at /tmp/tmp9x_tsqj1/test.db ...
+2026-09-19 20:41:49 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmp9x_tsqj1/test.db
+2026-09-19 20:41:49 | INFO     | rooze_ziba | Pre-migration DB backup created: test.pre_migration_v1.db
+2026-09-19 20:41:49 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:41:49 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:41:49 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:41:49 | WARNING  | rooze_ziba | AI provider __v11_test_provider__ circuit-open for 45.0s after 3 consecutive failures
+2026-09-19 20:42:01 | INFO     | rooze_ziba | YOUTUBE_DOWNLOADER_FIX=82.0-no-youtube loaded from /tmp/final/ALIMJ3-main/bot/services/downloader.py
+2026-09-19 20:42:01 | ERROR    | rooze_ziba | auto_restore_if_empty Telegram restore failed
+Traceback (most recent call last):
+  File "/tmp/final/ALIMJ3-main/bot/db_persist_parts/part_019_auto_restore_if_empty.py", line 30, in auto_restore_if_empty
+    ok, msg = telegram_download_pinned_db()
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <lambda>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+                                                                   ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <genexpr>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+RuntimeError: network down
+2026-09-19 20:42:01 | INFO     | rooze_ziba | DB OK — local=7
+2026-09-19 20:42:02 | INFO     | rooze_ziba | Initializing database at /tmp/tmp6yo5sd1b/test.db ...
+2026-09-19 20:42:02 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmp6yo5sd1b/test.db
+2026-09-19 20:42:02 | INFO     | rooze_ziba | Pre-migration DB backup created: test.pre_migration_v1.db
+2026-09-19 20:42:02 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:42:02 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:42:02 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:02 | WARNING  | rooze_ziba | AI provider __v11_test_provider__ circuit-open for 45.0s after 3 consecutive failures
+2026-09-19 20:42:08 | INFO     | rooze_ziba | YOUTUBE_DOWNLOADER_FIX=82.0-no-youtube loaded from /tmp/final/ALIMJ3-main/bot/services/downloader.py
+2026-09-19 20:42:08 | ERROR    | rooze_ziba | auto_restore_if_empty Telegram restore failed
+Traceback (most recent call last):
+  File "/tmp/final/ALIMJ3-main/bot/db_persist_parts/part_019_auto_restore_if_empty.py", line 30, in auto_restore_if_empty
+    ok, msg = telegram_download_pinned_db()
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <lambda>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+                                                                   ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <genexpr>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+RuntimeError: network down
+2026-09-19 20:42:08 | INFO     | rooze_ziba | DB OK — local=7
+2026-09-19 20:42:08 | INFO     | rooze_ziba | Initializing database at /tmp/tmpukpn5z8f/test.db ...
+2026-09-19 20:42:08 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmpukpn5z8f/test.db
+2026-09-19 20:42:08 | INFO     | rooze_ziba | Pre-migration DB backup created: test.pre_migration_v1.db
+2026-09-19 20:42:08 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:42:08 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:42:08 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:08 | WARNING  | rooze_ziba | AI provider __v11_test_provider__ circuit-open for 45.0s after 3 consecutive failures
+2026-09-19 20:42:15 | INFO     | rooze_ziba | YOUTUBE_DOWNLOADER_FIX=82.0-no-youtube loaded from /tmp/final/ALIMJ3-main/bot/services/downloader.py
+2026-09-19 20:42:15 | ERROR    | rooze_ziba | auto_restore_if_empty Telegram restore failed
+Traceback (most recent call last):
+  File "/tmp/final/ALIMJ3-main/bot/db_persist_parts/part_019_auto_restore_if_empty.py", line 30, in auto_restore_if_empty
+    ok, msg = telegram_download_pinned_db()
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <lambda>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+                                                                   ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <genexpr>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+RuntimeError: network down
+2026-09-19 20:42:15 | INFO     | rooze_ziba | DB OK — local=7
+2026-09-19 20:42:16 | INFO     | rooze_ziba | Initializing database at /tmp/tmpn8t_tirj/test.db ...
+2026-09-19 20:42:16 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmpn8t_tirj/test.db
+2026-09-19 20:42:16 | INFO     | rooze_ziba | Pre-migration DB backup created: test.pre_migration_v1.db
+2026-09-19 20:42:16 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:42:16 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:42:16 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:16 | WARNING  | rooze_ziba | AI provider __v11_test_provider__ circuit-open for 45.0s after 3 consecutive failures
+2026-09-19 20:42:22 | INFO     | rooze_ziba | YOUTUBE_DOWNLOADER_FIX=82.0-no-youtube loaded from /tmp/final/ALIMJ3-main/bot/services/downloader.py
+2026-09-19 20:42:22 | ERROR    | rooze_ziba | auto_restore_if_empty Telegram restore failed
+Traceback (most recent call last):
+  File "/tmp/final/ALIMJ3-main/bot/db_persist_parts/part_019_auto_restore_if_empty.py", line 30, in auto_restore_if_empty
+    ok, msg = telegram_download_pinned_db()
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <lambda>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+                                                                   ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <genexpr>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+RuntimeError: network down
+2026-09-19 20:42:22 | INFO     | rooze_ziba | DB OK — local=7
+2026-09-19 20:42:22 | INFO     | rooze_ziba | Initializing database at /tmp/tmpxwwwnagu/test.db ...
+2026-09-19 20:42:22 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmpxwwwnagu/test.db
+2026-09-19 20:42:23 | INFO     | rooze_ziba | Pre-migration DB backup created: test.pre_migration_v1.db
+2026-09-19 20:42:23 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:42:23 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:42:23 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:23 | WARNING  | rooze_ziba | AI provider __v11_test_provider__ circuit-open for 45.0s after 3 consecutive failures
+2026-09-19 20:42:30 | INFO     | rooze_ziba | YOUTUBE_DOWNLOADER_FIX=82.0-no-youtube loaded from /tmp/final/ALIMJ3-main/bot/services/downloader.py
+2026-09-19 20:42:30 | ERROR    | rooze_ziba | auto_restore_if_empty Telegram restore failed
+Traceback (most recent call last):
+  File "/tmp/final/ALIMJ3-main/bot/db_persist_parts/part_019_auto_restore_if_empty.py", line 30, in auto_restore_if_empty
+    ok, msg = telegram_download_pinned_db()
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <lambda>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+                                                                   ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <genexpr>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+RuntimeError: network down
+2026-09-19 20:42:30 | INFO     | rooze_ziba | DB OK — local=7
+2026-09-19 20:42:31 | INFO     | rooze_ziba | Initializing database at /tmp/tmpd5p4ge06/test.db ...
+2026-09-19 20:42:31 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmpd5p4ge06/test.db
+2026-09-19 20:42:31 | INFO     | rooze_ziba | Pre-migration DB backup created: test.pre_migration_v1.db
+2026-09-19 20:42:31 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:42:31 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:42:31 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:31 | WARNING  | rooze_ziba | AI provider __v11_test_provider__ circuit-open for 45.0s after 3 consecutive failures
+2026-09-19 20:42:32 | INFO     | rooze_ziba | Initializing database at /tmp/tmp9uxlh8co/bot.db ...
+2026-09-19 20:42:32 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmp9uxlh8co/bot.db
+2026-09-19 20:42:32 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-09-19 20:42:32 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:42:32 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:42:32 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:32 | INFO     | rooze_ziba | Initializing database at /tmp/tmpu8x2p2id/bot.db ...
+2026-09-19 20:42:32 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmpu8x2p2id/bot.db
+2026-09-19 20:42:32 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-09-19 20:42:32 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:42:32 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:42:32 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:32 | INFO     | rooze_ziba | Initializing database at /tmp/tmpu8x2p2id/bot.db ...
+2026-09-19 20:42:32 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmpu8x2p2id/bot.db
+2026-09-19 20:42:32 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:32 | WARNING  | rooze_ziba | web_search failed: SECRET_API_KEY_123
+Traceback (most recent call last):
+  File "/tmp/final/ALIMJ3-main/bot/services/ai_extras_parts/part_011_web_search.py", line 12, in web_search
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+               ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/final/ALIMJ3-main/tests/test_v60_links_and_error_privacy.py", line 28, in __aenter__
+    raise RuntimeError("SECRET_API_KEY_123")
+RuntimeError: SECRET_API_KEY_123
+2026-09-19 20:42:39 | INFO     | rooze_ziba | YOUTUBE_DOWNLOADER_FIX=82.0-no-youtube loaded from /tmp/final/ALIMJ3-main/bot/services/downloader.py
+2026-09-19 20:42:40 | ERROR    | rooze_ziba | auto_restore_if_empty Telegram restore failed
+Traceback (most recent call last):
+  File "/tmp/final/ALIMJ3-main/bot/db_persist_parts/part_019_auto_restore_if_empty.py", line 30, in auto_restore_if_empty
+    ok, msg = telegram_download_pinned_db()
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <lambda>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+                                                                   ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <genexpr>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+RuntimeError: network down
+2026-09-19 20:42:40 | INFO     | rooze_ziba | DB OK — local=7
+2026-09-19 20:42:40 | INFO     | rooze_ziba | Initializing database at /tmp/tmpqwc7dtt0/test.db ...
+2026-09-19 20:42:40 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmpqwc7dtt0/test.db
+2026-09-19 20:42:40 | INFO     | rooze_ziba | Pre-migration DB backup created: test.pre_migration_v1.db
+2026-09-19 20:42:40 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:42:40 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:42:40 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:40 | WARNING  | rooze_ziba | AI provider __v11_test_provider__ circuit-open for 45.0s after 3 consecutive failures
+2026-09-19 20:42:41 | INFO     | rooze_ziba | Initializing database at /tmp/tmpahwstugj/bot.db ...
+2026-09-19 20:42:41 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmpahwstugj/bot.db
+2026-09-19 20:42:41 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-09-19 20:42:41 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:42:41 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:42:41 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:41 | INFO     | rooze_ziba | Initializing database at /tmp/tmpau6t1fzy/bot.db ...
+2026-09-19 20:42:41 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmpau6t1fzy/bot.db
+2026-09-19 20:42:41 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-09-19 20:42:41 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:42:41 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:42:41 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:41 | INFO     | rooze_ziba | Initializing database at /tmp/tmpau6t1fzy/bot.db ...
+2026-09-19 20:42:41 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmpau6t1fzy/bot.db
+2026-09-19 20:42:41 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:41 | WARNING  | rooze_ziba | web_search failed: SECRET_API_KEY_123
+Traceback (most recent call last):
+  File "/tmp/final/ALIMJ3-main/bot/services/ai_extras_parts/part_011_web_search.py", line 12, in web_search
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+               ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/final/ALIMJ3-main/tests/test_v60_links_and_error_privacy.py", line 28, in __aenter__
+    raise RuntimeError("SECRET_API_KEY_123")
+RuntimeError: SECRET_API_KEY_123
+2026-09-19 20:42:48 | INFO     | rooze_ziba | YOUTUBE_DOWNLOADER_FIX=82.0-no-youtube loaded from /tmp/final/ALIMJ3-main/bot/services/downloader.py
+2026-09-19 20:42:48 | ERROR    | rooze_ziba | auto_restore_if_empty Telegram restore failed
+Traceback (most recent call last):
+  File "/tmp/final/ALIMJ3-main/bot/db_persist_parts/part_019_auto_restore_if_empty.py", line 30, in auto_restore_if_empty
+    ok, msg = telegram_download_pinned_db()
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <lambda>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+                                                                   ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/final/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <genexpr>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+RuntimeError: network down
+2026-09-19 20:42:48 | INFO     | rooze_ziba | DB OK — local=7
+2026-09-19 20:42:49 | INFO     | rooze_ziba | Initializing database at /tmp/tmp7hem0t5f/test.db ...
+2026-09-19 20:42:49 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmp7hem0t5f/test.db
+2026-09-19 20:42:49 | INFO     | rooze_ziba | Pre-migration DB backup created: test.pre_migration_v1.db
+2026-09-19 20:42:49 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:42:49 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:42:49 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:49 | WARNING  | rooze_ziba | AI provider __v11_test_provider__ circuit-open for 45.0s after 3 consecutive failures
+2026-09-19 20:42:50 | INFO     | rooze_ziba | Initializing database at /tmp/tmp2m3kvv8s/bot.db ...
+2026-09-19 20:42:50 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmp2m3kvv8s/bot.db
+2026-09-19 20:42:50 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-09-19 20:42:50 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:42:50 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:42:50 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:50 | INFO     | rooze_ziba | Initializing database at /tmp/tmp1dpwy0u5/bot.db ...
+2026-09-19 20:42:50 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmp1dpwy0u5/bot.db
+2026-09-19 20:42:50 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-09-19 20:42:50 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-09-19 20:42:50 | INFO     | rooze_ziba | Migration: all azan notifications set to OFF by default
+2026-09-19 20:42:50 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:50 | INFO     | rooze_ziba | Initializing database at /tmp/tmp1dpwy0u5/bot.db ...
+2026-09-19 20:42:50 | INFO     | rooze_ziba | No backup to restore — fresh DB at /tmp/tmp1dpwy0u5/bot.db
+2026-09-19 20:42:50 | INFO     | rooze_ziba | Database ready — 0 users
+2026-09-19 20:42:50 | WARNING  | rooze_ziba | web_search failed: SECRET_API_KEY_123
+Traceback (most recent call last):
+  File "/tmp/final/ALIMJ3-main/bot/services/ai_extras_parts/part_011_web_search.py", line 12, in web_search
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+               ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/final/ALIMJ3-main/tests/test_v60_links_and_error_privacy.py", line 28, in __aenter__
+    raise RuntimeError("SECRET_API_KEY_123")
+RuntimeError: SECRET_API_KEY_123
