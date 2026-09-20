@@ -1,0 +1,1237 @@
+"""هندلر پیام‌ها — همه قابلیت‌ها"""
+from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
+from bot.database import (
+    update_user_field, get_user_city, set_last_main_msg_id,
+    add_reminder, track_usage,
+    get_user_usage, set_birth_date, get_birth_date, get_user,
+    get_azan_settings, set_azan_master, toggle_azan_prayer,
+)
+from bot.utils.helpers import (
+    build_message, get_main_keyboard, get_refresh_button,
+    get_country_keyboard, get_smart_settings_keyboard, get_iran_cities_keyboard, get_iraq_cities_keyboard,
+    get_language_keyboard, get_more_keyboard, get_date_tools_keyboard,
+    get_religious_keyboard, get_market_keyboard, get_weather_geo_keyboard,
+    get_tools_keyboard, get_fun_keyboard, get_profile_keyboard, get_joke_keyboard,
+    get_calendar_text, get_calendar_buttons, ALL_CITIES, CITY_COUNTRY,
+    get_azan_keyboard, get_ai_keyboard, get_ai_model_keyboard,
+)
+from bot.api.calendar import get_today_tehran
+from bot.handlers.middleware import check_and_rate_limit
+from bot.handlers.feature_handlers import (
+    _h_date_convert, _h_age_calc, _h_birthday, _h_zodiac, _h_lunar,
+    _h_date_diff, _h_age_diff, _h_event_search, _h_countdown, _h_calc,
+    _h_profit, _h_currency, _h_crypto_full, _h_crypto_pos, _h_crypto_chart,
+    _h_crypto_analyze, _h_economic_calendar, _h_distance, _h_birth_save, _h_count_text,
+    _h_font_text, _h_font_all, _h_reminder_manager, _h_reminder_input,
+)
+from bot.utils.motivation import get_motivation
+from bot.features.date.date_tools import (
+    parse_shamsi, parse_any_date, parse_two_dates, parse_countdown,
+    birthday_countdown, zodiac_animal, lunar_age, date_diff, age_diff,
+    convert_with_weekday, month_calendar, search_events, nowruz_countdown,
+    world_clock, custom_countdown,
+)
+from bot.features.date.converters import calculate_age, parse_birth_datetime
+from bot.features.religious import (
+    qibla_direction, daily_adhkar, daily_verse_hadith,
+    religious_countdown, religious_month_view, istikhara, istikhara_intro,
+)
+from bot.features.market.finance import full_market_prices, convert_currency, profit_loss, parse_profit, get_top_crypto, convert_crypto, get_crypto_chart, get_gold_chart, analyze_crypto, analyze_gold, parse_currency_input, get_crypto_analysis_keyboard, trading_recommendation, derivatives_radar, risk_scenarios, position_size_guide, calc_position_size, entry_alert_text, register_price_alert
+from bot.features.tools.app_tools import calculator, generate_password, count_text, world_distance
+from bot.features.fun.fun_tools import hafez_fal, joke_of_day, fact_of_day, daily_challenge, random_joke, get_joke_categories
+from bot.features.weather.weather_extra import weather_forecast, air_quality
+from bot.features.fonts import apply_font, list_fonts, get_font_preview, apply_all_fonts
+from bot.features.profile import profile_text
+from bot.utils.helpers import get_font_keyboard, get_font_en_keyboard, get_font_fa_keyboard
+from bot.features.fonts.styles import FONT_NAMES
+from bot.features.fonts.converter import EN_STYLES, FA_STYLES
+import re
+import time
+import asyncio
+from datetime import datetime, timedelta
+import pytz
+from bot.config import config
+from bot.logger import logger
+from bot.services.ai_extras import (
+    store_answer, get_last_answer, get_ai_result_keyboard, parse_chart_request, make_chart_image,
+    web_search, parse_natural_reminder, enhance_ocr_prompt,
+    get_last_answer_id, build_continue_prompt,
+)
+from bot.services.visual_search import visual_search, looks_like_visual_search
+from bot.services.ai_service import (
+    ask_ai, ask_ai_media, clear_history, enabled_providers,
+    _extract_text_from_bytes, generate_or_edit_image,
+    looks_like_image_request, looks_like_image_edit,
+    text_to_speech, wants_voice_reply, strip_voice_prefix, speech_to_text,
+    analyze_voice_emotion, wants_emotion_analysis, should_auto_voice_reply,
+    wants_voice_chat_mode, wants_end_voice_chat, is_voice_only_request,
+    generate_music, analyze_video, translate_voice,
+)
+async def _safe_reply(update, text, **kwargs):
+    """ارسال امن بدون کرش بابت Markdown"""
+    kwargs.pop("parse_mode", None)
+    try:
+        await update.message.reply_text(text, **kwargs)
+    except Exception:
+        try:
+            await update.message.reply_text(str(text)[:4000], reply_markup=kwargs.get("reply_markup"))
+        except Exception as _exc:
+            logger.debug("%s: %s", __name__, _exc)
+async def _keep_typing(bot, chat_id, stop_event):
+    """تا وقتی پاسخ آماده نشده، مدام حالت «در حال نوشتن...» را نشان بده."""
+    import asyncio
+    from telegram.constants import ChatAction
+    while not stop_event.is_set():
+        try:
+            await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+        except Exception as _exc:
+            logger.debug("%s: %s", __name__, _exc)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=4)
+        except Exception as _exc:
+            logger.debug("%s: %s", __name__, _exc)
+def _apply_voice_chat_flags(context, text: str) -> str | None:
+    """
+    فعال/غیرفعال کردن حالت مکالمه ویسی.
+    پیام تأیید برای کاربر برمی‌گرداند یا None.
+    """
+    if wants_end_voice_chat(text):
+        context.user_data["ai_voice_chat"] = False
+        return "📝 حالت ویس خاموش شد. از این به بعد جواب‌ها بیشتر متنی است."
+    if wants_voice_chat_mode(text):
+        context.user_data["ai_voice_chat"] = True
+        return (
+            "🎙️ حالت مکالمه ویسی روشن شد.\n"
+            "هر چی بگی (متن یا ویس) سعی می‌کنم با صدا جواب بدم.\n"
+            "برای خاموش کردن بگو: «قطع ویس» یا «فقط متن»."
+        )
+    return None
+async def _handle_special_ai_intents(update, context, user_id, text: str) -> bool:
+    """نمودار، جستجو، یادآوری، موسیقی — True اگر کامل هندل شد."""
+    import re
+    from io import BytesIO
+    from bot.database import add_reminder
+    # یادآوری
+    rem = parse_natural_reminder(text)
+    if rem:
+        body, when, repeat_type, repeat_every = rem
+        add_reminder(
+            user_id,
+            body,
+            when.isoformat(),
+            repeat_type=repeat_type,
+            repeat_every=repeat_every,
+        )
+        repeat_label = {
+            "daily": "روزانه",
+            "weekly": "هفتگی",
+            "monthly": "ماهانه",
+            "every_minutes": f"هر {repeat_every} دقیقه",
+            "every_hours": f"هر {repeat_every} ساعت",
+        }.get(repeat_type, "یک‌بار")
+        await update.message.reply_text(
+            f"⏰ یادآوری ثبت شد.\nموضوع: {body}\nزمان: {when.strftime('%Y-%m-%d %H:%M')}\nتکرار: {repeat_label}",
+        )
+        return True
+    # Weather/Crypto عمدی اینجا مستقیم پاسخ داده نمی‌شوند.
+    # V41.1: اجازه بده Capability Router + Function Calling ابزار واقعی را اجرا کند
+    # و خود AI نتیجه را به زبان طبیعی برای کاربر بنویسد؛ خروجی خام ابزار کپی نشود.
+    # جستجوی وب
+    m = re.match(r"^(جستجو|سرچ|search)\s*[:：]?\s*(.+)$", text, re.I | re.S)
+    if m or re.search(r"\b(در\s*اینترنت|تو\s*وب)\s*جستجو", text, re.I):
+        q = m.group(2).strip() if m else re.sub(r".*جستجو\s*[:：]?", "", text, flags=re.I).strip()
+        notice = await update.message.reply_text("🔎 در حال جستجو...")
+        try:
+            result = await web_search(q)
+            await update.message.reply_text(result)
+        finally:
+            try:
+                await notice.delete()
+            except Exception as _exc:
+                logger.debug("%s: %s", __name__, _exc)
+        return True
+    # نمودار
+    chart = parse_chart_request(text)
+    if chart:
+        title, labels, values, ctype = chart
+        notice = await update.message.reply_text("📊 در حال رسم نمودار...")
+        try:
+            png = make_chart_image(title, labels, values, ctype)
+            bio = BytesIO(png)
+            bio.name = "chart.png"
+            await update.message.reply_photo(photo=bio, caption=title)
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ نمودار: {e}")
+        finally:
+            try:
+                await notice.delete()
+            except Exception as _exc:
+                logger.debug("%s: %s", __name__, _exc)
+        return True
+    # موسیقی
+    if re.search(r"(موسیقی|آهنگ|music)\s*بساز|(بساز|تولید)\s*(موسیقی|آهنگ|افکت)", text, re.I):
+        notice = await update.message.reply_text("🎵 در حال ساخت موسیقی...")
+        try:
+            audio = await generate_music(text)
+            bio = BytesIO(audio)
+            bio.name = "music.mp3"
+            await update.message.reply_audio(audio=bio, caption="🎵")
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ ساخت موسیقی در دسترس نبود:\n{e}")
+        finally:
+            try:
+                await notice.delete()
+            except Exception as _exc:
+                logger.debug("%s: %s", __name__, _exc)
+        return True
+    return False
+
+def _split_telegram_text(text: str, limit: int = 3900) -> list[str]:
+    """تقسیم متن بلند به چند پیام بدون قطع وسط کلمه در صورت امکان."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= limit:
+        return [text]
+    parts: list[str] = []
+    rest = text
+    while rest:
+        if len(rest) <= limit:
+            parts.append(rest)
+            break
+        cut = rest.rfind("\n", 0, limit)
+        if cut < limit // 3:
+            cut = rest.rfind(" ", 0, limit)
+        if cut < limit // 3:
+            cut = limit
+        parts.append(rest[:cut].strip())
+        rest = rest[cut:].strip()
+    return [p for p in parts if p]
+
+
+def _looks_truncated(answer: str) -> bool:
+    """تشخیص تقریبی پاسخ ناقص (برای پیشنهاد دکمه ادامه)."""
+    a = (answer or "").strip()
+    if len(a) < 1200:
+        return False
+    # اگر خیلی بلند است یا با علائم ناتمام تمام شده
+    if len(a) >= 2800:
+        return True
+    if a.endswith(("...", "…", ":", "—", "-", ",")):
+        return True
+    # جمله کامل تمام نشده
+    if not re.search(r"[.!?؟۔]\s*$", a) and len(a) > 1600:
+        return True
+    return False
+
+
+async def _reply_long_text(msg, text: str, *, prefix: str = "🤖 ", reply_markup=None):
+    """ارسال پاسخ کامل؛ اگر بلند بود ادامه در پیام‌های بعدی. کیبورد فقط روی آخرین تکه."""
+    body = (text or "").strip()
+    chunks = _split_telegram_text(prefix + body, 3900)
+    if not chunks:
+        chunks = [prefix + "پاسخی دریافت نشد."]
+    first = None
+    total = len(chunks)
+    for i, chunk in enumerate(chunks):
+        is_last = i == total - 1
+        kwargs = {}
+        if is_last and reply_markup is not None:
+            kwargs["reply_markup"] = reply_markup
+        if i == 0:
+            first = await msg.reply_text(chunk, **kwargs)
+        else:
+            body_chunk = chunk
+            if body_chunk.startswith("🤖 "):
+                body_chunk = body_chunk[2:].lstrip()
+            await msg.reply_text(f"🤖 ادامه ({i+1}/{total})\n{body_chunk}", **kwargs)
+    return first
+
+
+async def _send_ai_answer(update, user_id, answer: str, *, prompt: str = "", stream: bool = True):
+    """ارسال جواب AI کامل — بدون کلید مدل/حافظه؛ فقط در صورت نیاز دکمه ادامه."""
+    msg = update.message
+    aid = store_answer(user_id, answer, prompt=prompt)
+    offer = _looks_truncated(answer) or len(answer or "") >= 1800
+    # فقط دکمه ادامه؛ کلیدهای «انتخاب مدل» و «حذف حافظه» زیر پاسخ نباشد.
+    kb = get_ai_result_keyboard(user_id, aid, offer_continue=offer)
+    return await _reply_long_text(msg, answer, prefix="🤖 ", reply_markup=kb)
+
+
+async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
+    """استریم AI و ویرایش تدریجی پیام؛ در پایان همه تکه‌ها ارسال و دکمه ادامه اضافه می‌شود."""
+    import asyncio
+    from bot.services.ai_service import ask_ai_stream
+    msg = update.message
+    sent = await msg.reply_text("✍️ در حال نوشتن...")
+    buf = []
+    provider_label = ""
+    try:
+        last_edit = time.monotonic()
+        last_len = 0
+        last_rendered = "✍️ در حال نوشتن..."
+        async for piece, label in ask_ai_stream(user_id, text):
+            if label:
+                provider_label = label
+                continue
+            if piece:
+                buf.append(piece)
+                current = "".join(buf)
+                now = time.monotonic()
+                if now - last_edit >= 0.8 and len(current) - last_len >= 80:
+                    preview = "🤖 " + current
+                    if len(preview) > 4000:
+                        preview = preview[:3990] + "…"
+                    if preview != last_rendered:
+                        try:
+                            await sent.edit_text(preview)
+                            last_rendered = preview
+                            last_edit, last_len = now, len(current)
+                        except Exception as edit_error:
+                            logger.debug("AI stream edit skipped: %s", edit_error)
+                    else:
+                        last_edit, last_len = now, len(current)
+        answer = "".join(buf).strip()
+        if not answer:
+            raise RuntimeError("جواب خالی")
+        aid = store_answer(user_id, answer, prompt=text)
+        chunks = _split_telegram_text("🤖 " + answer, 3900)
+        if not chunks:
+            chunks = ["🤖 پاسخی دریافت نشد."]
+        offer = _looks_truncated(answer) or len(answer) >= 1800
+        # فقط دکمه ادامه؛ بدون کلید مدل/حافظه زیر پاسخ
+        kb = get_ai_result_keyboard(user_id, aid, offer_continue=offer)
+
+        # پیام اول: ویرایش همان «در حال نوشتن»
+        first = chunks[0]
+        total = len(chunks)
+        edit_kwargs = {}
+        if total == 1 and kb is not None:
+            edit_kwargs["reply_markup"] = kb
+        if first != last_rendered:
+            try:
+                await sent.edit_text(first, **edit_kwargs)
+                last_rendered = first
+            except Exception as edit_error:
+                logger.warning("AI final edit failed; retrying same message: %s", edit_error)
+                try:
+                    await asyncio.sleep(0.15)
+                    await sent.edit_text(first, **edit_kwargs)
+                    last_rendered = first
+                except Exception as retry_error:
+                    logger.warning("AI final edit retry failed: %s", retry_error)
+                    try:
+                        await msg.reply_text(first, **edit_kwargs)
+                    except Exception:
+                        pass
+        elif total == 1 and kb is not None:
+            try:
+                await sent.edit_text(first, reply_markup=kb)
+            except Exception:
+                pass
+
+        # ادامه‌ها در پیام‌های بعدی تا هیچ بخشی حذف نشود
+        for i, chunk in enumerate(chunks[1:], start=2):
+            try:
+                body = chunk
+                if body.startswith("🤖 "):
+                    body = body[2:].lstrip()
+                kwargs = {}
+                if i == total and kb is not None:
+                    kwargs["reply_markup"] = kb
+                await msg.reply_text(f"🤖 ادامه ({i}/{total})\n{body}", **kwargs)
+            except Exception as cont_err:
+                logger.warning("AI continuation send failed: %s", cont_err)
+        return answer, provider_label or "ai"
+    except Exception:
+        try:
+            await sent.delete()
+        except Exception as _exc:
+            logger.debug("%s: %s", __name__, _exc)
+        raise
+async def _send_ai_voice(update_or_msg, text: str, user_id: int, reply_markup=None):
+    """ارسال ویس با پیام وضعیت «در حال ویس دادن»."""
+    msg = getattr(update_or_msg, "message", None) or update_or_msg
+    notice = await msg.reply_text("🔊 در حال ویس دادن...")
+    try:
+        audio = await text_to_speech(text)
+        from io import BytesIO
+        bio = BytesIO(audio)
+        bio.name = "reply.mp3"
+        kwargs = {"audio": bio, "caption": "🔊"}
+        if reply_markup is not None:
+            kwargs["reply_markup"] = reply_markup
+        await msg.reply_audio(**kwargs)
+    finally:
+        try:
+            await notice.delete()
+        except Exception as _exc:
+            logger.debug("%s: %s", __name__, _exc)
+async def _ask_ai_with_typing(update, context, user_id, text):
+    """AI request with stable chunked output and safe fallback semantics."""
+    import asyncio
+    stop_event = asyncio.Event()
+    chat_id = update.effective_chat.id
+    # فقط _ask_ai_stream_and_send یک پیام «✍️ در حال نوشتن...» می‌فرستد.
+    # اینجا فقط ChatAction.TYPING برای وضعیت تایپ تلگرام فعال می‌شود تا
+    # پیام وضعیت دوبار روی صفحه ایجاد نشود.
+    from bot.utils.task_manager import spawn
+    task = spawn(_keep_typing(context.bot, chat_id, stop_event), name=f"typing-{chat_id}")
+    try:
+        try:
+            result = await _ask_ai_stream_and_send(update, context, user_id, text)
+            context.user_data["_ai_already_sent"] = True
+            return result
+        except Exception as stream_error:
+            logger.warning("AI chunked stream failed, using canonical fallback: %s", stream_error)
+            context.user_data["_ai_already_sent"] = False
+            return await ask_ai(user_id, text)
+    finally:
+        stop_event.set()
+        try:
+            await task
+        except Exception as _exc:
+            logger.debug("%s: %s", __name__, _exc)
+async def _send_main(update, context, text, user_id):
+    context.user_data.pop("waiting_for", None)
+    await update.message.reply_text("🏠 منوی اصلی", reply_markup=get_main_keyboard(user_id))
+    msg = await update.message.reply_text(text, reply_markup=get_refresh_button())
+    context.user_data["last_main_msg_id"] = msg.message_id
+    set_last_main_msg_id(user_id, msg.message_id)
+    return msg
+def _is_back(text):
+    t = text.strip()
+    return t in ("🔙 بازگشت", "بازگشت") or "بازگشت" in t
+def _is_back_more(text):
+    return "بازگشت به بیشتر" in text
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+    if not await check_and_rate_limit(update, context):
+        return
+    # واکنش خودکار را از مسیر پاسخ جدا نگه می‌داریم؛ فقط صف محلی را پر می‌کند
+    # و ارسال reaction در worker انجام می‌شود تا سرعت/پایداری پاسخ‌ها آسیب نبیند.
+    try:
+        from bot.services.auto_reactions import maybe_auto_react
+        await maybe_auto_react(update, context)
+    except Exception as _reaction_exc:
+        logger.debug("auto reaction hook failed: %s", _reaction_exc)
+    try:
+        await _text_handler_inner(update, context)
+    except Exception as e:
+        logger.error(f"text_handler error: {e}", exc_info=True)
+        try:
+            await update.message.reply_text("⚠️ این بخش موقتاً در دسترس نیست. کمی بعد دوباره امتحان کنید.")
+        except Exception as _exc:
+            logger.debug("%s: %s", __name__, _exc)
+async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    user_id = update.effective_user.id
+    first_name = update.effective_user.first_name or "کاربر"
+    try:
+        from bot.handlers.v71_handlers import handle_downloader_url_v71
+        if await handle_downloader_url_v71(update, context, text):
+            return
+    except Exception as _dl_exc:
+        from bot.logger import logger as _lg
+        _lg.debug("downloader url hook: %s", _dl_exc)
+    city = get_user_city(user_id)
+    waiting = context.user_data.get("waiting_for")
+    # ساخت یادآوری جدید از منوی «مدیریت یادآوری‌ها» باید قبل از AI عمومی هندل شود.
+    # این مسیر باعث می‌شود جمله‌هایی مثل «فردا ساعت ۱۲ ظهر خبرم کن درس بخونم»
+    # مستقیم ثبت شوند و به AI سپرده نشوند.
+    if waiting == "reminder_new":
+        if text.strip().lower() in ("لغو", "انصراف", "cancel"):
+            context.user_data.pop("waiting_for", None)
+            await _h_reminder_manager(update, context, user_id)
+            return
+        rem = parse_natural_reminder(text)
+        if rem:
+            body, when, repeat_type, repeat_every = rem
+            add_reminder(user_id, body, when.isoformat(), repeat_type=repeat_type, repeat_every=repeat_every)
+            context.user_data.pop("waiting_for", None)
+            repeat_label = {
+                "daily": "روزانه", "weekly": "هفتگی", "monthly": "ماهانه",
+                "every_minutes": f"هر {repeat_every} دقیقه",
+                "every_hours": f"هر {repeat_every} ساعت",
+            }.get(repeat_type, "یک‌بار")
+            await update.message.reply_text(
+                f"⏰ یادآوری ثبت شد.\nموضوع: {body}\nزمان: {when.strftime('%Y-%m-%d %H:%M')}\nتکرار: {repeat_label}"
+            )
+            return
+        await update.message.reply_text(
+            "⚠️ زمان یادآوری را متوجه نشدم.\nمثلاً: «فردا ساعت ۱۲ ظهر خبرم کن درس بخونم» یا «فردا ساعت ۹ جلسه دارم»."
+        )
+        return
+    if await _h_reminder_input(update, context, user_id, text):
+        return
+    # AI chat mode
+    if context.user_data.get("ai_mode"):
+        if _is_back(text) or _is_back_more(text):
+            context.user_data.pop("ai_mode", None)
+            context.user_data.pop("waiting_for", None)
+            await update.message.reply_text("➕ منوی بیشتر:", reply_markup=get_more_keyboard())
+            return
+        if text.startswith(("➕", "🏠", "📅", "🕌", "💰", "🌤", "🛠", "🎮", "🎨", "👤", "🏙", "🌍", "🔙", "🤖")):
+            if text != "🤖 دستیار هوشمند":
+                context.user_data.pop("ai_mode", None)
+                # fall through to normal menu handling
+            else:
+                # repeat the AI entry prompt
+                providers = enabled_providers()
+                provider_text = "، ".join(providers) if providers else "هیچ سرویس فعالی ندارد"
+                await update.message.reply_text(
+                    "🤖 دستیار هوشمند روز زیبا\n\n"
+                    "پیامت را بفرست تا به هوش مصنوعی ارسال شود.\n"
+                    f"سرویس‌های فعال: {provider_text}",
+                    reply_markup=get_ai_keyboard(user_id),
+                )
+                return
+        else:
+            try:
+                # فقط خواندن متن با ویس (بدون AI)
+                import re as _re
+                m_read = _re.match(r"^(بخون|بخوان)\s*[:：]?\s*(.+)$", text, _re.I | _re.S)
+                if m_read:
+                    to_read = m_read.group(2).strip()
+                    try:
+                        await _send_ai_voice(
+                            update, to_read, user_id)
+                    except Exception as ve:
+                        await update.message.reply_text(f"⚠️ ویس ساخته نشد: {ve}")
+                    return
+                if looks_like_image_request(text):
+                    notice = await update.message.reply_text("🎨 در حال ساخت تصویر...")
+                    try:
+                        img_bytes, mime = await generate_or_edit_image(text)
+                        from io import BytesIO
+                        bio = BytesIO(img_bytes)
+                        bio.name = "ai_image.png" if "png" in mime else "ai_image.jpg"
+                        await update.message.reply_photo(
+                            photo=bio,
+                            caption="🎨 تصویر ساخته شد",
+                        )
+                    finally:
+                        try:
+                            await notice.delete()
+                        except Exception as _exc:
+                            logger.debug("%s: %s", __name__, _exc)
+                    return
+                mode_msg = _apply_voice_chat_flags(context, text)
+                if mode_msg:
+                    await update.message.reply_text(mode_msg)
+                # «ویس بفرست» بدون سؤال → آخرین جواب را با ویس بفرست
+                if is_voice_only_request(text):
+                    last = get_last_answer(user_id) or (context.user_data or {}).get("last_ai_answer")
+                    if last:
+                        try:
+                            await _send_ai_voice(update, last, user_id)
+                        except Exception as ve:
+                            await update.message.reply_text(f"⚠️ ویس ساخته نشد: {ve}")
+                    else:
+                        await update.message.reply_text(
+                            "هنوز جوابی برای خواندن ندارم. اول یک سؤال بپرس، بعد بگو «ویس بفرست»."
+                        )
+                    return
+                voice_mode = wants_voice_reply(text) or bool(
+                    context.user_data.get("ai_voice_chat")
+                )
+                ask_text = strip_voice_prefix(text) if wants_voice_reply(text) else text
+                # اگر فقط روشن کردن حالت ویس بود و سؤال دیگری نبود، لازم نیست AI سنگین
+                if mode_msg and wants_voice_chat_mode(text) and len(ask_text) < 40:
+                    try:
+                        await _send_ai_voice(
+                            update,
+                            "باشه، با ویس حرف می‌زنیم. هر وقت خواستی بگو.",
+                            user_id,
+                        )
+                    except Exception as _exc:
+                        logger.debug("%s: %s", __name__, _exc)
+                    return
+                # قابلیت‌های ویژه قبل از AI عمومی
+                handled = await _handle_special_ai_intents(
+                    update, context, user_id, ask_text
+                )
+                if handled:
+                    return
+                answer, provider = await _ask_ai_with_typing(
+                    update, context, user_id, ask_text
+                )
+                if context.user_data is not None:
+                    context.user_data["last_ai_answer"] = answer
+                if not (context.user_data or {}).get("_ai_already_sent"):
+                    await _send_ai_answer(update, user_id, answer, prompt=ask_text)
+                if context.user_data is not None:
+                    context.user_data.pop("_ai_already_sent", None)
+                explicit = wants_voice_reply(text)
+                if should_auto_voice_reply(
+                    ask_text,
+                    answer,
+                    input_was_voice=False,
+                    explicit_voice=explicit,
+                    voice_chat_mode=bool(context.user_data.get("ai_voice_chat")),
+                ):
+                    try:
+                        await _send_ai_voice(
+                            update, answer, user_id
+                        )
+                    except Exception as ve:
+                        await update.message.reply_text(
+                            f"⚠️ متن آماده شد ولی ویس ساخته نشد: {ve}"
+                        )
+            except Exception as exc:
+                await update.message.reply_text(
+                    "❌ فعلاً هیچ‌کدام از سرویس‌های AI پاسخ ندادند.\n\n" + str(exc)[:3000]
+                )
+            return
+    if waiting:
+        if _is_back(text) or _is_back_more(text):
+            context.user_data.pop("waiting_for", None)
+            await update.message.reply_text("➕ منوی بیشتر:", reply_markup=get_more_keyboard())
+            return
+        # اگر کاربر دکمه منو زد، waiting را رها کن و ادامه بده
+        menu_starts = (
+            "➕", "🏠", "📅", "🕌", "💰", "🌤", "🛠", "🎮", "🎨", "👤",
+            "🏙", "🌍", "🔙", "💵", "💎", "🔄", "📈", "📐", "🔢", "🔐",
+            "📝", "🗺", "⏰", "📒", "📖", "😂", "🧠", "💪", "💖", "🕋",
+            "📿", "🙏", "🔔", "🌫", "📍", "🇬🇧", "🇮🇷", "🌈", "📋", "🤖", "🧹",
+        )
+        if text.startswith(menu_starts) or text in (
+            "بیشتر", "بازار", "مذهبی", "ابزارها", "سرگرمی", "فونت", "پروفایل",
+            "تاریخ و سن", "هوا و مکان", "انتخاب شهر", "تقویم", "زبان",
+        ):
+            context.user_data.pop("waiting_for", None)
+            waiting = None
+        else:
+            handlers = {
+                "date_convert": _h_date_convert, "age_calc": _h_age_calc,
+                "birthday": _h_birthday, "zodiac": _h_zodiac, "lunar": _h_lunar,
+                "date_diff": _h_date_diff, "age_diff": _h_age_diff,
+                "event_search": _h_event_search, "countdown": _h_countdown,
+                "calc": _h_calc,
+                "profit": _h_profit, "currency": _h_currency, "distance": _h_distance, "crypto_chart": _h_crypto_full, "crypto_analyze": _h_crypto_full, "crypto_full": _h_crypto_full, "crypto_pos": _h_crypto_pos, "crypto_alert": _h_crypto_pos,
+                "birth_save": _h_birth_save,
+                "count_text": _h_count_text,
+                "font_text": _h_font_text, "font_all": _h_font_all,
+                "economic_calendar": _h_economic_calendar,
+            }
+            fn = handlers.get(waiting)
+            if fn:
+                try:
+                    await fn(update, context, text, user_id)
+                except Exception as e:
+                    logger.error(f"waiting handler {waiting}: {e}", exc_info=True)
+                    context.user_data.pop("waiting_for", None)
+                    await update.message.reply_text(
+                        "⚠️ خطا در پردازش. دوباره از منو انتخاب کنید.",
+                        reply_markup=get_more_keyboard(),
+                    )
+                return
+            context.user_data.pop("waiting_for", None)
+    if text in ("🏙 انتخاب شهر", "انتخاب شهر"):
+        await update.message.reply_text("🏙 کشور:", reply_markup=get_country_keyboard()); return
+    if text in ("📅 تقویم", "تقویم"):
+        t = get_today_tehran()
+        await update.message.reply_text(get_calendar_text(t.year, t.month, t.day, user_id), reply_markup=get_calendar_buttons(t.year, t.month, t.day, user_id)); return
+    if text in ("🌍 زبان", "زبان"):
+        await update.message.reply_text("🌍 زبان:", reply_markup=get_language_keyboard()); return
+    if text in ("➕ بیشتر", "بیشتر"):
+        await update.message.reply_text("➕ بخش را انتخاب کنید:", reply_markup=get_more_keyboard()); return
+    if text in ("📥 دانلودر فایل", "دانلودر فایل", "دانلودر"):
+        from bot.handlers.v71_handlers import downloader_entry_v71
+        await downloader_entry_v71(update, context)
+        return
+    if text == "🤖 دستیار هوشمند":
+        providers = enabled_providers()
+        context.user_data["ai_mode"] = True
+        provider_text = "، ".join(providers) if providers else "هیچ سرویس فعالی ندارد"
+        await update.message.reply_text(
+            "🤖 دستیار هوشمند روز زیبا\n\n"
+            "پیامت را بفرست تا به هوش مصنوعی ارسال شود.\n"
+            f"سرویس‌های فعال: {provider_text}",
+            reply_markup=get_ai_keyboard(user_id),
+        )
+        return
+    if text == "📅 تاریخ و سن":
+        await update.message.reply_text("📅 تاریخ و سن:", reply_markup=get_date_tools_keyboard()); return
+    if text == "🕌 مذهبی":
+        await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard()); return
+    if text == "💰 بازار":
+        await update.message.reply_text("💰 بازار:", reply_markup=get_market_keyboard()); return
+    if text == "🌤 هوا و مکان":
+        await update.message.reply_text("🌤 هوا و مکان:", reply_markup=get_weather_geo_keyboard()); return
+    if text == "🛠 ابزارها":
+        await update.message.reply_text("🛠 ابزارها:", reply_markup=get_tools_keyboard()); return
+    if text == "🎮 سرگرمی":
+        await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard()); return
+    if text in ("🎨 فونت", "فونت"):
+        await update.message.reply_text("🎨 بخش فونت:", reply_markup=get_font_keyboard()); return
+    if text in ("📋 لیست فونت‌ها", "📋 لیست همه فونت‌ها"):
+        await update.message.reply_text(list_fonts(), reply_markup=get_font_keyboard()); return
+    if text == "🇬🇧 فونت انگلیسی":
+        await update.message.reply_text("🇬🇧 یک فونت انگلیسی انتخاب کنید:", reply_markup=get_font_en_keyboard()); return
+    if text == "🇮🇷 فونت فارسی":
+        await update.message.reply_text("🇮🇷 یک فونت فارسی/تزئینی انتخاب کنید:", reply_markup=get_font_fa_keyboard()); return
+    if text == "🌈 همه فونت‌ها":
+        context.user_data["waiting_for"] = "font_all"
+        await update.message.reply_text("🌈 یک کلمه یا جمله بفرستید تا روی همه فونت‌ها اعمال شود:", reply_markup=get_font_keyboard()); return
+    if text == "🔙 بازگشت فونت":
+        await update.message.reply_text("🎨 بخش فونت:", reply_markup=get_font_keyboard()); return
+    # انتخاب فونت از نام نمایشی
+    name_to_key = {v: k for k, v in FONT_NAMES.items()}
+    name_to_key.update({v[:18]: k for k, v in FONT_NAMES.items()})
+    if text in name_to_key or text in FONT_NAMES:
+        key = name_to_key.get(text, text)
+        context.user_data["selected_font"] = key
+        context.user_data["waiting_for"] = "font_text"
+        await update.message.reply_text(f"🎨 فونت انتخاب شد.\nمتن را بفرستید:", reply_markup=get_font_keyboard()); return
+    if text == "👤 پروفایل":
+        await update.message.reply_text("👤 پروفایل:", reply_markup=get_profile_keyboard()); return
+    if _is_back_more(text):
+        await update.message.reply_text("➕ منوی بیشتر:", reply_markup=get_more_keyboard()); return
+    # تاریخ و سن
+    if text in ("🔄 مبدل تاریخ", "مبدل تاریخ"):
+        context.user_data["waiting_for"] = "date_convert"; track_usage(user_id, "date_convert")
+        await update.message.reply_text("🔄 تاریخ:\n`1403/05/18` یا `2024/08/09`", reply_markup=get_date_tools_keyboard()); return
+    if text in ("🎂 محاسبه سن", "🎂 محاسبه سن دقیق", "محاسبه سن"):
+        context.user_data["waiting_for"] = "age_calc"; track_usage(user_id, "age_calc")
+        await update.message.reply_text("🎂 تولد شمسی:\n`1375/03/15`", reply_markup=get_date_tools_keyboard()); return
+    if text in ("🎉 روزشمار تولد", "روزشمار تولد"):
+        context.user_data["waiting_for"] = "birthday"; track_usage(user_id, "birthday")
+        bd = get_birth_date(user_id)
+        if bd and len(bd.split("/")) == 3:
+            p = bd.split("/"); context.user_data.pop("waiting_for", None)
+            await update.message.reply_text(birthday_countdown(int(p[0]), int(p[1]), int(p[2])), reply_markup=get_date_tools_keyboard()); return
+        await update.message.reply_text("🎉 تولد شمسی:\n`1375/03/15`", reply_markup=get_date_tools_keyboard()); return
+    if text in ("♈ برج و حیوان", "برج و حیوان"):
+        context.user_data["waiting_for"] = "zodiac"; track_usage(user_id, "zodiac")
+        await update.message.reply_text("♈ تولد شمسی:\n`1375/03/15`", reply_markup=get_date_tools_keyboard()); return
+    if text in ("🌙 سن قمری", "سن قمری"):
+        context.user_data["waiting_for"] = "lunar"; track_usage(user_id, "lunar")
+        await update.message.reply_text("🌙 تولد شمسی:\n`1375/03/15`", reply_markup=get_date_tools_keyboard()); return
+    if text in ("📆 اختلاف تاریخ", "📆 اختلاف دو تاریخ", "اختلاف تاریخ"):
+        context.user_data["waiting_for"] = "date_diff"; track_usage(user_id, "date_diff")
+        await update.message.reply_text(
+            "📆 دو تاریخ شمسی بفرست:\n"
+            "`1375/03/15 1403/05/18`\n\n"
+            "خروجی: سال/ماه/روز • هفته • ساعت • روز کاری • میلادی و قمری",
+            reply_markup=get_date_tools_keyboard(),
+        ); return
+    if text in ("👥 اختلاف سن", "اختلاف سن"):
+        context.user_data["waiting_for"] = "age_diff"; track_usage(user_id, "age_diff")
+        await update.message.reply_text(
+            "👥 دو تاریخ تولد شمسی بفرست:\n"
+            "`1375/03/15 1380/06/20`\n\n"
+            "خروجی: سن هر نفر • اختلاف دقیق • سن قمری • نسبت سنی",
+            reply_markup=get_date_tools_keyboard(),
+        ); return
+    if text in ("📅 تقویم ماه", "تقویم ماه"):
+        track_usage(user_id, "month_cal")
+        await update.message.reply_text(month_calendar(), reply_markup=get_date_tools_keyboard()); return
+    if text in ("🔍 مناسبت‌یاب", "مناسبت‌یاب"):
+        context.user_data["waiting_for"] = "event_search"; track_usage(user_id, "event_search")
+        await update.message.reply_text("🔍 کلمه کلیدی:\n`نوروز`", reply_markup=get_date_tools_keyboard()); return
+    if text in ("🌸 شمارش نوروز", "شمارش نوروز"):
+        track_usage(user_id, "nowruz")
+        await update.message.reply_text(nowruz_countdown(), reply_markup=get_date_tools_keyboard()); return
+    if text in ("🌍 ساعت جهانی", "ساعت جهانی"):
+        track_usage(user_id, "world_clock")
+        await update.message.reply_text(world_clock(), reply_markup=get_date_tools_keyboard()); return
+    if text in ("⏳ شمارش‌معکوس", "شمارش‌معکوس"):
+        context.user_data["waiting_for"] = "countdown"; track_usage(user_id, "countdown")
+        await update.message.reply_text("⏳ تاریخ:\n`1405/01/01 نوروز`", reply_markup=get_date_tools_keyboard()); return
+    # مذهبی
+    if text in ("🕋 قبله‌نما", "قبله‌نما"):
+        track_usage(user_id, "qibla")
+        await update.message.reply_text(qibla_direction(city), reply_markup=get_religious_keyboard()); return
+    if text in ("📿 اذکار روز", "اذکار روز"):
+        track_usage(user_id, "adhkar")
+        await update.message.reply_text(daily_adhkar(user_id), reply_markup=get_religious_keyboard()); return
+    if text in ("📖 آیه و حدیث", "آیه و حدیث"):
+        track_usage(user_id, "verse")
+        await update.message.reply_text(await daily_verse_hadith(user_id), reply_markup=get_religious_keyboard()); return
+    if text in ("🕌 مناسبت مذهبی", "مناسبت مذهبی"):
+        track_usage(user_id, "rel_cd")
+        # معماری مشابه تقویم: نمای کلی + مناسبت‌های نزدیک + نمای ماه جاری قمری
+        body = religious_countdown()
+        body += "\n\n" + "—" * 12 + "\n" + religious_month_view()
+        await update.message.reply_text(body, reply_markup=get_religious_keyboard()); return
+    if text in ("🙏 استخاره", "استخاره"):
+        track_usage(user_id, "istikhara")
+        context.user_data["waiting_for"] = "istikhara_confirm"
+        await update.message.reply_text(istikhara_intro(), reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("🙏 استخاره بگیر")], [KeyboardButton("🔙 بازگشت به مذهبی")]],
+            resize_keyboard=True
+        )); return
+    if text == "🙏 استخاره بگیر":
+        context.user_data.pop("waiting_for", None)
+        track_usage(user_id, "istikhara_do")
+        await update.message.reply_text(await istikhara(user_id), reply_markup=get_religious_keyboard()); return
+    if text == "🔙 بازگشت به مذهبی":
+        context.user_data.pop("waiting_for", None)
+        await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard()); return
+    if text in ("🔔 تنظیم اذان", "تنظیم اذان"):
+        track_usage(user_id, "azan")
+        await _show_azan_settings(update, user_id, city)
+        return
+    # دکمه‌های شخصی‌سازی اذان
+    if text in ("🔔 اعلان‌ها: روشن", "🔕 اعلان‌ها: خاموش"):
+        settings = get_azan_settings(user_id)
+        set_azan_master(user_id, not settings["enabled"])
+        await _show_azan_settings(update, user_id, city, note="وضعیت کلی اعلان‌ها تغییر کرد.")
+        return
+    if text in ("🔄 همه روشن",):
+        set_azan_master(user_id, True)
+        for key in ("fajr", "dhuhr", "asr", "maghrib", "isha"):
+            field = f"notify_{key}"
+            update_user_field(user_id, field, 1)
+        await _show_azan_settings(update, user_id, city, note="همه اذان‌ها روشن شدند.")
+        return
+    if text in ("⏹ همه خاموش",):
+        for key in ("fajr", "dhuhr", "asr", "maghrib", "isha"):
+            update_user_field(user_id, f"notify_{key}", 0)
+        await _show_azan_settings(update, user_id, city, note="همه اذان‌ها خاموش شدند.")
+        return
+    # تحلیل طلا دقیقاً داخل همان جریان «بازار» و با ساختار منوی تحلیل کریپتو
+    # نمایش داده می‌شود؛ وارد بخش/منوی جدید نمی‌شود.
+    if text in ("🥇 تحلیل طلا", "تحلیل طلا"):
+        try:
+            track_usage(user_id, "gold_analysis")
+            notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…")
+            report = await analyze_gold("1h")
+            chart_note = ""
+            try:
+                png, chart_note = await get_gold_chart("1h")
+            except Exception as chart_exc:
+                logger.warning("get_gold_chart failed: %s", chart_exc)
+                png, chart_note = None, str(chart_exc)
+            try:
+                await notice.delete()
+            except Exception:
+                pass
+            # XAUUSD همان منوی Inline تحلیل کریپتو را با نماد gold استفاده می‌کند.
+            # بنابراین تایم‌فریم، پرایس‌اکشن، تحلیل هوشمند و بروزرسانی همگی روی همان پیام می‌مانند.
+            menu = get_crypto_analysis_keyboard("gold")
+            if png:
+                from io import BytesIO
+                try:
+                    bio = BytesIO(png)
+                    bio.name = "gold_xauusd_1h.png"
+                    chart_msg = await update.message.reply_photo(
+                        photo=bio,
+                        caption="🥇 <b>تحلیل طلا / XAUUSD — 1H</b>",
+                        parse_mode="HTML",
+                    )
+                    context.user_data["market_chart_message_id"] = chart_msg.message_id
+                    context.user_data["market_chart_chat_id"] = update.effective_chat.id
+                except Exception as send_exc:
+                    logger.warning("gold chart send failed: %s", send_exc)
+                    chart_note = chart_note or str(send_exc)
+            elif chart_note:
+                try:
+                    await update.message.reply_text(f"⚠️ نمودار طلا در دسترس نیست: {chart_note[:300]}")
+                except Exception:
+                    pass
+            chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
+            text_ids = []
+            for i, chunk in enumerate(chunks):
+                mtxt = await update.message.reply_text(
+                    chunk, parse_mode="HTML",
+                    reply_markup=menu if i == len(chunks) - 1 else None,
+                )
+                text_ids.append(mtxt.message_id)
+            context.user_data["market_analysis_text_ids"] = text_ids
+            context.user_data["market_analysis_chat_id"] = update.effective_chat.id
+            return
+        except Exception as exc:
+            logger.error("gold market button failed: %s", exc, exc_info=True)
+            await update.message.reply_text(
+                "⚠️ دریافت تحلیل طلا موقتاً ناموفق بود؛ دوباره تلاش کنید.",
+                reply_markup=get_market_keyboard(),
+            )
+            return
+    # تحلیل مستقیم طلا: کاربر می‌تواند فقط «gold»، «طلا»، «اونس»، «XAUUSD» یا عبارت تحلیلی مشابه را بفرستد.
+    # این مسیر قبل از fallback عمومی اجرا می‌شود تا Gold هرگز به‌عنوان «نماد نامعتبر» پاسخ داده نشود.
+    _gold_text = re.sub(r"[\s\u200c_/\-]+", "", text.lower())
+    _gold_aliases = ("gold", "xau", "xauusd", "طلا", "طلایجهانی", "اونس", "اونسجهانی")
+    if any(alias in _gold_text for alias in _gold_aliases):
+        # فقط وقتی پیام واقعاً درباره طلاست؛ اعداد/متن‌های نامرتبطی که کلمه gold را داخل جمله دارند هم به تحلیل طلا می‌روند.
+        try:
+            track_usage(user_id, "gold_analysis")
+            notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…")
+            report = await analyze_gold("1h")
+            chart_note = ""
+            try:
+                png, chart_note = await get_gold_chart("1h")
+            except Exception as chart_exc:
+                logger.warning("get_gold_chart (alias) failed: %s", chart_exc)
+                png, chart_note = None, str(chart_exc)
+            try:
+                await notice.delete()
+            except Exception:
+                pass
+            menu = get_crypto_analysis_keyboard("gold")
+            if png:
+                from io import BytesIO
+                try:
+                    bio = BytesIO(png)
+                    bio.name = "gold_xauusd_1h.png"
+                    chart_msg = await update.message.reply_photo(
+                        photo=bio,
+                        caption="🥇 Gold / XAUUSD — 1H",
+                        parse_mode="HTML",
+                    )
+                    context.user_data["market_chart_message_id"] = chart_msg.message_id
+                    context.user_data["market_chart_chat_id"] = update.effective_chat.id
+                except Exception as send_exc:
+                    logger.warning("gold chart send (alias) failed: %s", send_exc)
+                    chart_note = chart_note or str(send_exc)
+            elif chart_note:
+                try:
+                    await update.message.reply_text(f"⚠️ نمودار طلا در دسترس نیست: {chart_note[:300]}")
+                except Exception:
+                    pass
+            # گزارش کامل را به‌صورت پیام متنی می‌فرستیم تا محدودیت 1024 کاراکتری کپشن باعث ناقص شدن تحلیل نشود.
+            chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
+            text_ids = []
+            for i, chunk in enumerate(chunks):
+                try:
+                    mtxt = await update.message.reply_text(
+                        chunk, parse_mode="HTML",
+                        reply_markup=menu if i == len(chunks) - 1 else None,
+                    )
+                except Exception:
+                    mtxt = await update.message.reply_text(re.sub(r"<[^>]+>", "", chunk)[:3500])
+                text_ids.append(mtxt.message_id)
+            context.user_data["market_analysis_text_ids"] = text_ids
+            context.user_data["market_analysis_chat_id"] = update.effective_chat.id
+            return
+        except Exception as exc:
+            logger.error("direct gold analysis failed: %s", exc, exc_info=True)
+            await update.message.reply_text("⚠️ دریافت تحلیل طلا موقتاً ناموفق بود؛ دوباره تلاش کنید.")
+            return
+    # دکمه‌های تکی اذان (با ✅ یا ❌)
+    _azan_btn_map = {
+        "اذان صبح": "fajr",
+        "اذان ظهر": "dhuhr",
+        "اذان عصر": "asr",
+        "اذان مغرب": "maghrib",
+        "اذان عشاء": "isha",
+    }
+    for label, key in _azan_btn_map.items():
+        if text.endswith(label) and (text.startswith("✅") or text.startswith("❌")):
+            new_state = toggle_azan_prayer(user_id, key)
+            status = "روشن" if new_state else "خاموش"
+            await _show_azan_settings(update, user_id, city, note=f"{label} {status} شد.")
+            return
+    if text in ("🔙 بازگشت به مذهبی",):
+        await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard())
+        return
+    # «دستیار خرید» قدیمی حذف شده؛ خرید اکنون بخشی از همان دستیار هوشمند است.
+    if text in ("🛒 دستیار خرید", "دستیار خرید", "🛍 دستیار خرید"):
+        context.user_data["ai_mode"] = True
+        context.user_data.pop("ai_shopping_mode", None)
+        await update.message.reply_text(
+            "🤖 دستیار هوشمند فعال است.\n\n"
+            "اسم محصول، قیمت، لینک خرید یا عکس محصول را بفرست؛ خودم جستجوی فروشگاهی و مقایسه را انجام می‌دهم.",
+        )
+        return
+    if text in ("💵 قیمت کامل بازار", "قیمت کامل بازار"):
+        track_usage(user_id, "market")
+        m = await update.message.reply_text("⏳ دریافت قیمت‌ها...")
+        r = await full_market_prices()
+        await m.edit_text(r)
+        await update.message.reply_text("💰", reply_markup=get_market_keyboard()); return
+    if text in ("💎 ۲۰ ارز برتر کریپتو", "۲۰ ارز برتر کریپتو", "💎 ۳۰۰ ارز برتر کریپتو", "۳۰۰ ارز برتر کریپتو", "کریپتو"):
+        track_usage(user_id, "crypto_top")
+        m = await update.message.reply_text("⏳ دریافت لیست کریپتو...")
+        r = await get_top_crypto(20)
+        await m.edit_text(r)
+        await update.message.reply_text("💎", reply_markup=get_market_keyboard()); return
+    if text in ("🔄 تبدیل ارز", "تبدیل ارز", "🔄 تبدیل ارز / کریپتو", "تبدیل ارز / کریپتو"):
+        context.user_data["waiting_for"] = "currency"; track_usage(user_id, "currency")
+        await update.message.reply_text(
+            "🔄 مبدل هوشمند ارز / کریپتو\n\n"
+            "تقریباً همه ارزهای دیجیتال + تومان/دلار پشتیبانی می‌شود.\n\n"
+            "مثال‌ها:\n"
+            "• 1.5 btc\n"
+            "• 20 ton\n"
+            "• 100 تتر\n"
+            "• 50 دلار\n"
+            "• 1 btc eth\n"
+            "• 50000 تومان دلار\n"
+            "• 100 usdt toman\n"
+            "• ۲ بیتکوین",
+            reply_markup=get_market_keyboard()
+        ); return
+    if text in ("🗓 تقویم اقتصادی", "تقویم اقتصادی", "📅 تقویم اقتصادی"):
+        track_usage(user_id, "economic_calendar")
+        await _h_economic_calendar(update, context, text, user_id)
+        return
+    if text in ("📈 سود و ضرر", "سود و ضرر"):
+        context.user_data["waiting_for"] = "profit"; track_usage(user_id, "profit")
+        await update.message.reply_text("📈 `1000 1200` یا `1000 1200 5`", reply_markup=get_market_keyboard()); return
+    if text in (
+        "📊 نمودار و تحلیل ارز دیجیتال",
+        "نمودار و تحلیل ارز دیجیتال",
+        "📊 نمودار قیمت کریپتو",
+        "نمودار قیمت کریپتو",
+        "نمودار کریپتو",
+        "🔍 تحلیل ارز دیجیتال",
+        "تحلیل ارز دیجیتال",
+        "تحلیل کریپتو",
+    ):
+        context.user_data["waiting_for"] = "crypto_full"
+        track_usage(user_id, "crypto_full")
+        await update.message.reply_text(
+            "📈 تحلیل‌گر هوشمند کریپتو\n"
+            "────────────────────\n\n"
+            "نماد را بفرستید. بازه نمودار اختیاری است:\n\n"
+            "مثال‌ها:\n"
+            "• btc — بیت‌کوین (۳۰ روز)\n"
+            "• eth 30 — اتریوم، ۳۰ روز\n"
+            "• sol 7 — سولانا، ۷ روز\n"
+            "• ton — تون\n\n"
+            "📦 در یک پیام دریافت می‌کنید:\n"
+            "• نمودار چندپنلی (کندل، EMA، بولینگر، RSI، ADX)\n"
+            "• تحلیل چندتایم‌فریم ۱H / ۴H / ۱D\n"
+            "• ساختار بازار، حجم، الگوهای کندلی\n"
+            "• نسبت لانگ/شورت و شاخص ترس و طمع\n"
+            "• سناریو A/B و سیگنال لانگ / شورت / صبر با AI\n\n"
+            "⚠️ صرفاً آموزشی است؛ توصیه سرمایه‌گذاری قطعی نیست.",
+            reply_markup=get_market_keyboard(),
+        )
+        return
+    # هوا
+    if text in ("🌤 پیش‌بینی هوا", "پیش‌بینی هوا"):
+        track_usage(user_id, "forecast")
+        await update.message.reply_text(await weather_forecast(city), reply_markup=get_weather_geo_keyboard()); return
+    if text in ("🌫 کیفیت هوا", "کیفیت هوا"):
+        track_usage(user_id, "aqi")
+        await update.message.reply_text(await air_quality(city), reply_markup=get_weather_geo_keyboard()); return
+    if text in ("🗺 فاصله شهرها", "فاصله شهرها", "🗺 فاصله جهانی", "فاصله جهانی"):
+        context.user_data["waiting_for"] = "distance"; track_usage(user_id, "distance")
+        await update.message.reply_text(
+            "🗺 فاصله جهانی\n"
+            "🌍 همه شهرها و کشورهای دنیا پشتیبانی می‌شود.\n\n"
+            "دو مکان را بفرستید:\n"
+            "• تهران مشهد\n"
+            "• تهران تا ترکیه\n"
+            "• ایران ژاپن\n"
+            "• Paris to Tokyo\n"
+            "• New York - Brazil",
+            reply_markup=get_tools_keyboard(),
+        ); return
+    if text in ("📍 لوکیشن من", "لوکیشن من"):
+        track_usage(user_id, "location")
+        await update.message.reply_text(f"📍 لوکیشن را از 📎 بفرستید.\nشهر فعلی: {city}", reply_markup=get_weather_geo_keyboard()); return
+    # ابزار
+    if text in ("🔢 ماشین‌حساب", "ماشین‌حساب"):
+        context.user_data["waiting_for"] = "calc"; track_usage(user_id, "calc")
+        await update.message.reply_text("🔢 `2+3*4`", reply_markup=get_tools_keyboard()); return
+    if text in ("🔐 پسورد تصادفی", "پسورد تصادفی"):
+        track_usage(user_id, "password")
+        pwd = generate_password(16)
+        await update.message.reply_text(
+            "🔐 پسورد تصادفی:\n\n<code>" + pwd + "</code>\n\n👆 روی پسورد بزنید تا کپی شود",
+            reply_markup=get_tools_keyboard(),
+            parse_mode="HTML",
+        ); return
+    if text in ("📝 شمارش متن", "شمارش متن"):
+        context.user_data["waiting_for"] = "count_text"; track_usage(user_id, "count")
+        await update.message.reply_text("📝 متن را بفرستید:", reply_markup=get_tools_keyboard()); return
+    # سرگرمی
+    if text in ("📖 فال حافظ", "فال حافظ"):
+        track_usage(user_id, "hafez"); await update.message.reply_text(await hafez_fal(user_id), reply_markup=get_fun_keyboard()); return
+    if text in ("😂 جوک روز", "جوک روز"):
+        track_usage(user_id, "joke")
+        await update.message.reply_text(
+            "😂 دسته جوک را انتخاب کن:\n(بیش از ۸۷۰۰ جوک از farsijokes)",
+            reply_markup=get_joke_keyboard(),
+        ); return
+    # دسته‌های جوک
+    _joke_map = {
+        "🎲 جوک تصادفی": None,
+        "😄 عمومی": "general",
+        "🤣 ترکی": "turkish",
+        "😂 رشتی": "rashti",
+        "😏 قزوینی": "ghazvini",
+        "👨 مردان": "men",
+        "👩 زنان": "women",
+        "🤑 اصفهانی": "isfahani",
+        "🔞 سکسی": "adult",
+        "🎭 متفرقه": "misc",
+        "💀 زشت": "dirty",
+    }
+    if text in _joke_map:
+        track_usage(user_id, "joke")
+        cat = _joke_map[text]
+        await update.message.reply_text(await joke_of_day(cat, user_id=update.effective_user.id), reply_markup=get_joke_keyboard())
+        return
+    if text in ("🔙 بازگشت به سرگرمی",):
+        await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard()); return
+    if text in ("🧠 دانستنی روز", "دانستنی روز"):
+        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(), reply_markup=get_fun_keyboard()); return
+    if text in ("💪 چالش امروز", "چالش امروز"):
+        track_usage(user_id, "challenge"); await update.message.reply_text(await daily_challenge(), reply_markup=get_fun_keyboard()); return
+    if text in ("💖 جمله انگیزشی", "جمله انگیزشی"):
+        track_usage(user_id, "motivation"); await update.message.reply_text(f"💖 {get_motivation()}", reply_markup=get_fun_keyboard()); return
+    # پروفایل
+    if text in ("⏰ مدیریت یادآوری‌ها", "مدیریت یادآوری‌ها"):
+        await _h_reminder_manager(update, context, user_id)
+        return
+    if text in ("⚙️ تنظیمات هوشمند", "تنظیمات هوشمند"):
+        from bot.database import get_user_preferences
+        prefs = get_user_preferences(user_id)
+        style_names = {"short": "کوتاه", "balanced": "متعادل", "long": "کامل"}
+        await update.message.reply_text(
+            "⚙️ تنظیمات هوشمند\n\n"
+            f"✍️ سبک پاسخ: {style_names.get(prefs.get('response_style'), 'متعادل')}\n"
+            f"💵 ارز پیش‌فرض: {prefs.get('currency', 'USD')}\n\n"
+            "این تنظیمات فقط برای شخصی‌سازی تجربه استفاده می‌شوند.",
+            reply_markup=get_smart_settings_keyboard(),
+        )
+        return
+    if text in ("✍️ پاسخ کوتاه", "📚 پاسخ کامل", "⚖️ پاسخ متعادل"):
+        from bot.database import set_user_preference
+        style = "short" if "کوتاه" in text else "long" if "کامل" in text else "balanced"
+        set_user_preference(user_id, "response_style", style)
+        await update.message.reply_text("✅ سبک پاسخ ذخیره شد.", reply_markup=get_smart_settings_keyboard())
+        return
+    if text in ("💵 ارز USD", "💶 ارز EUR", "🇮🇷 ارز IRR"):
+        from bot.database import set_user_preference
+        currency = text.split()[-1]
+        set_user_preference(user_id, "currency", currency)
+        await update.message.reply_text(f"✅ ارز پیش‌فرض: {currency}", reply_markup=get_smart_settings_keyboard())
+        return
+    if text == "🧹 پاک‌سازی تنظیمات":
+        from bot.database import clear_user_preferences
+        clear_user_preferences(user_id)
+        await update.message.reply_text("🧹 تنظیمات هوشمند پاک شد.", reply_markup=get_smart_settings_keyboard())
+        return
+    if text == "🔙 بازگشت به پروفایل":
+        await update.message.reply_text("👤 پروفایل:", reply_markup=get_profile_keyboard())
+        return
+    if text in ("👤 پروفایل من", "پروفایل من"):
+        track_usage(user_id, "profile")
+        u = update.effective_user
+        txt = profile_text(
+            user_id, u.first_name or first_name,
+            username=u.username, last_name=u.last_name,
+            language_code=getattr(u, "language_code", None),
+        )
+        try:
+            photos = await context.bot.get_user_profile_photos(user_id, limit=1)
+            if photos.total_count > 0:
+                file_id = photos.photos[0][-1].file_id
+                await update.message.reply_photo(file_id, caption=txt.replace("**", "").replace("`","")+ "", reply_markup=get_profile_keyboard())
+            else:
+                await update.message.reply_text(txt.replace("**", "").replace("`",""), reply_markup=get_profile_keyboard())
+        except Exception:
+            await update.message.reply_text(txt.replace("**", "").replace("`",""), reply_markup=get_profile_keyboard())
+        return
+    if text in ("📊 آمار من", "آمار من"):
+        track_usage(user_id, "stats")
+        usage = get_user_usage(user_id) or []
+        if usage:
+            lines = []
+            for row in usage[:15]:
+                try:
+                    lines.append(f"• {row[0]}: {row[1]}")
+                except Exception as _exc:
+                    logger.debug("%s: %s", __name__, _exc)
+            msg = "📊 آمار:\n" + ("\n".join(lines) if lines else "خالی")
+        else:
+            msg = "📊 آمار:\nخالی"
+        await update.message.reply_text(msg, reply_markup=get_profile_keyboard()); return
+    if text in ("🎂 ذخیره تاریخ تولد", "ذخیره تاریخ تولد"):
+        context.user_data["waiting_for"] = "birth_save"
+        await update.message.reply_text("🎂 `1375/03/15`", reply_markup=get_profile_keyboard()); return
+    if text in ("🇮🇷 ایران", "ایران"):
+        await update.message.reply_text("🇮🇷 شهر:", reply_markup=get_iran_cities_keyboard()); return
+    if text in ("🇮🇶 عراق", "عراق"):
+        await update.message.reply_text("🇮🇶 شهر:", reply_markup=get_iraq_cities_keyboard()); return
+    if _is_back(text):
+        await _send_main(update, context, await build_message(user_id, first_name, city), user_id); return
+    if text.startswith("فارسی") or text == "فارسی 🇮🇷":
+        update_user_field(user_id, "language", "fa"); await _send_main(update, context, await build_message(user_id, first_name, city), user_id); return
+    if text.startswith("English") or text == "English 🇬🇧":
+        update_user_field(user_id, "language", "en"); await _send_main(update, context, await build_message(user_id, first_name, city), user_id); return
+    if "العربية" in text or "العربيه" in text:
+        update_user_field(user_id, "language", "ar"); await _send_main(update, context, await build_message(user_id, first_name, city), user_id); return
+    if text in ALL_CITIES:
+        update_user_field(user_id, "city", text); update_user_field(user_id, "country", CITY_COUNTRY.get(text, "Iran"))
+        await _send_main(update, context, f"✅ شهر → **{text}**\n\n" + await build_message(user_id, first_name, text), user_id); return
+async def _show_azan_settings(update, user_id, city, note: str = None):
+    """نمایش پنل تنظیم اذان با وضعیت فعلی و اوقات شرعی"""
+    from bot.api.prayer import get_prayer_times, get_next_prayer_time
+    from datetime import datetime
+    import pytz
+    from bot.config import config
+    settings = get_azan_settings(user_id)
+    times = get_prayer_times(city) or {}
+    now = datetime.now(pytz.timezone(config.TIMEZONE))
+    nxt_name, nxt_delta = get_next_prayer_time(times, now) if times else (None, None)
+    def mark(on: bool) -> str:
+        return "✅" if on else "❌"
+    lines = [f"🔔 تنظیم اذان — {city}\n"]
+    if note:
+        lines.append(f"ℹ️ {note}\n")
+    master = "روشن ✅" if settings["enabled"] else "خاموش ❌"
+    lines.append(f"اعلان کلی: {master}\n")
+    lines.append("انتخاب اذان‌ها:")
+    lines.append(f"{mark(settings['fajr'])} اذان صبح" + (f"  ({times.get('اذان صبح', '—')})" if times else ""))
+    lines.append(f"{mark(settings['dhuhr'])} اذان ظهر" + (f"  ({times.get('اذان ظهر', '—')})" if times else ""))
+    lines.append(f"{mark(settings['asr'])} اذان عصر" + (f"  ({times.get('اذان عصر', '—')})" if times else ""))
+    lines.append(f"{mark(settings['maghrib'])} اذان مغرب" + (f"  ({times.get('اذان مغرب', '—')})" if times else ""))
+    lines.append(f"{mark(settings['isha'])} اذان عشاء" + (f"  ({times.get('اذان عشاء', '—')})" if times else ""))
+    if nxt_name and nxt_delta and settings["enabled"]:
+        secs = int(nxt_delta.total_seconds())
+        h, r = divmod(secs, 3600)
+        mi, _ = divmod(r, 60)
+        lines.append(f"\n⏳ اذان بعدی: {nxt_name} — {h} ساعت و {mi} دقیقه")
+    elif not settings["enabled"]:
+        lines.append("\n🔕 اعلان‌ها خاموش است.")
+    lines.append("\nروی هر دکمه بزن تا روشن/خاموش شود.")
+    await update.message.reply_text(
+        "\n".join(lines),
+        reply_markup=get_azan_keyboard(settings),
+    )
+async def media_ai_handler(update, context):
+    """Compatibility facade; implementation lives in media_handlers.py."""
+    from bot.handlers.media_handlers import media_ai_handler as _impl
+    return await _impl(update, context)
+async def lens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """اجرای Lens محلی روی عکسی که کاربر به آن Reply کرده است."""
+    if not update.message:
+        return
+    reply = update.message.reply_to_message
+    if not reply:
+        await update.message.reply_text("📷 روی یک عکس Reply کن و بعد /lens را بفرست.")
+        return
+    photo = reply.photo[-1] if reply.photo else None
+    if not photo and reply.document:
+        mime = reply.document.mime_type or ""
+        if mime.startswith("image/"):
+            photo = reply.document
+    if not photo:
+        await update.message.reply_text("❌ پیام Reply شده یک تصویر نیست.")
+        return
+    notice = await update.message.reply_text("🔎 در حال تحلیل تصویر...")
+    try:
+        tg_file = await photo.get_file()
+        data = bytes(await tg_file.download_as_bytearray())
+        result = await visual_search(data, caption="lens")
+        await update.message.reply_text(result[:4000])
+    except Exception as exc:
+        await update.message.reply_text(f"❌ تحلیل تصویر انجام نشد:\n{str(exc)[:2000]}")
+    finally:
+        try:
+            await notice.delete()
+        except Exception as _exc:
+            logger.debug("%s: %s", __name__, _exc)
+async def voice_ai_handler(update, context):
+    """Compatibility facade; implementation lives in media_handlers.py."""
+    from bot.handlers.media_handlers import voice_ai_handler as _impl
+    return await _impl(update, context)
