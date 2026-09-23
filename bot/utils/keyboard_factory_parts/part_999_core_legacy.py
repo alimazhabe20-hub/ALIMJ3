@@ -118,7 +118,6 @@ def get_market_keyboard():
             [KeyboardButton("🔄 تبدیل ارز / کریپتو"), KeyboardButton("📈 سود و ضرر")],
             [KeyboardButton("🗓 تقویم اقتصادی")],
             [KeyboardButton("📊 نمودار و تحلیل ارز دیجیتال")],
-            [KeyboardButton("🧠 کدوم ارز بخرم؟")],
             [KeyboardButton("🥇 تحلیل طلا")],
             [KeyboardButton("🔙 بازگشت به بیشتر")],
         ],
