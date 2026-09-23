@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ChatAction
 
 from bot.logger import logger
 from bot.utils.http_client import pooled_async_client, request_with_retry, safe_json
@@ -75,6 +76,21 @@ def _cache_put(key: str, value: Any):
         oldest = sorted(_CACHE.items(), key=lambda x: x[1][0])[:6]
         for k, _ in oldest:
             _CACHE.pop(k, None)
+
+
+async def _keep_typing(bot, chat_id, stop_event: asyncio.Event):
+    """Keep Telegram 'typing…' status alive while the long scan runs."""
+    while not stop_event.is_set():
+        try:
+            await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+        except Exception as exc:
+            logger.debug("opportunity typing action failed: %s", exc)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=4.0)
+        except asyncio.TimeoutError:
+            pass
+        except Exception as exc:
+            logger.debug("opportunity typing wait failed: %s", exc)
 
 
 async def _top_500() -> list[dict[str, Any]]:
@@ -438,6 +454,17 @@ async def handle_crypto_opportunity_callback(update, context) -> bool:
 
     interval = parts[2]
     await query.answer("⏳ اسکن ۵۰۰ ارز شروع شد…")
+
+    # Keep Telegram typing notification alive for the whole scan duration.
+    stop_event = asyncio.Event()
+    chat_id = query.message.chat_id if query.message else (update.effective_chat.id if update.effective_chat else None)
+    typing_task = None
+    if chat_id is not None:
+        typing_task = asyncio.create_task(
+            _keep_typing(context.bot, chat_id, stop_event),
+            name=f"opp-typing-{chat_id}",
+        )
+
     try:
         await query.edit_message_text(
             f"⏳ <b>در حال اسکن بازار</b>\nتایم‌فریم: {TIMEFRAMES[interval][0]} ({interval.upper()})\n\n"
@@ -452,8 +479,18 @@ async def handle_crypto_opportunity_callback(update, context) -> bool:
         )
     except Exception as exc:
         logger.exception("crypto opportunity scan failed: %s", exc)
-        await query.edit_message_text(
-            "⚠️ اسکن بازار کامل نشد. داده بازار یا یکی از منابع موقتاً در دسترس نیست؛ دوباره تلاش کن.",
-            reply_markup=opportunity_timeframe_keyboard(),
-        )
+        try:
+            await query.edit_message_text(
+                "⚠️ اسکن بازار کامل نشد. داده بازار یا یکی از منابع موقتاً در دسترس نیست؛ دوباره تلاش کن.",
+                reply_markup=opportunity_timeframe_keyboard(),
+            )
+        except Exception as edit_exc:
+            logger.debug("opportunity error edit failed: %s", edit_exc)
+    finally:
+        stop_event.set()
+        if typing_task is not None:
+            try:
+                await typing_task
+            except Exception as _exc:
+                logger.debug("opportunity typing task cleanup: %s", _exc)
     return True
