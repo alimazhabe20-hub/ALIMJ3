@@ -522,16 +522,6 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("📐 تحلیل ICT", "تحلیل ICT", "ICT", "ict"):
         await _h_ict(update, context, text, user_id)
         return
-    if text in ("🧠 کدوم ارز بخرم؟", "کدوم ارز بخرم؟", "کدام ارز بخرم؟"):
-        from bot.features.market.crypto_opportunity import opportunity_timeframe_keyboard
-        track_usage(user_id, "crypto_opportunity")
-        await update.message.reply_text(
-            "🧠 <b>کدوم ارز بخرم؟</b>\n\n"
-            "تایم‌فریم را انتخاب کن. بعد از انتخاب، جامعه ۵۰۰ ارز برتر بررسی می‌شود و ۵ ستاپ دارای سیگنال لانگ/شورت با تحلیل حرفه‌ای نمایش داده می‌شود.",
-            parse_mode="HTML",
-            reply_markup=opportunity_timeframe_keyboard(),
-        )
-        return
     if text in (
         "📊 نمودار و تحلیل ارز دیجیتال",
         "نمودار و تحلیل ارز دیجیتال",
