@@ -41,22 +41,79 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
     # Weather/Crypto عمدی اینجا مستقیم پاسخ داده نمی‌شوند.
     # V41.1: اجازه بده Capability Router + Function Calling ابزار واقعی را اجرا کند
     # و خود AI نتیجه را به زبان طبیعی برای کاربر بنویسد؛ خروجی خام ابزار کپی نشود.
-    # جستجوی فروشگاهی مستقیم: لینک واقعی را از ماژول خرید می‌گیریم، نه پاسخ حدسی AI.
-    if classify_intent(text) == "product_search" and not classify_intent(text) == "crypto_price":
-        q = re.sub(r"(?:لینک|خرید|قیمت|فروشگاه|محصول|buy|price|shop|link)", " ", text, flags=re.I).strip(" :،,")
-        if len(q) >= 2:
-            notice = await update.message.reply_text("🔎 در حال پیدا کردن فروشگاه‌ها و لینک‌های واقعی...")
-            try:
-                from bot.features.market.shopping import search_shopping
-                result = await search_shopping(q, max_results=8, user_id=user_id)
-                await update.message.reply_text(result)
-            except Exception:
-                logger.exception("product search failed for user=%s", user_id)
-                await update.message.reply_text("⚠️ جستجوی خرید فعلاً در دسترس نیست. چند ثانیه بعد دوباره امتحان کنید.")
-            finally:
-                try: await notice.delete()
-                except Exception: pass
-            return True
+    # جستجوی فروشگاهی مستقیم: درخواست‌های خرید/قیمت محصول باید قبل از AI عمومی
+    # قطعاً وارد موتور جستجوی واقعی شوند. به classify_intent قدیمی تکیه نمی‌کنیم؛
+    # آن classifier برای «ارزان‌ترین»، «اقتصادی»، «بهترین برند/مدل» و چند عبارت
+    # رایج خرید حساسیت کافی نداشت و باعث می‌شد پاسخ حدسی AI تولید شود.
+    shopping_text = (text or "").strip().replace("‌", " ")
+    finance_or_market = re.search(
+        r"(?:بیت.?کوین|bitcoin|اتریوم|ethereum|تتر|usdt|سولانا|solana|"
+        r"رمزارز|کریپتو|crypto|فارکس|forex|طلا|gold|xau(?:usd)?|دلار|usd|یورو|eur|"
+        r"سکه|شاخص|بورس|سهام|بازار|RSI|ADX|ATR|BOS|CHOCH|لانگ|شورت|ترید|معامله|سیگنال)",
+        shopping_text,
+        re.I | re.X,
+    )
+    shopping_cue = re.search(
+        r"(?:خرید|بخر|ارزان(?:ترین)?|ارزان.?قیمت|اقتصادی|به.?صرفه|"
+        r"مقرون.?به.?صرفه|بهترین|برند|مدل|فروشگاه|فروشنده|لینک(?: خرید)?|"
+        r"مقایسه(?:\s+قیمت)?|قیمت\s+(?:این|این محصول|محصول)|"
+        r"قیمت(?:\s+روز)?\s+[^\n]{2,}|buy|cheap|cheapest|best|brand|model|shop|store)",
+        shopping_text,
+        re.I | re.X,
+    )
+    product_word = re.search(
+        r"(?:محصول|کالا|گوشی|موبایل|لپ.?تاپ|کامپیوتر|مانیتور|کیبورد|ماوس|"
+        r"هدفون|هندزفری|تلویزیون|کنسول|پرینتر|مودم|روتر|هارد|SSD|RAM|"
+        r"خمیر\s+سیلیکون|خمیر\s+حرارتی|پاور|کارت\s*گرافیک|CPU|پردازنده|"
+        r"لباس|کفش|ساعت|عطر|لوازم|ابزار|دوربین|میکروفون|صندلی|میز|"
+        r"یخچال|لباسشویی|جاروبرقی|اسپیکر|شارژر|کابل|باتری)",
+        shopping_text,
+        re.I | re.X,
+    )
+    explicit_product_price = bool(
+        re.search(r"(?:قیمت|خرید|لینک|فروشگاه|فروشنده)\b", shopping_text, re.I)
+        and product_word
+    )
+    is_shopping_request = bool(
+        not finance_or_market
+        and (
+            shopping_cue and product_word
+            or explicit_product_price
+            or (product_word and re.search(r"(?:ارزان|اقتصادی|کیفیت|کیفی|مدل|برند)", shopping_text, re.I))
+        )
+    )
+    if is_shopping_request:
+        # فقط کلمات کنترلی را حذف می‌کنیم و نام/مدل محصول را دست‌نخورده نگه می‌داریم.
+        q = re.sub(
+            r"(?:لطفاً|لطفا|می.?خوام|می.?خوام\s+بدونم|"
+            r"خرید|بخر|قیمت|قیمت\s+روز|فروشگاه|فروشنده|محصول|کالا|"
+            r"لینک(?:\s+خرید)?|ارزان(?:ترین)?|ارزان.?قیمت|اقتصادی|به.?صرفه|"
+            r"مقرون.?به.?صرفه|بهترین|برند(?:[‌ ]*ها)?|مدل(?:[‌ ]*ها)?|کیفیت|باکیفیت|با\s+کیفیت|"
+            r"buy|cheap|cheapest|best|brand|model|shop|store)",
+            " ",
+            shopping_text,
+            flags=re.I | re.X,
+        )
+        q = re.sub(r"\s+", " ", q).strip(" :،,؛؟?.")
+        if len(q) < 2:
+            q = shopping_text
+        notice = await update.message.reply_text("🔎 در حال پیدا کردن فروشگاه‌ها و لینک‌های واقعی...")
+        try:
+            from bot.features.market.shopping import search_shopping
+            result = await search_shopping(q, max_results=8, user_id=user_id)
+            # نتیجه موتور خرید تنها منبع قیمت است؛ در صورت نبود داده، همان پیام صادقانه
+            # موتور را نمایش می‌دهیم و اجازه نمی‌دهیم AI عمومی آن را با قیمت حدسی پر کند.
+            await update.message.reply_text(result)
+        except Exception:
+            logger.exception("product search failed for user=%s query=%r", user_id, q)
+            await update.message.reply_text(
+                "⚠️ جستجوی زنده خرید فعلاً در دسترس نیست. "
+                "قیمت تقریبی یا حدسی ارائه نمی‌کنم؛ چند لحظه بعد دوباره امتحان کنید."
+            )
+        finally:
+            try: await notice.delete()
+            except Exception: pass
+        return True
     # Market Intelligence: تحلیل چندتایم‌فریمی با داده زنده، فقط وقتی درخواست تحلیل روشن است.
     market_match = re.search(r"(?:تحلیل|آنالیز|analyze|analysis)\s+(?:ارز|رمزارز|crypto)?\s*([A-Za-z]{2,12}|بیت\s*کوین|اتریوم|تتر|سولانا|ریپل|دوج\s*کوین|بایننس|کاردانو)\b", text, re.I)
     if market_match:
