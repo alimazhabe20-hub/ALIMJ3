@@ -112,6 +112,32 @@ async def _handle_special_ai_intents(update, context, user_id, text: str) -> boo
     import re
     from io import BytesIO
     from bot.database import add_reminder
+
+    # HARD PRODUCT/PRICE GATE: product price requests must never fall through to
+    # general AI knowledge. The shopping engine is the sole source for live
+    # product prices, availability and seller links.
+    try:
+        from bot.handlers.messages_parts.part_005__handle_special_ai_intents import (
+            is_live_product_request,
+            run_live_product_search,
+        )
+        if is_live_product_request(text):
+            handled = await run_live_product_search(update, user_id, text)
+            if handled:
+                return True
+    except Exception as _shopping_gate_exc:
+        logger.exception("live product gate failed for user=%s: %s", user_id, _shopping_gate_exc)
+        # Do NOT fall through to generic AI after a product-price request has
+        # been positively identified. The helper itself returns a safe error.
+        try:
+            if is_live_product_request(text):
+                await update.message.reply_text(
+                    "⚠️ استعلام زنده قیمت محصول فعلاً در دسترس نیست؛ قیمت حدسی ارائه نمی‌کنم."
+                )
+                return True
+        except Exception:
+            pass
+
     # یادآوری
     rem = parse_natural_reminder(text)
     if rem:
