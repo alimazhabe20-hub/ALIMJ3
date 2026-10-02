@@ -73,6 +73,11 @@ class Config:
     RELEASE_VERSION = os.getenv("RELEASE_VERSION", "").strip()
     DEPLOYMENT_ID = os.getenv("DEPLOYMENT_ID", os.getenv("RENDER_GIT_COMMIT", "")).strip()
     STARTUP_CHECK = os.getenv("STARTUP_CHECK", "true").strip().lower() not in {"0", "false", "no", "off"}
+    # Optional Local Bot API Server. Disabled by default; standard Telegram API remains unchanged.
+    TELEGRAM_LOCAL_MODE = os.getenv("TELEGRAM_LOCAL_MODE", "false").strip().lower() in {"1", "true", "yes", "on"}
+    TELEGRAM_API_BASE_URL = os.getenv("TELEGRAM_API_BASE_URL", "https://api.telegram.org/bot").strip().rstrip("/")
+    TELEGRAM_API_FILE_BASE_URL = os.getenv("TELEGRAM_API_FILE_BASE_URL", "https://api.telegram.org/file/bot").strip().rstrip("/")
+    TELEGRAM_MAX_UPLOAD_BYTES = max(0, int(os.getenv("TELEGRAM_MAX_UPLOAD_BYTES", "0") or 0))
     # V78 Update Center (read-only remote release manifest).
     UPDATE_MANIFEST_URL = os.getenv("UPDATE_MANIFEST_URL", "").strip()
     UPDATE_CHECK_TTL = max(60, int(os.getenv("UPDATE_CHECK_TTL", "1800")))
