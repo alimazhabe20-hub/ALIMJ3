@@ -1,6 +1,6 @@
 # Auto-split part 5: download_from_ytdlp
 async def download_from_ytdlp(url: str, temp_dir: str | None = None) -> str:
-    """Exact logic from insta-downloader-bot/downloaders/ytdlp.py (+ cookies/proxy)."""
+    """Shared fast yt-dlp path for Instagram/social URLs (+ cookies/proxy)."""
     created = False
     if not temp_dir:
         temp_dir = tempfile.mkdtemp(prefix="alimj3_ydl_")
@@ -18,14 +18,13 @@ async def download_from_ytdlp(url: str, temp_dir: str | None = None) -> str:
             "no_warnings": True,
             "noplaylist": True,
             "merge_output_format": "mp4",
-            # Keep the fast path responsive while allowing segmented media
-            # downloads to use several connections.
-            "concurrent_fragment_downloads": max(1, min(int(os.getenv("YTDLP_CONCURRENT_FRAGMENTS", "4")), 8)),
-            "http_chunk_size": min(max(int(os.getenv("YTDLP_HTTP_CHUNK_SIZE", str(10 * 1024 * 1024))), 0), 10 * 1024 * 1024),
-            "buffersize": 1024 * 1024,
+            "concurrent_fragment_downloads": max(1, min(int(os.getenv("DOWNLOADER_CONCURRENT_FRAGMENTS", "4")), 8)),
+            "http_chunk_size": min(max(int(os.getenv("DOWNLOADER_HTTP_CHUNK_SIZE", str(10 * 1024 * 1024))), 0), 10 * 1024 * 1024),
+            "buffersize": max(64 * 1024, int(os.getenv("DOWNLOADER_BUFFER_SIZE", str(1024 * 1024)))),
             "retries": 5,
             "fragment_retries": 5,
             "continuedl": True,
+            "ignoreconfig": True,
             "http_headers": {
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -41,6 +40,7 @@ async def download_from_ytdlp(url: str, temp_dir: str | None = None) -> str:
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
         if proxy:
             ydl_opts["proxy"] = proxy
+        ydl_opts["extractor_args"] = {"instagram": {"app_id": "web"}}
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
