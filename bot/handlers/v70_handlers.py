@@ -24,9 +24,13 @@ async def handle_downloader_url(update:Update,context:ContextTypes.DEFAULT_TYPE,
         result=await download(text)
         path=result['path']
         await notice.edit_text(f"✅ آماده شد\n📄 {result['title']}\n📦 {result['size']/1024/1024:.1f} MB\n\nدر حال ارسال…")
-        with open(path,'rb') as fh:
-            await update.message.reply_document(document=fh,filename=result['title'][:120],caption='📥 دانلودر فایل • روز زیبا')
+        from bot.services.telegram_upload import send_media
+        await send_media(update.message, path, title=result['title'])
     except Exception as e:
+        if str(e) in {"telegram_standard_api_limit", "telegram_upload_too_large"}:
+            from bot.services.telegram_upload import upload_error_message
+            await update.message.reply_text(upload_error_message(str(e)))
+            return True
         code=str(e) if str(e) in {'invalid_url','blocked_host','dns_error','rate_limited','site_blocked','access_restricted','unsupported','too_large','yt_dlp_missing','failed'} else 'failed'
         logger.warning('downloader failed: %s',code)
         await update.message.reply_text(user_message(code))
