@@ -1,78 +1,92 @@
-"""Freshness policy for Rooze Ziba AI.
+"""Freshness routing for AI requests.
 
-Decides when an answer must be grounded in a live web search instead of
-relying on the model's training knowledge. This module intentionally stays
-small so freshness policy can evolve without touching provider code.
+Requests whose answer can change with time must use a live tool before the model
+is allowed to answer.  This module deliberately does not contain provider logic;
+it only classifies the user request and supplies a safe instruction.
 """
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 
-# Explicit freshness words cover Persian, English, and common user shorthand.
-_EXPLICIT = re.compile(
-    r"(?:"
-    r"امروز|امشب|الان|اکنون|فعلی|لحظه.?ای|همین.?الان|جدیدترین|آخرین|تازه|جدید|به.?روز|بروز|روز.?آمد|"
-    r"خبر|اخبار|آپدیت|به.?روزرسانی|نسخه.?جدید|عرضه|معرفی|منتشر|موجودی|در.?دسترس|قیمت|نرخ|ارزش|"
-    r"today|tonight|now|right\s*now|current|latest|newest|recent|fresh|live|real.?time|"
-    r"news|price|rate|value|release|released|launch|launched|available|availability|stock|update|version"
-    r")",
+@dataclass(frozen=True)
+class FreshnessDecision:
+    required: bool
+    tool: str | None
+    reason: str
+
+
+_LIVE_MARKERS = re.compile(
+    r"(?:امروز|الان|همین الان|فعلی|فعلاً|فعلیه|جدیدترین|آخرین|جدیدترین|به.?روز|به.?روزترین|روز|این روزها|2026|2027|latest|current|today|now|newest|recent|live|real.?time)",
     re.I,
 )
-
-# Requests about products/services are frequently time-sensitive even when the
-# user does not explicitly say "latest". The model must verify these online.
-_PRODUCT = re.compile(
-    r"(?:"
-    r"آیفون|ایفون|اپل|سامسونگ|شیائومی|پوکو|وان.?پلاس|گوگل.?پیکسل|هواوی|لپ.?تاپ|گوشی|موبایل|"
-    r"iphone|ipad|macbook|apple|samsung|xiaomi|poco|oneplus|pixel|huawei|laptop|phone|gpu|cpu|"
-    r"کارت.?گرافیک|پردازنده|کنسول|پلی.?استیشن|ایکس.?باکس|ps[45]|xbox|"
-    r"محصول|کالا|فروشگاه|خرید|فروش|قیمت.?فروش|ارزان|گران|موجودی|"
-    r"product|shopping|shop|buy|sell|store"
-    r")",
+_NEWS_MARKERS = re.compile(
+    r"(?:خبر|اخبار|آخرین خبر|خبر جدید|چه خبر|news|breaking|headline)", re.I
+)
+_PRODUCT_MARKERS = re.compile(
+    r"(?:خرید|بخر|فروشگاه|فروشنده|قیمت.*(?:گوشی|آیفون|iphone|لپ.?تاپ|تلویزیون|کفش|خمیر|محصول|کالا)|"
+    r"(?:گوشی|آیفون|iphone|لپ.?تاپ|تلویزیون|کفش|خمیر|محصول|کالا).*(?:قیمت|خرید|موجودی)|"
+    r"قیمت روز محصول|لینک خرید|ارزان.?ترین|موجودی|price.*product|buy|shop)",
     re.I,
 )
-
-# Market/financial data is always live-sensitive.
-_MARKET = re.compile(
-    r"(?:"
-    r"بیت.?کوین|اتریوم|کریپتو|رمزارز|ارز دیجیتال|دلار|یورو|پوند|طلا|سکه|بورس|سهام|بازار|"
-    r"bitcoin|btc|ethereum|eth|crypto|forex|gold|silver|stock|stocks|market|usd|eur|gbp|"
-    r"نفت|oil|nasdaq|s&p|dow\s*jones"
-    r")",
+_MARKET_MARKERS = re.compile(
+    r"(?:بیت.?کوین|bitcoin|اتریوم|ethereum|تتر|usdt|کریپتو|رمزارز|طلا|xau|دلار|یورو|سکه|ارز|"
+    r"قیمت.*(?:دلار|یورو|طلا|سکه|بیت|اتریوم|تتر)|نرخ.*(?:دلار|یورو|ارز))",
     re.I,
+)
+_WEATHER_MARKERS = re.compile(
+    r"(?:هوا|آب.?وهوا|دمای|باران|برف|رطوبت|weather|forecast|air quality|کیفیت هوا)", re.I
 )
 
 
-def requires_live_shopping(query: str) -> bool:
-    """Return True when the request is asking for live product/marketplace data."""
-    text = (query or "").strip()
-    if not text:
+def is_live_required(text: str) -> bool:
+    """Return True when answering from model memory would be unsafe/stale."""
+    q = (text or "").strip()
+    if not q:
         return False
-    return bool(re.search(
-        r"(?:قیمت|چنده|چند\s*هزار|چند\s*تومنه|خرید|فروشگاه|فروشنده|لینک\s*خرید|ارزان.?ترین|موجودی|تخفیف|\bprice\b|\bbuy\b|\bshop\b|\bstore\b|\bstock\b|\bavailable\b)",
-        text, re.I,
-    ) and _PRODUCT.search(text))
+    return bool(
+        _LIVE_MARKERS.search(q)
+        or _NEWS_MARKERS.search(q)
+        or _PRODUCT_MARKERS.search(q)
+        or _MARKET_MARKERS.search(q)
+        or _WEATHER_MARKERS.search(q)
+    )
 
 
-def requires_live_web(query: str) -> bool:
-    """Return True when the user's request should be answered from live web data."""
-    text = (query or "").strip()
-    if not text:
-        return False
-    if _EXPLICIT.search(text) or _PRODUCT.search(text) or _MARKET.search(text):
-        return True
-
-    # A product/model question such as "iphone 18 pro max چند؟" may contain no
-    # explicit freshness word. Product-looking text with a model number should
-    # still be verified online.
-    if re.search(r"(?:iphone|آیفون|ایفون|galaxy|گلکسی|pixel|پیکسل|macbook|ps\s*[45]|xbox)\s*[-\w]*\d", text, re.I):
-        return True
-    return False
+def classify(text: str) -> FreshnessDecision:
+    q = (text or "").strip()
+    if not is_live_required(q):
+        return FreshnessDecision(False, None, "static_or_general")
+    if _PRODUCT_MARKERS.search(q):
+        return FreshnessDecision(True, "search_shopping", "product/shopping data can change")
+    if _MARKET_MARKERS.search(q):
+        return FreshnessDecision(True, None, "market data can change")
+    if _WEATHER_MARKERS.search(q):
+        return FreshnessDecision(True, None, "weather data can change")
+    return FreshnessDecision(True, "web_search", "time-sensitive information requires live verification")
 
 
-def freshness_query(query: str) -> str:
-    """Add today's UTC date to live searches so results are time-aware."""
-    day = datetime.now(timezone.utc).date().isoformat()
-    return f"{query.strip()} latest current information {day}".strip()
+def today_utc() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def build_instruction(text: str) -> str:
+    decision = classify(text)
+    if not decision.required:
+        return ""
+    tool_line = (
+        f"ابزار اجباری برای این درخواست: {decision.tool}."
+        if decision.tool
+        else "ابتدا از ابزار زنده/مرتبط ثبت‌شده استفاده کن و نتیجه آن را مبنا قرار بده."
+    )
+    return (
+        "\n\n[LIVE DATA REQUIRED]\n"
+        f"این سؤال زمان‌مند است ({decision.reason}). {tool_line} "
+        "قبل از پاسخ نهایی، داده زنده را بررسی کن. از دانش قدیمی مدل برای قیمت، خبر، "
+        "موجودی، وضعیت فعلی یا مشخصات عرضه‌شده به‌عنوان واقعیت امروز استفاده نکن. "
+        "اگر ابزار زنده شکست خورد یا داده قابل تأیید نداد، صریحاً بگو اطلاعات فعلی قابل تأیید نیست "
+        "و هیچ عدد/خبر/موجودی حدسی ارائه نکن.\n"
+        f"تاریخ مرجع سیستم: {today_utc()} (UTC)."
+    )
