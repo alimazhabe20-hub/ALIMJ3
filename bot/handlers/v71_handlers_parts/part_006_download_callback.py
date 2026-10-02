@@ -41,34 +41,19 @@ async def download_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         if notice:
             try: await notice.edit_text(f"{ux_text(_dl_lang(update), 'ready')}\n📄 {result['title']}\n📦 {result['size']/1024/1024:.1f}MB\n\n{ux_text(_dl_lang(update), 'sending')}")
             except Exception: pass
-        from pathlib import Path
-        media_path = Path(result["path"])
-        video_exts = {".mp4", ".m4v", ".mov", ".webm", ".mkv"}
-        audio_exts = {".mp3", ".m4a", ".aac", ".ogg", ".wav", ".opus"}
-        with media_path.open("rb") as fh:
-            if media_path.suffix.lower() in video_exts:
-                await q.message.reply_video(
-                    video=fh,
-                    caption="📥 دانلودر فایل • روز زیبا",
-                    supports_streaming=True,
-                    filename=result["title"][:120],
-                )
-            elif media_path.suffix.lower() in audio_exts:
-                await q.message.reply_audio(
-                    audio=fh,
-                    caption="📥 دانلودر فایل • روز زیبا",
-                    filename=result["title"][:120],
-                )
-            else:
-                await q.message.reply_document(
-                    document=fh,
-                    filename=result["title"][:120],
-                    caption="📥 دانلودر فایل • روز زیبا",
-                )
+        from bot.services.telegram_upload import send_media
+        await send_media(q.message, result["path"], title=result["title"])
         return True
     except Exception as exc:
         code=str(exc)
-        if code not in {"invalid_url","blocked_host","dns_error","rate_limited","site_blocked","access_restricted","unsupported","too_large","yt_dlp_missing","youtube_disabled","failed"}: code="failed"
+        if code in {"telegram_standard_api_limit", "telegram_upload_too_large"}:
+            from bot.services.telegram_upload import upload_error_message
+            message = upload_error_message(code)
+            if job_id: update_download(job_id, status="failed", error_code=code)
+            logger.warning("telegram upload rejected: %s", code)
+            await q.message.reply_text(message)
+            return True
+        if code not in {"invalid_url","blocked_host","dns_error","rate_limited","site_blocked","access_restricted","unsupported","too_large","yt_dlp_missing","failed"}: code="failed"
         if job_id: update_download(job_id, status="failed", error_code=code)
         logger.warning("downloader callback failed: %s",code)
         await q.message.reply_text(user_message(code))

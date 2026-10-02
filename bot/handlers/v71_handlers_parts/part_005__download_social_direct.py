@@ -23,30 +23,25 @@ async def _download_social_direct(update: Update, context: ContextTypes.DEFAULT_
 
         try:
             await notice.edit_text("📤 در حال ارسال...")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("non-fatal exception: %s", exc)
 
-        with open(path, "rb") as fh:
-            if is_video_path(path):
-                await update.message.reply_video(
-                    video=fh,
-                    caption="📥 دانلودر • روز زیبا",
-                    supports_streaming=True,
-                )
-            else:
-                from pathlib import Path as _P
-                await update.message.reply_document(
-                    document=fh,
-                    filename=_P(path).name[:120],
-                    caption="📥 دانلودر • روز زیبا",
-                )
+        from bot.services.telegram_upload import send_media
+        await send_media(update.message, path, title=__import__("pathlib").Path(path).name)
         try:
             await notice.delete()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("non-fatal exception: %s", exc)
     except Exception as exc:
         logger.exception("social direct download failed: %s", exc)
         err = str(exc)
+        if err in {"telegram_standard_api_limit", "telegram_upload_too_large"}:
+            from bot.services.telegram_upload import upload_error_message
+            try:
+                await notice.edit_text(upload_error_message(err))
+            except Exception:
+                await update.message.reply_text(upload_error_message(err))
+            return
         low = err.lower()
         if "gallery-dl" in low and ("نصب" in err or "not found" in low or "no such file" in low):
             code = "gallery_dl_missing"
