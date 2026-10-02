@@ -1,6 +1,6 @@
 [project]
 name = "rooze-ziba"
-version = "78.0.0"
+version = "80.2.0"
 description = "Production-grade multilingual Telegram assistant with AI, tools, memory, and agents"
 readme = "README.md"
 requires-python = ">=3.11"

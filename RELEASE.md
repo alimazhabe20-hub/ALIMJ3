@@ -1,6 +1,6 @@
-# ALIMJ3 V78.0.0 — Ultimate Final Release
+# ALIMJ3 V80.2.0 — Production Release
 
-Version: `78.0.0`
+Version: `80.2.0`
 
 ## Scope
 V78 is the V77 platform plus the production-safe Update Center. It keeps the bot free for all users and supports Persian, English and Arabic only. Automatic long-conversation summarization is intentionally excluded.
