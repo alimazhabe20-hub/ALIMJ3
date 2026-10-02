@@ -10,12 +10,12 @@ MORE_DOWNLOAD_LABEL='📥 دانلودر فایل'
 
 async def downloader_entry(update:Update,context:ContextTypes.DEFAULT_TYPE):
     context.user_data['waiting_for']='downloader_url'
-    await update.message.reply_text('📥 دانلودر فایل حرفه‌ای\n\nلینک عمومی را بفرستید؛ YouTube، Instagram، TikTok، Facebook و بسیاری از سایت‌های دیگر و همچنین لینک مستقیم فایل پشتیبانی می‌شود.\n\n⚠️ محدودیت سایت، CAPTCHA، محتوای خصوصی یا ورود اجباری دور زده نمی‌شود. سقف ارسال مستقیم: ۴۸MB.')
+    await update.message.reply_text('📥 دانلودر فایل حرفه‌ای\n\nلینک عمومی را بفرستید؛ Instagram، TikTok، Facebook و بسیاری از سایت‌های دیگر و همچنین لینک مستقیم فایل پشتیبانی می‌شود.\n\n⚠️ محدودیت سایت، CAPTCHA، محتوای خصوصی یا ورود اجباری دور زده نمی‌شود. سقف ارسال مستقیم: ۴۸MB.')
 
 async def handle_downloader_url(update:Update,context:ContextTypes.DEFAULT_TYPE,text:str)->bool:
     if not is_url(text): return False
     # Only activate after button or an explicit URL; this prevents stealing generic chat links.
-    if context.user_data.get('waiting_for')!='downloader_url' and not re.search(r'(youtube|youtu\.be|instagram|tiktok|facebook|twitter|x\.com|vimeo|dailymotion)',text,re.I):
+    if context.user_data.get('waiting_for')!='downloader_url' and not re.search(r'(instagram|tiktok|facebook|twitter|x\.com|vimeo|dailymotion)',text,re.I):
         return False
     context.user_data.pop('waiting_for',None)
     notice=await update.message.reply_text('⏬ در حال بررسی لینک و آماده‌سازی فایل…')
