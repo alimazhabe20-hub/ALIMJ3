@@ -1,16 +1,19 @@
 # Auto-split part 11: web_search
 async def web_search(query: str, max_results: int = 5) -> str:
-    """Live web search with freshness metadata and useful result snippets."""
+    """Live web search with freshness metadata and bounded snippets.
+
+    This is intentionally a discovery tool. It never invents a result when the
+    network fails and it marks the response as unavailable so the AI layer can
+    refuse to present stale model knowledge as current data.
+    """
+    from datetime import datetime, timezone
+
     query = (query or "").strip()
     if not query:
-        return "عبارت جستجو خالی است."
-
-    try:
-        from bot.services.ai_freshness import freshness_query
-        live_query = freshness_query(query)
-    except Exception:
-        live_query = query
-
+        return "LIVE_DATA_UNAVAILABLE: عبارت جستجو خالی است."
+    max_results = max(1, min(int(max_results or 5), 10))
+    date_tag = datetime.now(timezone.utc).date().isoformat()
+    live_query = f"{query} (current as of {date_tag})"
     try:
         import httpx
         from bs4 import BeautifulSoup
@@ -23,42 +26,27 @@ async def web_search(query: str, max_results: int = 5) -> str:
                 headers={"User-Agent": "Mozilla/5.0 (compatible; RoozeZibaBot/1.0)"},
             )
             r.raise_for_status()
-
         soup = BeautifulSoup(r.text, "html.parser")
+        result_nodes = soup.select(".result")[:max_results]
         results = []
-        for item in soup.select(".result")[: max_results]:
-            a = item.select_one("a.result__a")
+        for node in result_nodes:
+            a = node.select_one("a.result__a")
             if not a:
                 continue
             title = a.get_text(" ", strip=True)
             href = a.get("href") or ""
-            snippet_node = item.select_one(".result__snippet")
+            snippet_node = node.select_one(".result__snippet")
             snippet = snippet_node.get_text(" ", strip=True) if snippet_node else ""
             block = f"• {title}\n  {href}"
             if snippet:
                 block += f"\n  خلاصه: {snippet}"
             results.append(block)
-
         if not results:
-            for sn in soup.select(".result__snippet")[:max_results]:
-                text = sn.get_text(" ", strip=True)
-                if text:
-                    results.append("• " + text)
-
-        if not results:
-            return (
-                "LIVE_WEB_NO_RESULT: برای این درخواست نتیجه قابل اتکایی از وب پیدا نشد. "
-                "از دانش قبلی مدل برای ادعای اطلاعات فعلی استفاده نکن."
-            )
-
+            return f"LIVE_DATA_UNAVAILABLE: برای «{query}» نتیجه قابل اتکایی پیدا نشد."
         return (
-            "LIVE_WEB_OK: نتایج وب برای اطلاعات زمان‌مند. "
-            "این نتایج بر دانش قدیمی مدل اولویت دارند.\n"
-            f"جستجو: {live_query}\n\n" + "\n\n".join(results)
+            f"LIVE_WEB_RESULTS (searched {date_tag} UTC) برای «{query}»:\n\n"
+            + "\n\n".join(results)
         )
     except Exception as e:
         logger.warning("web_search failed: %s", e, exc_info=True)
-        return (
-            "LIVE_WEB_FAILED: جستجوی زنده وب در دسترس نیست. "
-            "برای اطلاعاتی که نیاز به به‌روز بودن دارند، حدس نزن و آن را به‌عنوان اطلاعات فعلی ارائه نکن."
-        )
+        return "LIVE_DATA_UNAVAILABLE: جستجوی وب فعلاً در دسترس نیست؛ اطلاعات قدیمی را جایگزین نکن."
