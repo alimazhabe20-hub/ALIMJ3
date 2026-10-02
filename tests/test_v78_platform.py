@@ -16,5 +16,6 @@ def test_v71_handler_imports_detect_language_from_v71_platform():
 
 
 def test_v78_release_is_declared():
-    text = Path("bot/release.py").read_text(encoding="utf-8")
-    assert 'VERSION = "78.0.0"' in text
+    # V78 is historical; the runtime release is newer.
+    text = Path("V78_RELEASE.md").read_text(encoding="utf-8")
+    assert "V78.0.0" in text
