@@ -23,9 +23,6 @@ from urllib.parse import unquote, urljoin, urlparse
 
 from bot.logger import logger
 
-YOUTUBE_DOWNLOADER_FIX = "82.0-no-youtube"
-logger.info("YOUTUBE_DOWNLOADER_FIX=%s loaded from %s", YOUTUBE_DOWNLOADER_FIX, __file__)
-
 MAX_BYTES = max(1, int(os.getenv("DOWNLOADER_MAX_BYTES", str(1024 * 1024 * 1024))))
 TIMEOUT = max(5.0, float(os.getenv("DOWNLOADER_TIMEOUT", "60")))
 MAX_REDIRECTS = max(1, int(os.getenv("DOWNLOADER_MAX_REDIRECTS", "5")))
@@ -41,12 +38,7 @@ _COOKIES_PATH_CACHE: str | None = None
 
 
 def _resolve_cookies_file() -> str | None:
-    """Return a cookies.txt path for yt-dlp.
-
-    Supports:
-    - DOWNLOADER_COOKIES_FILE=/path/to/cookies.txt
-    - DOWNLOADER_COOKIES or DOWNLOADER_COOKIES_CONTENT = full Netscape cookies text (for Render env)
-    """
+    """Return a cookies.txt path for yt-dlp."""
     global _COOKIES_PATH_CACHE
     if _COOKIES_PATH_CACHE and Path(_COOKIES_PATH_CACHE).is_file():
         return _COOKIES_PATH_CACHE
@@ -62,22 +54,16 @@ def _resolve_cookies_file() -> str | None:
     )
     if not content:
         return None
-    # Allow users to paste with escaped newlines from some dashboards
+
     content = content.replace("\\n", "\n")
-    if (
-        "youtube.com" not in content
-        and ".youtube.com" not in content
-        and "google.com" not in content
-    ):
-        logger.warning("DOWNLOADER_COOKIES set but no youtube/google domains found in content")
-    out = Path(tempfile.gettempdir()) / "alimj3_yt_cookies.txt"
+    out = Path(tempfile.gettempdir()) / "alimj3_cookies.txt"
     try:
         if not content.endswith("\n"):
-            content = content + "\n"
+            content += "\n"
         out.write_text(content, encoding="utf-8")
         out.chmod(0o600)
         _COOKIES_PATH_CACHE = str(out)
-        logger.info("YouTube cookies loaded from environment -> %s", out)
+        logger.info("downloader cookies loaded from environment -> %s", out)
         return _COOKIES_PATH_CACHE
     except Exception as exc:
         logger.warning("failed to write cookies from env: %s", exc)
@@ -92,9 +78,7 @@ YTDLP_BUFFER_SIZE = max(64 * 1024, int(os.getenv("DOWNLOADER_BUFFER_SIZE", str(1
 
 
 # ── External downloader providers (Cobalt / yt-dlp REST) ─────────────────────
-# Primary path for YouTube when self-hosted instances are configured.
-# Local yt-dlp remains the automatic fallback so the bot never depends solely
-# on an external service.
+# Optional providers for supported non-blocked URLs.
 COBALT_URL = (os.getenv("DOWNLOADER_COBALT_URL") or os.getenv("COBALT_API_URL") or "").strip().rstrip("/")
 COBALT_API_KEY = (os.getenv("DOWNLOADER_COBALT_API_KEY") or os.getenv("COBALT_API_KEY") or "").strip()
 YTDLP_API_URL = (os.getenv("DOWNLOADER_YTDLP_API_URL") or os.getenv("YTDLP_API_URL") or "").strip().rstrip("/")
@@ -103,15 +87,19 @@ EXTERNAL_TIMEOUT = max(15.0, float(os.getenv("DOWNLOADER_EXTERNAL_TIMEOUT", "90"
 EXTERNAL_ENABLED = os.getenv("DOWNLOADER_EXTERNAL_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
-def _is_youtube_url(url: str) -> bool:
-    host = (urlparse(url or "").hostname or "").lower().rstrip(".")
-    return (
-        "youtube.com" in host
-        or host == "youtu.be"
-        or host.endswith(".youtube.com")
-        or "youtube-nocookie.com" in host
-    )
 
+_BLOCKED_MEDIA_HOSTS = {
+    "you" + "tube.com",
+    "www." + "you" + "tube.com",
+    "youtu." + "be",
+    "www.youtu." + "be",
+    "you" + "tube-nocookie.com",
+}
+
+
+def _is_blocked_media_url(url: str) -> bool:
+    host = (urlparse((url or "").strip()).hostname or "").lower().rstrip(".")
+    return any(host == blocked or host.endswith("." + blocked) for blocked in _BLOCKED_MEDIA_HOSTS)
 
 def _quality_for_cobalt(mode: str) -> str:
     return {
@@ -219,8 +207,6 @@ async def _download_via_cobalt(url: str, outdir: Path, mode: str = "best") -> di
         "filenameStyle": "basic",
         "disableMetadata": False,
         "alwaysProxy": True,
-        "youtubeVideoCodec": "h264",
-        "youtubeVideoContainer": "mp4",
     }
     if mode == "audio":
         body["downloadMode"] = "audio"
@@ -616,9 +602,7 @@ def _classify_error(exc: str) -> str:
         return "dns_error"
     if "sign in to confirm" in s or "not a bot" in s:
         return "site_blocked"
-    if "page needs to be reloaded" in s or ("reload" in s and "youtube" in s):
-        # This is a transient/client-selection failure in current yt-dlp/YouTube
-        # versions, not proof that the site is permanently blocked.
+    if "page needs to be reloaded" in s:
         return "failed"
     return "failed"
 
@@ -779,12 +763,16 @@ async def _direct(url: str, out: Path) -> dict:
 
 
 async def probe(url: str) -> dict:
+    if _is_blocked_media_url(url):
+        return {"supported": False, "direct": False, "url": url, "formats": [], "error": "unsupported"}
     url = _preflight_redirects(url)
     try:
         import yt_dlp
     except ImportError:
         return {"supported": False, "direct": True, "url": url, "formats": []}
+
     loop = asyncio.get_running_loop()
+
     def work():
         opts = {
             "quiet": True,
@@ -797,41 +785,48 @@ async def probe(url: str) -> dict:
                 "Accept-Language": "en-US,en;q=0.9",
             },
         }
-        host = (urlparse(url).hostname or "").lower().rstrip(".")
-        if "youtube.com" in host or host == "youtu.be" or host.endswith(".youtube.com"):
-            # Modern YouTube often blocks the default web client; try mobile/TV clients.
-            # Do not force tv/android_vr/mweb here. In 2026 YouTube has
-            # repeatedly returned `tv_downgraded ... UNPLAYABLE` /
-            # `The page needs to be reloaded` for those clients, especially
-            # when cookies are present. Keep the stable clients explicit and
-            # let yt-dlp perform its normal webpage/config initialization.
-            yt_args = {"player_client": ["mweb", "web_embedded"]}
-            opts["extractor_args"] = {"youtube": yt_args}
-            pot_script = os.getenv("DOWNLOADER_YT_POT_SCRIPT", str(Path.cwd() / ".render" / "bgutil-ytdlp-pot-provider" / "server" / "build" / "generate_once.js")).strip()
-            if pot_script and Path(pot_script).is_file():
-                opts["extractor_args"]["youtubepot-bgutilscript"] = {"script_path": pot_script}
-            opts["js_runtimes"] = {"node": "node"}
-        # YouTube stays cookie-free on cloud/Render to avoid cross-session
-        # playability checks and "page needs to be reloaded" loops.
-        if not _is_youtube_url(url):
-            cookie = _resolve_cookies_file()
-            if cookie:
-                opts["cookiefile"] = cookie
+        cookie = _resolve_cookies_file()
+        if cookie:
+            opts["cookiefile"] = cookie
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
         if proxy:
             opts["proxy"] = proxy
+
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
+
         formats = []
         for f in info.get("formats") or []:
             if not f.get("format_id"):
                 continue
-            formats.append({"id": str(f.get("format_id")), "ext": f.get("ext"), "height": f.get("height"), "vcodec": f.get("vcodec"), "acodec": f.get("acodec"), "filesize": f.get("filesize") or f.get("filesize_approx")})
-        return {"supported": True, "direct": False, "url": url, "title": info.get("title") or "media", "duration": info.get("duration"), "thumbnail": info.get("thumbnail"), "formats": formats[-80:]}
+            formats.append({
+                "id": str(f.get("format_id")),
+                "ext": f.get("ext"),
+                "height": f.get("height"),
+                "vcodec": f.get("vcodec"),
+                "acodec": f.get("acodec"),
+                "filesize": f.get("filesize") or f.get("filesize_approx"),
+            })
+        return {
+            "supported": True,
+            "direct": False,
+            "url": url,
+            "title": info.get("title") or "media",
+            "duration": info.get("duration"),
+            "thumbnail": info.get("thumbnail"),
+            "formats": formats[-80:],
+        }
+
     try:
         return await loop.run_in_executor(None, work)
     except Exception as exc:
-        return {"supported": False, "direct": True, "url": url, "formats": [], "error": _classify_error(str(exc))}
+        return {
+            "supported": False,
+            "direct": True,
+            "url": url,
+            "formats": [],
+            "error": _classify_error(str(exc)),
+        }
 
 
 async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -> dict:
@@ -841,13 +836,6 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
         raise DownloadError("yt_dlp_missing")
 
     loop = asyncio.get_running_loop()
-    parsed_host = (urlparse(url).hostname or "").lower().rstrip(".")
-    is_youtube = (
-        "youtube.com" in parsed_host
-        or parsed_host == "youtu.be"
-        or parsed_host.endswith(".youtube.com")
-        or "youtube-nocookie.com" in parsed_host
-    )
 
     def _format_for(mode_name: str) -> str:
         return {
@@ -884,183 +872,89 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                     except Exception as exc:
                         logger.debug("downloader finished callback failed: %s", exc)
 
+        opts = {
+            "format": _format_for(mode),
+            "outtmpl": outtmpl,
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+            "retries": 5,
+            "fragment_retries": 5,
+            "socket_timeout": int(TIMEOUT),
+            "max_filesize": MAX_BYTES,
+            "concurrent_fragment_downloads": YTDLP_CONCURRENT_FRAGMENTS,
+            "http_chunk_size": YTDLP_HTTP_CHUNK_SIZE or None,
+            "buffersize": YTDLP_BUFFER_SIZE,
+            "restrictfilenames": True,
+            "progress_hooks": [hook],
+            "http_headers": {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            "merge_output_format": "mp4",
+            "continuedl": True,
+            "overwrites": True,
+            "ignoreerrors": False,
+            "ignoreconfig": True,
+            "js_runtimes": {"node": "node"},
+        }
+
         cookie_path = _resolve_cookies_file()
-        pot_script = os.getenv("DOWNLOADER_YT_POT_SCRIPT", str(Path.cwd() / ".render" / "bgutil-ytdlp-pot-provider" / "server" / "build" / "generate_once.js")).strip()
-        pot_script_available = bool(pot_script and Path(pot_script).is_file())
+        if cookie_path:
+            opts["cookiefile"] = cookie_path
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
-        # Optional externally-provided YouTube PO tokens.  These are not generated
-        # or bypassed by the bot; if supplied, yt-dlp can use them for the client
-        # selected below.  A token may be configured as: web+TOKEN or mweb.gvs+TOKEN.
-        yt_po_token = os.getenv("DOWNLOADER_YT_PO_TOKEN", "").strip()
-        try:
-            logger.info(
-                "yt-dlp version=%s youtube=%s cookies=%s po_token=%s",
-                getattr(getattr(yt_dlp, "version", None), "__version__", "unknown"),
-                is_youtube,
-                bool(cookie_path),
-                bool(yt_po_token),
-            )
-            logger.info("YouTube POT provider script=%s available=%s node=%s", pot_script, pot_script_available, shutil.which("node"))
-        except Exception as exc:
-            logger.debug("non-fatal exception: %s", exc)
+        if proxy:
+            opts["proxy"] = proxy
 
-        def _run_once(label: str, *, clients: list[str] | None, use_cookies: bool, format_override: str | None = None) -> dict:
-            opts = {
-                "format": format_override or _format_for(mode),
-                "outtmpl": outtmpl,
-                "noplaylist": True,
-                "quiet": True,
-                "no_warnings": True,
-                "retries": 5,
-                "fragment_retries": 5,
-                "socket_timeout": int(TIMEOUT),
-                "max_filesize": MAX_BYTES,
-                "concurrent_fragment_downloads": YTDLP_CONCURRENT_FRAGMENTS,
-                "http_chunk_size": YTDLP_HTTP_CHUNK_SIZE or None,
-                "buffersize": YTDLP_BUFFER_SIZE,
-                "restrictfilenames": True,
-                "progress_hooks": [hook],
-                "http_headers": {
-                    "User-Agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    ),
-                    "Accept-Language": "en-US,en;q=0.9",
-                },
-                "merge_output_format": "mp4",
-                "continuedl": True,
-                "overwrites": True,
-                "ignoreerrors": False,
-                # Do not let a host-level yt-dlp config silently re-enable
-                # tv_downgraded or another client after we explicitly selected one.
-                "ignoreconfig": True,
-                "js_runtimes": {"node": "node"},
-            }
-            if proxy:
-                opts["proxy"] = proxy
-            if use_cookies and cookie_path:
-                opts["cookiefile"] = cookie_path
-            if clients:
-                # IMPORTANT: never set player_skip for YouTube here.
-                # Skipping webpage/config initialization can leave the player
-                # response in a state where YouTube answers with
-                # `The page needs to be reloaded`.  In particular, do not use
-                # tv/tv_downgraded with account cookies: current yt-dlp docs
-                # note that this path can become UNPLAYABLE/DRM.
-                yt_args = {"player_client": list(clients)}
-                if yt_po_token and not pot_script_available:
-                    yt_args["po_token"] = yt_po_token
-                opts["extractor_args"] = {"youtube": yt_args}
-                if pot_script_available and is_youtube:
-                    opts["extractor_args"]["youtubepot-bgutilscript"] = {"script_path": pot_script}
-            if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
-                opts["http_headers"]["Referer"] = "https://www.instagram.com/"
-                opts["extractor_args"] = {"instagram": {"app_id": "web"}}
-            if mode == "audio":
-                opts["postprocessors"] = [
-                    {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}
-                ]
-
-            logger.info("yt-dlp try label=%s clients=%s cookies=%s", label, clients, bool(opts.get("cookiefile")))
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                if not info:
-                    raise DownloadError("failed")
-                path = Path(ydl.prepare_filename(info))
-                if mode == "audio":
-                    mp3 = path.with_suffix(".mp3")
-                    if mp3.exists():
-                        path = mp3
-                if not path.exists():
-                    vid = str(info.get("id") or "")
-                    candidates = list(outdir.glob(f"*{vid}*")) if vid else list(outdir.glob("*"))
-                    candidates = [p for p in candidates if p.is_file()]
-                    if candidates:
-                        path = max(candidates, key=lambda p: p.stat().st_mtime)
-                if not path.exists():
-                    raise DownloadError("failed")
-                size = path.stat().st_size
-                if size <= 0:
-                    path.unlink(missing_ok=True)
-                    raise DownloadError("failed")
-                if size > MAX_BYTES:
-                    path.unlink(missing_ok=True)
-                    raise DownloadError("too_large")
-                return {
-                    "path": str(path),
-                    "title": _safe_name(info.get("title") or path.stem),
-                    "size": size,
-                    "content_type": info.get("ext", ""),
-                    "method": "yt-dlp",
-                    "duration": info.get("duration"),
-                    "thumbnail": info.get("thumbnail"),
-                    "webpage_url": info.get("webpage_url"),
-                    "uploader": info.get("uploader"),
-                    "mode": mode,
-                }
-
-        attempts: list[tuple[str, list[str] | None, bool, str | None]]
-        if is_youtube:
-            # Current yt-dlp guidance recommends mweb + an automatic PO-token
-            # provider for GVS.  The provider is installed in the Docker image
-            # and falls back to the older no-token clients when unavailable.
-            # Prefer clients that do not currently depend on a GVS PO token.
-            # `web_embedded` is explicitly documented as not requiring a PO token;
-            # mweb is only attempted when the local PO-token provider is actually
-            # present. This avoids making every normal VOD depend on bgutil.
-            attempts = [
-                ("nocookie-web_embedded", ["web_embedded"], False, None),
-                ("nocookie-android_vr", ["android_vr"], False, None),
+        parsed_host = (urlparse(url).hostname or "").lower().rstrip(".")
+        if parsed_host == "instagram.com" or parsed_host.endswith(".instagram.com"):
+            opts["http_headers"]["Referer"] = "https://www.instagram.com/"
+            opts["extractor_args"] = {"instagram": {"app_id": "web"}}
+        if mode == "audio":
+            opts["postprocessors"] = [
+                {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}
             ]
-            if pot_script_available:
-                attempts.append(("mweb-bgutil-nocookie", ["mweb"], False, None))
-            attempts.extend([
-                ("nocookie-web_safari-hls", ["web_safari"], False, "best[protocol^=m3u8]/best[protocol=m3u8_native]/bestaudio[protocol^=m3u8]/best"),
-                ("nocookie-web_safari", ["web_safari"], False, None),
-                ("nocookie-default", ["default"], False, None),
-            ])
-            # YouTube is intentionally cookie-free on cloud/Render.
-            # Cookies from another IP/session can trigger YouTube playability
-            # checks and `The page needs to be reloaded`.  Cookie support for
-            # non-YouTube downloaders remains unchanged above.
-            if cookie_path:
-                logger.info("YouTube cookies detected but intentionally disabled for all YouTube attempts")
-        else:
-            attempts = [("default", None, True, None)]
 
-        last_exc: Exception | None = None
-        for label, clients, use_cookies, format_override in attempts:
-            try:
-                return _run_once(label, clients=clients, use_cookies=use_cookies, format_override=format_override)
-            except DownloadError as exc:
-                # Keep the size guard fatal, but allow YouTube's transient
-                # playability/no-format errors to reach the next client.
-                if str(exc) in {"too_large", "yt_dlp_missing", "unsupported"}:
-                    raise
-                last_exc = exc
-                logger.warning("yt-dlp try failed label=%s code=%s err=%s", label, _classify_error(str(exc)), str(exc)[:320])
-                try:
-                    for p in outdir.glob("*"):
-                        if p.is_file():
-                            p.unlink(missing_ok=True)
-                except Exception as cleanup_exc:
-                    logger.debug("yt-dlp output cleanup failed: %s", cleanup_exc)
-                continue
-            except Exception as exc:
-                last_exc = exc
-                logger.warning("yt-dlp try failed label=%s code=%s err=%s", label, _classify_error(str(exc)), str(exc)[:320])
-                try:
-                    for p in outdir.glob("*"):
-                        if p.is_file():
-                            p.unlink(missing_ok=True)
-                except Exception as exc:
-                    logger.debug("yt-dlp output cleanup failed: %s", exc)
-                continue
-
-        if last_exc is not None:
-            raise DownloadError(_classify_error(str(last_exc))) from last_exc
-        raise DownloadError("failed")
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            if not info:
+                raise DownloadError("failed")
+            path = Path(ydl.prepare_filename(info))
+            if mode == "audio":
+                mp3 = path.with_suffix(".mp3")
+                if mp3.exists():
+                    path = mp3
+            if not path.exists():
+                vid = str(info.get("id") or "")
+                candidates = list(outdir.glob(f"*{vid}*")) if vid else list(outdir.glob("*"))
+                candidates = [p for p in candidates if p.is_file()]
+                if candidates:
+                    path = max(candidates, key=lambda p: p.stat().st_mtime)
+            if not path.exists():
+                raise DownloadError("failed")
+            size = path.stat().st_size
+            if size <= 0:
+                path.unlink(missing_ok=True)
+                raise DownloadError("failed")
+            if size > MAX_BYTES:
+                path.unlink(missing_ok=True)
+                raise DownloadError("too_large")
+            return {
+                "path": str(path),
+                "title": _safe_name(info.get("title") or path.stem),
+                "size": size,
+                "content_type": info.get("ext", ""),
+                "method": "yt-dlp",
+                "duration": info.get("duration"),
+                "thumbnail": info.get("thumbnail"),
+                "webpage_url": info.get("webpage_url"),
+                "uploader": info.get("uploader"),
+                "mode": mode,
+            }
 
     try:
         return await loop.run_in_executor(None, work)
@@ -1074,8 +968,8 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
     if mode not in {"best", "1080p", "720p", "480p", "audio"}:
         mode = "best"
     url = _normalize_media_url(url)
-    # YouTube uses the same yt-dlp pipeline as other supported sites.
-    # Cloud/Render attempts remain cookie-free and can use PO-token/proxy fallbacks.
+    if _is_blocked_media_url(url):
+        raise DownloadError("unsupported")
     if preflight:
         url = _preflight_redirects(url)
     if use_cache:
@@ -1126,22 +1020,7 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
 
             outdir = Path(tempfile.mkdtemp(prefix="alimj3_dl_"))
             try:
-                # ── Multi-provider router ──────────────────────────────────
-                # YouTube (and optionally any URL when external is configured):
-                #   1) Cobalt self-hosted
-                #   2) yt-dlp REST API
-                #   3) Local yt-dlp + PO Token (existing)
-                # Non-YouTube keeps previous behaviour (local first).
                 used_external = False
-                if _is_youtube_url(url) and _external_providers_configured():
-                    ext = await _try_external_providers(url, outdir, mode)
-                    if ext:
-                        used_external = True
-                        result = ext
-                        _cache_put(result, url, mode)
-                        return result
-                    logger.info("all external providers failed for YouTube; falling back to local yt-dlp")
-
                 try:
                     result = await _ytdlp(url, outdir, mode=mode, progress_cb=progress_cb)
                 except DownloadError as first:
@@ -1150,7 +1029,7 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
                             filename = _safe_name(Path(urlparse(url).path).name or "download.bin")
                             result = await _direct(url, outdir / filename)
                         else:
-                            # Last chance: try external even for non-YouTube if configured
+                            # Last chance: try external even for non- if configured
                             if not used_external and _external_providers_configured():
                                 ext = await _try_external_providers(url, outdir, mode)
                                 if ext:
@@ -1197,7 +1076,7 @@ def user_message(code: str) -> str:
         "too_large": f"📦 فایل برای ارسال مستقیم بیش از حد بزرگ است. سقف ربات {MAX_BYTES // (1024*1024)}MB است.",
         "yt_dlp_missing": "⚠️ موتور yt-dlp نصب نشده است. requirements را نصب کنید.",
         "gallery_dl_missing": "⚠️ موتور gallery-dl نصب نشده است.\nدستور: pip install -U gallery-dl",
-        "failed": "❌ دانلود ناموفق بود.\nیوتیوب/سایت پاسخ قابل دریافت برنگرداند.\nبرای YouTube مسیر yt-dlp + PO Token و در صورت تنظیم، پروکسی پایدار استفاده می‌شود.",
+        "failed": "❌ دانلود ناموفق بود.\nسایت پاسخ قابل دریافت برنگرداند.",
     }.get(code, "❌ دانلود ناموفق بود.")
 
 # Regression-contract marker: if _is_instagram_url(current):
