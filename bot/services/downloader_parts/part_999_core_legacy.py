@@ -486,8 +486,8 @@ async def _try_external_providers(url: str, outdir: Path, mode: str) -> dict | N
                 for p in outdir.glob("*"):
                     if p.is_file():
                         p.unlink(missing_ok=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("non-fatal exception: %s", exc)
             continue
         except Exception as exc:
             logger.warning("external provider %s error: %s", name, str(exc)[:300])
@@ -495,8 +495,8 @@ async def _try_external_providers(url: str, outdir: Path, mode: str) -> dict | N
                 for p in outdir.glob("*"):
                     if p.is_file():
                         p.unlink(missing_ok=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("non-fatal exception: %s", exc)
             continue
     return None
 
@@ -683,7 +683,8 @@ def _cache_get(url: str, mode: str) -> dict | None:
         if path.stat().st_size > MAX_BYTES:
             return None
         return {**info, "path": str(path), "size": path.stat().st_size, "cached": True}
-    except Exception:
+    except Exception as exc:
+        logger.debug("downloader cache read failed: %s", exc)
         return None
 
 
@@ -712,8 +713,8 @@ def _prune_cache() -> None:
                 p.with_suffix(".json").unlink(missing_ok=True)
             else:
                 total += size
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("non-fatal exception: %s", exc)
 
 
 def _content_disposition_name(value: str) -> str:
@@ -779,15 +780,6 @@ async def _direct(url: str, out: Path) -> dict:
 
 async def probe(url: str) -> dict:
     url = _preflight_redirects(url)
-    if _is_youtube_url(url):
-        return {
-            "supported": False,
-            "direct": False,
-            "url": url,
-            "formats": [],
-            "error": "youtube_disabled",
-            "title": None,
-        }
     try:
         import yt_dlp
     except ImportError:
@@ -819,9 +811,12 @@ async def probe(url: str) -> dict:
             if pot_script and Path(pot_script).is_file():
                 opts["extractor_args"]["youtubepot-bgutilscript"] = {"script_path": pot_script}
             opts["js_runtimes"] = {"node": "node"}
-        cookie = _resolve_cookies_file()
-        if cookie:
-            opts["cookiefile"] = cookie
+        # YouTube stays cookie-free on cloud/Render to avoid cross-session
+        # playability checks and "page needs to be reloaded" loops.
+        if not _is_youtube_url(url):
+            cookie = _resolve_cookies_file()
+            if cookie:
+                opts["cookiefile"] = cookie
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
         if proxy:
             opts["proxy"] = proxy
@@ -879,15 +874,15 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                     progress["last"] = now
                     try:
                         progress_cb(progress.copy())
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("downloader progress callback failed: %s", exc)
             elif status == "finished":
                 progress["path"] = d.get("filename")
                 if progress_cb:
                     try:
                         progress_cb({**progress, "finished": True})
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("downloader finished callback failed: %s", exc)
 
         cookie_path = _resolve_cookies_file()
         pot_script = os.getenv("DOWNLOADER_YT_POT_SCRIPT", str(Path.cwd() / ".render" / "bgutil-ytdlp-pot-provider" / "server" / "build" / "generate_once.js")).strip()
@@ -906,8 +901,8 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                 bool(yt_po_token),
             )
             logger.info("YouTube POT provider script=%s available=%s node=%s", pot_script, pot_script_available, shutil.which("node"))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("non-fatal exception: %s", exc)
 
         def _run_once(label: str, *, clients: list[str] | None, use_cookies: bool, format_override: str | None = None) -> dict:
             opts = {
@@ -1010,13 +1005,17 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
             # Current yt-dlp guidance recommends mweb + an automatic PO-token
             # provider for GVS.  The provider is installed in the Docker image
             # and falls back to the older no-token clients when unavailable.
-            attempts = []
+            # Prefer clients that do not currently depend on a GVS PO token.
+            # `web_embedded` is explicitly documented as not requiring a PO token;
+            # mweb is only attempted when the local PO-token provider is actually
+            # present. This avoids making every normal VOD depend on bgutil.
+            attempts = [
+                ("nocookie-web_embedded", ["web_embedded"], False, None),
+                ("nocookie-android_vr", ["android_vr"], False, None),
+            ]
             if pot_script_available:
                 attempts.append(("mweb-bgutil-nocookie", ["mweb"], False, None))
             attempts.extend([
-                ("nocookie-web_embedded", ["web_embedded"], False, None),
-                ("nocookie-android_vr", ["android_vr"], False, None),
-                ("nocookie-tv", ["tv"], False, None),
                 ("nocookie-web_safari-hls", ["web_safari"], False, "best[protocol^=m3u8]/best[protocol=m3u8_native]/bestaudio[protocol^=m3u8]/best"),
                 ("nocookie-web_safari", ["web_safari"], False, None),
                 ("nocookie-default", ["default"], False, None),
@@ -1034,8 +1033,20 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
         for label, clients, use_cookies, format_override in attempts:
             try:
                 return _run_once(label, clients=clients, use_cookies=use_cookies, format_override=format_override)
-            except DownloadError:
-                raise
+            except DownloadError as exc:
+                # Keep the size guard fatal, but allow YouTube's transient
+                # playability/no-format errors to reach the next client.
+                if str(exc) in {"too_large", "yt_dlp_missing", "unsupported"}:
+                    raise
+                last_exc = exc
+                logger.warning("yt-dlp try failed label=%s code=%s err=%s", label, _classify_error(str(exc)), str(exc)[:320])
+                try:
+                    for p in outdir.glob("*"):
+                        if p.is_file():
+                            p.unlink(missing_ok=True)
+                except Exception as cleanup_exc:
+                    logger.debug("yt-dlp output cleanup failed: %s", cleanup_exc)
+                continue
             except Exception as exc:
                 last_exc = exc
                 logger.warning("yt-dlp try failed label=%s code=%s err=%s", label, _classify_error(str(exc)), str(exc)[:320])
@@ -1043,8 +1054,8 @@ async def _ytdlp(url: str, outdir: Path, mode: str = "best", progress_cb=None) -
                     for p in outdir.glob("*"):
                         if p.is_file():
                             p.unlink(missing_ok=True)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("yt-dlp output cleanup failed: %s", exc)
                 continue
 
         if last_exc is not None:
@@ -1063,10 +1074,8 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
     if mode not in {"best", "1080p", "720p", "480p", "audio"}:
         mode = "best"
     url = _normalize_media_url(url)
-    # YouTube deliberately disabled (Render/datacenter IPs are routinely blocked).
-    # Instagram / TikTok / other social remain available via existing cascade.
-    if _is_youtube_url(url):
-        raise DownloadError("youtube_disabled")
+    # YouTube uses the same yt-dlp pipeline as other supported sites.
+    # Cloud/Render attempts remain cookie-free and can use PO-token/proxy fallbacks.
     if preflight:
         url = _preflight_redirects(url)
     if use_cache:
@@ -1095,8 +1104,8 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
                     if size > MAX_BYTES:
                         try:
                             p.unlink(missing_ok=True)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.debug("oversized social file cleanup failed: %s", exc)
                         raise DownloadError("too_large")
                     result = {
                         "path": str(p),
@@ -1172,8 +1181,8 @@ def cleanup(path: str | None):
         p.unlink(missing_ok=True)
         if parent.name.startswith("alimj3_dl_") and parent.exists() and not any(parent.iterdir()):
             parent.rmdir()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("non-fatal exception: %s", exc)
 
 
 def user_message(code: str) -> str:
@@ -1188,8 +1197,7 @@ def user_message(code: str) -> str:
         "too_large": f"📦 فایل برای ارسال مستقیم بیش از حد بزرگ است. سقف ربات {MAX_BYTES // (1024*1024)}MB است.",
         "yt_dlp_missing": "⚠️ موتور yt-dlp نصب نشده است. requirements را نصب کنید.",
         "gallery_dl_missing": "⚠️ موتور gallery-dl نصب نشده است.\nدستور: pip install -U gallery-dl",
-        "failed": "❌ دانلود ناموفق بود.\nیوتیوب پاسخ قابل دریافت برنگرداند.\nاگر DOWNLOADER_COBALT_URL یا DOWNLOADER_YTDLP_API_URL تنظیم شده باشد اول از آن‌ها استفاده می‌شود؛ وگرنه yt-dlp محلی + PO Token.\nدر صورت تکرار: instance اختصاصی Cobalt یا پروکسی پایدار (DOWNLOADER_PROXY) اضافه کنید.",
-        "site_blocked": "🚫 یوتیوب درخواست را ربات تشخیص داد.\nراه‌حل: کوکی مرورگر را در متغیر DOWNLOADER_COOKIES بگذارید یا پروکسی واقعی در DOWNLOADER_PROXY.",
+        "failed": "❌ دانلود ناموفق بود.\nیوتیوب/سایت پاسخ قابل دریافت برنگرداند.\nبرای YouTube مسیر yt-dlp + PO Token و در صورت تنظیم، پروکسی پایدار استفاده می‌شود.",
     }.get(code, "❌ دانلود ناموفق بود.")
 
 # Regression-contract marker: if _is_instagram_url(current):
