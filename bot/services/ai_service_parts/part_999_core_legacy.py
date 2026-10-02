@@ -561,13 +561,20 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
                 options,
                 key=lambda x: (rank.get(x[0], 9), options.index(x)),
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("non-fatal exception: %s", exc)
 
     original_prompt = prompt
     shopping_hint = _shopping_prompt_hint(prompt)
     if shopping_hint:
         prompt = prompt + shopping_hint
+    try:
+        from bot.services.ai_freshness import build_instruction
+        freshness_hint = build_instruction(original_prompt)
+        if freshness_hint:
+            prompt = prompt + freshness_hint
+    except Exception as exc:
+        logger.debug("freshness instruction skipped: %s", exc)
     try:
         _extract_and_store_memory(user_id, original_prompt)
     except Exception as _exc:
@@ -830,8 +837,8 @@ async def ask_ai_stream(user_id: int, prompt: str):
             reset_provider_circuits()
             rank = {"gemini": 0, "openrouter": 1, "groq": 2, "cerebras": 3, "cloudflare": 4}
             options = sorted(options, key=lambda x: (rank.get(x[0], 9), options.index(x)))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("non-fatal exception: %s", exc)
 
     async with _LOCKS[user_id]:
         selected = get_selected_model(user_id)
