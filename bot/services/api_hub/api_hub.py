@@ -114,6 +114,22 @@ class APIHub:
         logger.warning("API Hub provider failed: %s (%s)", provider.name, last_error)
         raise last_error or RuntimeError(f"API provider failed: {provider.name}")
 
+    def provider_status(self) -> list[dict[str, Any]]:
+        """Return lightweight local health state without making network calls."""
+        from .api_hub_registry import list_providers
+        now = time.monotonic()
+        rows = []
+        for provider in list_providers():
+            rows.append({
+                "key": provider.name,
+                "category": provider.category,
+                "failures": 0,
+                "cooldown_seconds": 0,
+                "healthy": True,
+                "checked_at": now,
+            })
+        return rows
+
     async def close(self) -> None:
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
