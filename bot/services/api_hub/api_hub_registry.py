@@ -1,175 +1,99 @@
-"""Provider registry for public APIs.
+"""Registry for public APIs that do not require an API key.
 
-The registry is deliberately independent from Telegram handlers. Providers
-can be enabled/disabled without changing the UI layer.
+URLs are kept here instead of in handlers, making providers easy to replace
+without changing the rest of the bot.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 
-@dataclass(frozen=True, slots=True)
-class ApiProvider:
-    key: str
+@dataclass(frozen=True)
+class APIProvider:
     name: str
     category: str
     base_url: str
-    auth: str = "No"
-    enabled: bool = True
-    timeout: float = 12.0
-    cache_ttl: int = 60
-    tags: tuple[str, ...] = field(default_factory=tuple)
-    notes: str = ""
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "key": self.key,
-            "name": self.name,
-            "category": self.category,
-            "base_url": self.base_url,
-            "auth": self.auth,
-            "enabled": self.enabled,
-            "timeout": self.timeout,
-            "cache_ttl": self.cache_ttl,
-            "tags": list(self.tags),
-            "notes": self.notes,
-        }
+    method: str = "GET"
+    timeout: float = 10.0
+    cache_ttl: float = 30.0
+    params: dict[str, Any] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)
+    description: str = ""
 
 
-_PROVIDERS: dict[str, ApiProvider] = {}
+PROVIDERS: dict[str, APIProvider] = {
+    "open_meteo_forecast": APIProvider(
+        "open_meteo_forecast", "weather", "https://api.open-meteo.com/v1/forecast",
+        cache_ttl=120, description="Current weather and forecast; no key required.",
+    ),
+    "open_meteo_geocoding": APIProvider(
+        "open_meteo_geocoding", "geocoding", "https://geocoding-api.open-meteo.com/v1/search",
+        cache_ttl=3600, description="City name to coordinates; no key required.",
+    ),
+    "frankfurter": APIProvider(
+        "frankfurter", "currency", "https://api.frankfurter.app/latest",
+        cache_ttl=60, description="Reference exchange rates; no key required.",
+    ),
+    "rest_countries": APIProvider(
+        "rest_countries", "world", "https://restcountries.com/v3.1/name/{name}",
+        cache_ttl=86400, description="Country information; no key required.",
+    ),
+    "rest_countries_all": APIProvider(
+        "rest_countries_all", "world", "https://restcountries.com/v3.1/all",
+        cache_ttl=86400, description="Country catalog; no key required.",
+    ),
+    "jokeapi": APIProvider(
+        "jokeapi", "entertainment", "https://v2.jokeapi.dev/joke/Any",
+        cache_ttl=30, description="Random jokes; no key required.",
+    ),
+    "quotable": APIProvider(
+        "quotable", "quotes", "https://api.quotable.io/random",
+        cache_ttl=30, description="Random quotes; no key required.",
+    ),
+    "open_library_search": APIProvider(
+        "open_library_search", "books", "https://openlibrary.org/search.json",
+        cache_ttl=300, description="Book search; no key required.",
+    ),
+    "gutendex": APIProvider(
+        "gutendex", "books", "https://gutendex.com/books",
+        cache_ttl=300, description="Public-domain books; no key required.",
+    ),
+    "musicbrainz": APIProvider(
+        "musicbrainz", "music", "https://musicbrainz.org/ws/2/recording",
+        cache_ttl=300, headers={"Accept": "application/json"},
+        description="Music metadata search; no key required.",
+    ),
+    "itunes_search": APIProvider(
+        "itunes_search", "music", "https://itunes.apple.com/search",
+        cache_ttl=300, description="Music and media search; no key required.",
+    ),
+    "tvmaze_search": APIProvider(
+        "tvmaze_search", "video", "https://api.tvmaze.com/search/shows",
+        cache_ttl=300, description="TV show search; no key required.",
+    ),
+    "nager_date": APIProvider(
+        "nager_date", "calendar", "https://date.nager.at/api/v3/PublicHolidays/{year}/{country_code}",
+        cache_ttl=86400, description="Public holidays; no key required.",
+    ),
+    "coin_gecko_simple": APIProvider(
+        "coin_gecko_simple", "crypto", "https://api.coingecko.com/api/v3/simple/price",
+        cache_ttl=20, description="Crypto prices; no key required for public endpoint.",
+    ),
+    "ipma_weather": APIProvider(
+        "ipma_weather", "weather", "https://api.ipma.pt/open-data/forecast/meteorology/cities/daily/{city_id}.json",
+        cache_ttl=120, description="Portuguese weather data; no key required.",
+    ),
+}
 
 
-def register_provider(provider: ApiProvider) -> ApiProvider:
-    if provider.auth not in {"No", "none", ""}:
-        raise ValueError(f"api_hub only accepts keyless providers: {provider.key}")
-    _PROVIDERS[provider.key] = provider
-    return provider
+def get_provider(name: str) -> APIProvider | None:
+    return PROVIDERS.get(str(name).strip().lower())
 
 
-def get_provider(key: str) -> ApiProvider | None:
-    return _PROVIDERS.get((key or "").strip().lower())
-
-
-def all_providers(*, enabled_only: bool = False) -> list[ApiProvider]:
-    values = list(_PROVIDERS.values())
-    if enabled_only:
-        values = [x for x in values if x.enabled]
-    return sorted(values, key=lambda x: (x.category, x.name.lower()))
-
-
-def providers_by_category(category: str, *, enabled_only: bool = True) -> list[ApiProvider]:
-    wanted = (category or "").strip().casefold()
-    return [
-        x for x in all_providers(enabled_only=enabled_only)
-        if x.category.casefold() == wanted
-    ]
-
-
-# First-wave, verified catalog entries used by the hub itself. More providers
-# are added as adapters are implemented; catalog-only entries must not be
-# exposed as working features until their endpoint contract is tested.
-register_provider(ApiProvider(
-    key="open_meteo",
-    name="Open-Meteo",
-    category="weather",
-    base_url="https://api.open-meteo.com",
-    cache_ttl=300,
-    tags=("weather", "forecast", "geocoding"),
-))
-register_provider(ApiProvider(
-    key="frankfurter",
-    name="Frankfurter",
-    category="currency",
-    base_url="https://api.frankfurter.app",
-    cache_ttl=300,
-    tags=("currency", "forex", "exchange"),
-))
-register_provider(ApiProvider(
-    key="coingecko",
-    name="CoinGecko",
-    category="crypto",
-    base_url="https://api.coingecko.com",
-    cache_ttl=30,
-    tags=("crypto", "price", "market"),
-))
-register_provider(ApiProvider(
-    key="rest_countries",
-    name="REST Countries",
-    category="geocoding",
-    base_url="https://restcountries.com",
-    cache_ttl=86400,
-    tags=("country", "capital", "currency", "timezone"),
-))
-register_provider(ApiProvider(
-    key="open_library",
-    name="Open Library",
-    category="books",
-    base_url="https://openlibrary.org",
-    cache_ttl=3600,
-    tags=("books", "authors", "isbn"),
-))
-register_provider(ApiProvider(
-    key="gutendex",
-    name="Gutendex",
-    category="books",
-    base_url="https://gutendex.com",
-    cache_ttl=3600,
-    tags=("books", "public-domain"),
-))
-register_provider(ApiProvider(
-    key="jikan",
-    name="Jikan",
-    category="anime",
-    base_url="https://api.jikan.moe",
-    cache_ttl=900,
-    tags=("anime", "manga", "mal"),
-))
-register_provider(ApiProvider(
-    key="studio_ghibli",
-    name="Studio Ghibli API",
-    category="anime",
-    base_url="https://ghibliapi.vercel.app",
-    cache_ttl=86400,
-    tags=("anime", "films", "ghibli"),
-))
-register_provider(ApiProvider(
-    key="dog_ceo",
-    name="Dog CEO",
-    category="animals",
-    base_url="https://dog.ceo",
-    cache_ttl=300,
-    tags=("dogs", "images"),
-))
-register_provider(ApiProvider(
-    key="cat_facts",
-    name="Cat Facts",
-    category="animals",
-    base_url="https://catfact.ninja",
-    cache_ttl=900,
-    tags=("cats", "facts"),
-))
-register_provider(ApiProvider(
-    key="quotable",
-    name="Quotable",
-    category="personality",
-    base_url="https://api.quotable.io",
-    cache_ttl=900,
-    tags=("quotes", "authors"),
-))
-register_provider(ApiProvider(
-    key="jokeapi",
-    name="JokeAPI",
-    category="entertainment",
-    base_url="https://v2.jokeapi.dev",
-    cache_ttl=300,
-    tags=("jokes", "entertainment"),
-))
-register_provider(ApiProvider(
-    key="quickchart",
-    name="QuickChart",
-    category="development",
-    base_url="https://quickchart.io",
-    cache_ttl=60,
-    tags=("charts", "qr", "images"),
-))
+def list_providers(category: str | None = None) -> list[APIProvider]:
+    values = list(PROVIDERS.values())
+    if category:
+        wanted = category.strip().lower()
+        values = [item for item in values if item.category.lower() == wanted]
+    return values
