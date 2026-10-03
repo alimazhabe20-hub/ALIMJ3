@@ -8,3 +8,6 @@ from bot.utils.modular_loader import load_modular_part
 
 load_modular_part(__file__, 'ai_tools_parts/part_999_core_legacy.py')
 
+# Keyless Public API Hub bridge. Kept outside the legacy implementation.
+from bot.services import api_hub_ai as _api_hub_ai  # noqa: F401,E402
+
