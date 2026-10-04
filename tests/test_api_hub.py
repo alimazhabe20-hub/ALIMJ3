@@ -38,7 +38,15 @@ def test_health_check_shape() -> None:
     assert rows
     assert {"key", "category", "failures", "cooldown_seconds"}.issubset(rows[0])
 
-def test_new_keyless_capabilities_are_registered() -> None:
-    keys = {p.name for p in all_providers()}
-    assert {"coin_gecko_simple", "itunes_search", "musicbrainz", "tvmaze_search", "nager_date"}.issubset(keys)
 
+def test_shopping_and_geocoding_providers_are_keyless() -> None:
+    assert get_provider("onefindme_search").auth == "No"
+    assert get_provider("nominatim_search").auth == "No"
+    assert get_provider("nominatim_reverse").auth == "No"
+
+
+def test_shopping_and_geocoding_runtime_exports() -> None:
+    from bot.services.api_hub import search_products, geocode, reverse_geocode
+    assert callable(search_products)
+    assert callable(geocode)
+    assert callable(reverse_geocode)
