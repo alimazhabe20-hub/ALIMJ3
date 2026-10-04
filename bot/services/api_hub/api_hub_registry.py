@@ -81,6 +81,23 @@ PROVIDERS: dict[str, APIProvider] = {
         "nager_date", "calendar", "https://date.nager.at/api/v3/PublicHolidays/{year}/{country_code}",
         cache_ttl=86400, description="Public holidays; no key required.",
     ),
+    "onefindme_search": APIProvider(
+        "onefindme_search", "shopping", "https://onefindme.com/api/search",
+        timeout=12, cache_ttl=60,
+        description="Keyless AliExpress product search with price, rating and orders.",
+    ),
+    "nominatim_search": APIProvider(
+        "nominatim_search", "geocoding", "https://nominatim.openstreetmap.org/search",
+        timeout=12, cache_ttl=3600,
+        headers={"Accept": "application/json", "User-Agent": "ALIMJBot/3.0 (+public-api-hub; contact=admin)"},
+        description="Worldwide forward geocoding; no API key required.",
+    ),
+    "nominatim_reverse": APIProvider(
+        "nominatim_reverse", "geocoding", "https://nominatim.openstreetmap.org/reverse",
+        timeout=12, cache_ttl=3600,
+        headers={"Accept": "application/json", "User-Agent": "ALIMJBot/3.0 (+public-api-hub; contact=admin)"},
+        description="Worldwide reverse geocoding; no API key required.",
+    ),
     "coin_gecko_simple": APIProvider(
         "coin_gecko_simple", "crypto", "https://api.coingecko.com/api/v3/simple/price",
         cache_ttl=20, description="Crypto prices; no key required for public endpoint.",

@@ -43,55 +43,47 @@ async def get_random_joke() -> dict[str, Any]:
     return await api_hub.call("jokeapi", params={"safe-mode": "true", "type": "single,twopart"})
 
 
-async def get_crypto_prices(
-    ids: str = "bitcoin,ethereum",
-    *,
-    vs_currency: str = "usd",
-    include_24h_change: bool = True,
-) -> dict[str, Any]:
-    """Get current public CoinGecko prices without an API key."""
+async def search_products(
+    query: str, *, country: str = "US", language: str = "en", max_results: int = 10,
+    min_price: float | None = None, max_price: float | None = None, free_shipping: bool | None = None,
+) -> Any:
+    """Search real AliExpress listings through the keyless OneFindMe API."""
+    q = str(query or "").strip()
+    if not q:
+        raise ValueError("query is required")
+    params: dict[str, Any] = {
+        "query": q,
+        "country": str(country or "US").upper(),
+        "language": str(language or "en").lower(),
+        "max_results": max(1, min(int(max_results), 20)),
+    }
+    if min_price is not None:
+        params["min_price"] = max(0.0, float(min_price))
+    if max_price is not None:
+        params["max_price"] = max(0.0, float(max_price))
+    if free_shipping is not None:
+        params["free_shipping"] = bool(free_shipping)
+    return await api_hub.call("onefindme_search", params=params)
+
+
+async def geocode(query: str, *, limit: int = 5, language: str = "fa") -> Any:
+    q = str(query or "").strip()
+    if not q:
+        raise ValueError("query is required")
     return await api_hub.call(
-        "coin_gecko_simple",
+        "nominatim_search",
         params={
-            "ids": ids,
-            "vs_currencies": vs_currency.lower(),
-            "include_24hr_change": str(bool(include_24h_change)).lower(),
+            "q": q, "format": "jsonv2", "addressdetails": 1,
+            "limit": max(1, min(int(limit), 10)), "accept-language": language or "fa",
         },
     )
 
 
-async def search_music(query: str, *, limit: int = 10) -> dict[str, Any]:
-    """Search music metadata using iTunes Search (no key required)."""
+async def reverse_geocode(latitude: float, longitude: float, *, language: str = "fa") -> Any:
     return await api_hub.call(
-        "itunes_search",
+        "nominatim_reverse",
         params={
-            "term": query,
-            "media": "music",
-            "entity": "song",
-            "limit": max(1, min(int(limit), 50)),
+            "lat": float(latitude), "lon": float(longitude), "format": "jsonv2",
+            "addressdetails": 1, "accept-language": language or "fa",
         },
-    )
-
-
-async def search_music_metadata(query: str, *, limit: int = 10) -> dict[str, Any]:
-    """Search recording metadata through MusicBrainz."""
-    return await api_hub.call(
-        "musicbrainz",
-        params={"query": query, "fmt": "json", "limit": max(1, min(int(limit), 100))},
-    )
-
-
-async def search_tv(query: str, *, limit: int = 10) -> list[dict[str, Any]]:
-    """Search TV shows through TVMaze."""
-    return await api_hub.call(
-        "tvmaze_search",
-        params={"q": query},
-    )
-
-
-async def get_public_holidays(year: int, country_code: str = "IR") -> list[dict[str, Any]]:
-    """Return public holidays for a country using Nager.Date."""
-    return await api_hub.call(
-        "nager_date",
-        params={"year": int(year), "country_code": country_code.upper()},
     )
