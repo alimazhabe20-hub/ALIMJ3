@@ -106,6 +106,22 @@ PROVIDERS: dict[str, APIProvider] = {
         "ipma_weather", "weather", "https://api.ipma.pt/open-data/forecast/meteorology/cities/daily/{city_id}.json",
         cache_ttl=120, description="Portuguese weather data; no key required.",
     ),
+    "jolpica_f1": APIProvider(
+        "jolpica_f1", "sports", "https://api.jolpi.ca/ergast/f1/{season}/{round}/{resource}.json",
+        timeout=12, cache_ttl=30, description="Formula 1 schedules, results and standings; no key required.",
+    ),
+    "freetogame_games": APIProvider(
+        "freetogame_games", "games", "https://www.freetogame.com/api/games",
+        timeout=12, cache_ttl=300, description="Free-to-play game catalog and filters; no key required.",
+    ),
+    "freetogame_game": APIProvider(
+        "freetogame_game", "games", "https://www.freetogame.com/api/game",
+        timeout=12, cache_ttl=300, description="Free-to-play game details; no key required.",
+    ),
+    "spaceflight_news": APIProvider(
+        "spaceflight_news", "news", "https://api.spaceflightnewsapi.net/v4/articles",
+        timeout=12, cache_ttl=120, description="Spaceflight news articles; no key required.",
+    ),
 }
 
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 from bot.services.tool_runtime import register_tool
 from bot.services.api_hub import (
     api_call, list_providers, search_products, geocode, reverse_geocode,
+    get_f1_data, search_games, get_game, search_spaceflight_news,
 )
 
 
@@ -81,4 +82,47 @@ register_tool(
     description="تبدیل latitude/longitude به آدرس و نام مکان.",
     parameters={"type": "object", "properties": {"latitude": {"type": "number"}, "longitude": {"type": "number"}, "language": {"type": "string", "default": "fa"}}, "required": ["latitude", "longitude"]},
     handler=_reverse_geocode, keywords=[r"reverse geocode", r"آدرس مختصات"], risk="read", network=True,
+)
+
+
+async def _f1(resource: str = "driverstandings", season: str = "current", round: str = "last"):
+    return await get_f1_data(resource, season=season, round=round)
+
+async def _games(genre: str | None = None, platform: str | None = None, sort_by: str | None = None, max_results: int = 20):
+    return await search_games(genre=genre, platform=platform, sort_by=sort_by, max_results=max_results)
+
+async def _game(game_id: int | str):
+    return await get_game(game_id)
+
+async def _space_news(query: str | None = None, limit: int = 10):
+    return await search_spaceflight_news(query=query, limit=limit)
+
+register_tool(
+    name="hub_f1",
+    description="داده‌های فرمول یک شامل برنامه، نتایج و جدول رانندگان/سازندگان بدون API key.",
+    parameters={"type":"object","properties":{
+        "resource":{"type":"string"},"season":{"type":"string","default":"current"},"round":{"type":"string","default":"last"}
+    }}, handler=_f1, keywords=[r"فرمول یک", r"f1", r"formula 1", r"رانندگان", r"مسابقه"], risk="read", network=True,
+)
+
+register_tool(
+    name="hub_games",
+    description="جست‌وجو در کاتالوگ بازی‌های رایگان FreeToGame بدون API key.",
+    parameters={"type":"object","properties":{
+        "genre":{"type":"string"},"platform":{"type":"string"},"sort_by":{"type":"string"},"max_results":{"type":"integer","default":20}
+    }}, handler=_games, keywords=[r"بازی", r"game", r"بازی رایگان", r"free to play"], risk="read", network=True,
+)
+
+register_tool(
+    name="hub_game",
+    description="دریافت جزئیات یک بازی رایگان از FreeToGame.",
+    parameters={"type":"object","properties":{"game_id":{"type":"integer"}},"required":["game_id"]},
+    handler=_game, keywords=[r"جزئیات بازی", r"game details"], risk="read", network=True,
+)
+
+register_tool(
+    name="hub_spaceflight_news",
+    description="جست‌وجو و دریافت اخبار فضایی/پروازهای فضایی از Spaceflight News API بدون API key.",
+    parameters={"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","default":10}}},
+    handler=_space_news, keywords=[r"اخبار فضایی", r"space news", r"ناسا", r"موشک", r"ماهواره"], risk="read", network=True,
 )

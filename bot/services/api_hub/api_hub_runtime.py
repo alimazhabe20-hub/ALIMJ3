@@ -87,3 +87,57 @@ async def reverse_geocode(latitude: float, longitude: float, *, language: str = 
             "addressdetails": 1, "accept-language": language or "fa",
         },
     )
+
+
+async def get_f1_data(
+    resource: str = "driverstandings", *, season: str = "current", round: str = "last",
+) -> dict[str, Any]:
+    """Read Formula 1 data from the keyless Jolpica/Ergast-compatible API."""
+    allowed = {"driverstandings", "constructorstandings", "results", "qualifying", "sprint", "schedule"}
+    resource = str(resource or "driverstandings").strip().lower()
+    if resource not in allowed:
+        raise ValueError("unsupported F1 resource")
+    season = str(season or "current").strip()
+    round = str(round or "last").strip()
+    return await api_hub.call(
+        "jolpica_f1",
+        params={"season": season, "round": round, "resource": resource},
+    )
+
+
+async def search_games(
+    *, genre: str | None = None, platform: str | None = None,
+    sort_by: str | None = None, max_results: int = 20,
+) -> Any:
+    """Search the FreeToGame catalog without an API key."""
+    params: dict[str, Any] = {}
+    if genre:
+        params["genre"] = str(genre).strip()
+    if platform:
+        params["platform"] = str(platform).strip()
+    if sort_by:
+        params["sort-by"] = str(sort_by).strip()
+    data = await api_hub.call("freetogame_games", params=params)
+    if isinstance(data, list):
+        return data[:max(1, min(int(max_results), 50))]
+    return data
+
+
+async def get_game(game_id: int | str) -> Any:
+    value = str(game_id).strip()
+    if not value:
+        raise ValueError("game_id is required")
+    return await api_hub.call("freetogame_game", params={"id": value})
+
+
+async def search_spaceflight_news(
+    *, query: str | None = None, limit: int = 10, ordering: str = "-published_at",
+) -> dict[str, Any]:
+    """Fetch recent spaceflight news; optional query filters title/summary fields."""
+    params: dict[str, Any] = {
+        "limit": max(1, min(int(limit), 20)),
+        "ordering": ordering if ordering in {"published_at", "-published_at", "updated_at", "-updated_at"} else "-published_at",
+    }
+    if query and str(query).strip():
+        params["search"] = str(query).strip()
+    return await api_hub.call("spaceflight_news", params=params)
