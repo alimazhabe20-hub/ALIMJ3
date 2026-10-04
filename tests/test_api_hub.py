@@ -37,3 +37,8 @@ def test_health_check_shape() -> None:
     rows = asyncio.run(health_check())
     assert rows
     assert {"key", "category", "failures", "cooldown_seconds"}.issubset(rows[0])
+
+def test_new_keyless_capabilities_are_registered() -> None:
+    keys = {p.name for p in all_providers()}
+    assert {"coin_gecko_simple", "itunes_search", "musicbrainz", "tvmaze_search", "nager_date"}.issubset(keys)
+
