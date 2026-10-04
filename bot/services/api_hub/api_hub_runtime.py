@@ -41,3 +41,57 @@ async def search_books(query: str, *, limit: int = 10) -> dict[str, Any]:
 
 async def get_random_joke() -> dict[str, Any]:
     return await api_hub.call("jokeapi", params={"safe-mode": "true", "type": "single,twopart"})
+
+
+async def get_crypto_prices(
+    ids: str = "bitcoin,ethereum",
+    *,
+    vs_currency: str = "usd",
+    include_24h_change: bool = True,
+) -> dict[str, Any]:
+    """Get current public CoinGecko prices without an API key."""
+    return await api_hub.call(
+        "coin_gecko_simple",
+        params={
+            "ids": ids,
+            "vs_currencies": vs_currency.lower(),
+            "include_24hr_change": str(bool(include_24h_change)).lower(),
+        },
+    )
+
+
+async def search_music(query: str, *, limit: int = 10) -> dict[str, Any]:
+    """Search music metadata using iTunes Search (no key required)."""
+    return await api_hub.call(
+        "itunes_search",
+        params={
+            "term": query,
+            "media": "music",
+            "entity": "song",
+            "limit": max(1, min(int(limit), 50)),
+        },
+    )
+
+
+async def search_music_metadata(query: str, *, limit: int = 10) -> dict[str, Any]:
+    """Search recording metadata through MusicBrainz."""
+    return await api_hub.call(
+        "musicbrainz",
+        params={"query": query, "fmt": "json", "limit": max(1, min(int(limit), 100))},
+    )
+
+
+async def search_tv(query: str, *, limit: int = 10) -> list[dict[str, Any]]:
+    """Search TV shows through TVMaze."""
+    return await api_hub.call(
+        "tvmaze_search",
+        params={"q": query},
+    )
+
+
+async def get_public_holidays(year: int, country_code: str = "IR") -> list[dict[str, Any]]:
+    """Return public holidays for a country using Nager.Date."""
+    return await api_hub.call(
+        "nager_date",
+        params={"year": int(year), "country_code": country_code.upper()},
+    )

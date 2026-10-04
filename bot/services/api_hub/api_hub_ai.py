@@ -1,20 +1,19 @@
-"""AI bridge for ALIMJ3's keyless public API Hub.
+"""AI-tool bridge for the keyless API Hub.
 
-The bridge exposes a small set of intent-oriented, read-only tools instead of
-forcing the model to know provider names.  The generic ``api_hub_call`` remains
-available for advanced use, while the helpers below are safer defaults.
+The bridge exposes focused read-only capabilities without adding Telegram
+buttons.  Generic api_hub_call remains available for advanced requests.
 """
 from __future__ import annotations
 
 from bot.services.tool_runtime import register_tool
 from bot.services.api_hub import (
     api_call,
-    get_country,
-    get_exchange_rate,
-    get_weather,
+    get_crypto_prices,
+    get_public_holidays,
     list_providers,
-    search_books,
-    get_random_joke,
+    search_music,
+    search_music_metadata,
+    search_tv,
 )
 
 
@@ -26,24 +25,25 @@ async def _api_hub_call(provider: str, params: dict | None = None):
     return await api_call(provider, params or {})
 
 
-async def _hub_weather(latitude: float, longitude: float, forecast_days: int = 3):
-    return await get_weather(float(latitude), float(longitude), forecast_days=forecast_days)
+async def _crypto(ids: str = "bitcoin,ethereum", vs_currency: str = "usd"):
+    return await get_crypto_prices(ids, vs_currency=vs_currency)
 
 
-async def _hub_currency(base: str = "USD", target: str = "EUR"):
-    return await get_exchange_rate(base.upper(), target.upper())
+async def _music(query: str, limit: int = 10):
+    return await search_music(query, limit=limit)
 
 
-async def _hub_country(name: str):
-    return await get_country(name.strip())
+async def _music_metadata(query: str, limit: int = 10):
+    return await search_music_metadata(query, limit=limit)
 
 
-async def _hub_books(query: str, limit: int = 10):
-    return await search_books(query.strip(), limit=limit)
+async def _tv(query: str, limit: int = 10):
+    rows = await search_tv(query, limit=limit)
+    return rows[: max(1, min(int(limit), 50))]
 
 
-async def _hub_joke():
-    return await get_random_joke()
+async def _calendar(year: int, country_code: str = "IR"):
+    return await get_public_holidays(year, country_code)
 
 
 register_tool(
@@ -67,63 +67,80 @@ register_tool(
 )
 
 register_tool(
-    name="hub_weather",
-    description="گرفتن وضعیت فعلی و پیش‌بینی هوا از Open-Meteo بدون API key.",
+    name="hub_crypto",
+    description="قیمت لحظه‌ای عمومی ارزهای دیجیتال و تغییر ۲۴ ساعته از CoinGecko بدون API key.",
     parameters={
-        "type": "object", "properties": {
-            "latitude": {"type": "number"},
-            "longitude": {"type": "number"},
-            "forecast_days": {"type": "integer", "minimum": 1, "maximum": 16},
-        }, "required": ["latitude", "longitude"],
+        "type": "object",
+        "properties": {
+            "ids": {"type": "string", "description": "شناسه‌های CoinGecko با کاما؛ مثل bitcoin,ethereum"},
+            "vs_currency": {"type": "string", "description": "ارز نمایش قیمت؛ مثل usd یا eur"},
+        },
     },
-    handler=_hub_weather,
-    keywords=[],
-    risk="read", network=True,
+    handler=_crypto,
+    risk="read",
+    network=True,
 )
 
 register_tool(
-    name="hub_currency",
-    description="دریافت نرخ مرجع تبدیل دو ارز از Frankfurter بدون API key.",
+    name="hub_music",
+    description="جست‌وجوی آهنگ، خواننده و اطلاعات موسیقی با iTunes بدون API key.",
     parameters={
-        "type": "object", "properties": {
-            "base": {"type": "string"}, "target": {"type": "string"},
-        }, "required": ["base", "target"],
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "نام آهنگ، خواننده یا عبارت جست‌وجو"},
+            "limit": {"type": "integer", "description": "تعداد نتایج"},
+        },
+        "required": ["query"],
     },
-    handler=_hub_currency,
-    keywords=[],
-    risk="read", network=True,
+    handler=_music,
+    risk="read",
+    network=True,
 )
 
 register_tool(
-    name="hub_country",
-    description="دریافت اطلاعات کشور از REST Countries بدون API key.",
+    name="hub_music_metadata",
+    description="جست‌وجوی metadata موسیقی با MusicBrainz بدون API key.",
     parameters={
-        "type": "object", "properties": {"name": {"type": "string"}},
-        "required": ["name"],
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "عبارت جست‌وجوی MusicBrainz"},
+            "limit": {"type": "integer", "description": "تعداد نتایج"},
+        },
+        "required": ["query"],
     },
-    handler=_hub_country,
-    keywords=[],
-    risk="read", network=True,
+    handler=_music_metadata,
+    risk="read",
+    network=True,
 )
 
 register_tool(
-    name="hub_books",
-    description="جست‌وجوی کتاب در Open Library بدون API key.",
+    name="hub_tv",
+    description="جست‌وجوی فیلم و سریال تلویزیونی از TVMaze بدون API key.",
     parameters={
-        "type": "object", "properties": {
-            "query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50},
-        }, "required": ["query"],
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "نام سریال یا عبارت جست‌وجو"},
+            "limit": {"type": "integer", "description": "تعداد نتایج"},
+        },
+        "required": ["query"],
     },
-    handler=_hub_books,
-    keywords=[],
-    risk="read", network=True,
+    handler=_tv,
+    risk="read",
+    network=True,
 )
 
 register_tool(
-    name="hub_joke",
-    description="دریافت یک جوک تصادفی ایمن از JokeAPI بدون API key.",
-    parameters={"type": "object", "properties": {}},
-    handler=_hub_joke,
-    keywords=[],
-    risk="read", network=True,
+    name="hub_calendar",
+    description="دریافت تعطیلات رسمی کشورها با Nager.Date بدون API key.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "year": {"type": "integer", "description": "سال میلادی"},
+            "country_code": {"type": "string", "description": "کد دوحرفی کشور؛ ایران IR"},
+        },
+        "required": ["year"],
+    },
+    handler=_calendar,
+    risk="read",
+    network=True,
 )
