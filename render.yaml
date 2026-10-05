@@ -4,6 +4,7 @@ services:
     runtime: python
     repo: https://github.com/alimazhabe-max/ALIMJ  # آدرس مخزن خود را وارد کنید
     plan: free
+    healthCheckPath: /health
     envVars:
       - key: BOT_TOKEN
         sync: false
