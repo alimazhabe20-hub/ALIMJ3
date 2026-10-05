@@ -12,6 +12,16 @@ def select_capability_tool(prompt: str) -> Optional[str]:
     if not text:
         return None
 
+    # Deterministic high-priority routing for capabilities whose answer must come
+    # from a real subsystem (date/time, latest catalog, live market, ...).
+    try:
+        from bot.services.ai_capability_router import route_live_capability
+        live_tool = route_live_capability(text)
+        if live_tool and live_tool in _REGISTRY:
+            return live_tool
+    except Exception as exc:
+        logger.debug("capability router unavailable: %s", exc)
+
     # Time-sensitive requests must never fall back to model memory.  Prefer the
     # live product search for shopping requests; otherwise force a web/live tool.
     try:
