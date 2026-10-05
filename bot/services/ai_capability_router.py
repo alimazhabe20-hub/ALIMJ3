@@ -125,6 +125,56 @@ def route_live_capability(prompt: str) -> str | None:
     return None
 
 
+
+
+FALLBACK_CAPABILITY_ORDER: tuple[str, ...] = (
+    "hub_smart_public_api",
+    "web_search",
+)
+
+
+def fallback_capability_tool() -> str | None:
+    """Return the safest generic fallback tool available in the registry."""
+    registry = _registry()
+    for name in FALLBACK_CAPABILITY_ORDER:
+        if name in registry:
+            return name
+    return None
+
+
+def route_with_fallback(prompt: str) -> str | None:
+    """Route known requests first, then use public API/Web fallback."""
+    direct = route_live_capability(prompt)
+    if direct:
+        return direct
+    q = _normalize(prompt)
+    if not q:
+        return None
+    registry = _registry()
+    ranked: list[tuple[float, int, str]] = []
+    for name, entry in registry.items():
+        if name in FALLBACK_CAPABILITY_ORDER:
+            continue
+        score = 0.0
+        hits = 0
+        for kw in entry.get("keywords") or ():
+            try:
+                m = re.search(kw, q, re.I)
+            except re.error:
+                continue
+            if m:
+                hits += 1
+                score += 1.0 + min(len(m.group(0)), 64) / 16.0
+        if hits:
+            ranked.append((score, hits, name))
+    if ranked:
+        ranked.sort(reverse=True)
+        best = ranked[0]
+        if best[0] >= 2.25 or best[1] >= 2:
+            return best[2]
+    return fallback_capability_tool()
+
+
 def ai_capability_catalog() -> str:
     """Human-readable inventory used when the user asks what the bot can do."""
     inv = capability_inventory()
