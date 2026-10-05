@@ -63,3 +63,39 @@ def test_movie_tv_runtime_exports() -> None:
     assert callable(search_tv)
     assert callable(get_movie_catalog)
     assert callable(get_series_catalog)
+
+
+def test_registry_has_core_domains() -> None:
+    categories = {p.category for p in all_providers()}
+    required = {"anime", "games", "news", "science", "health", "security", "food", "animals", "dictionary", "text", "jobs", "development", "education", "vehicle", "transportation", "social"}
+    assert required.issubset(categories)
+
+
+def test_provider_status_is_real_state_shape() -> None:
+    rows = asyncio.run(health_check())
+    row = next(r for r in rows if r["key"] == "open_meteo_forecast")
+    assert "health_score" in row
+    assert "successes" in row
+    assert "last_error" in row
+
+
+def test_circuit_breaker_records_failures_and_recovers(monkeypatch) -> None:
+    from bot.services.api_hub.api_hub import APIHub
+    from bot.services.api_hub.api_hub_registry import get_provider
+    hub = APIHub()
+    hub._failure_threshold = 2
+    hub._cooldown_seconds = 30
+    err = RuntimeError("boom")
+    hub._record_failure("open_meteo_forecast", err)
+    hub._record_failure("open_meteo_forecast", err)
+    status = next(x for x in hub.provider_status() if x["key"] == "open_meteo_forecast")
+    assert status["healthy"] is False
+    assert status["cooldown_seconds"] > 0
+    hub._health["open_meteo_forecast"].cooldown_until = 0
+    assert hub._is_available("open_meteo_forecast") is True
+
+
+def test_smart_provider_selection() -> None:
+    from bot.services.api_hub.api_hub import APIHub
+    hub = APIHub()
+    assert hub.choose_provider("weather") in {"open_meteo_forecast", "ipma_weather"}
