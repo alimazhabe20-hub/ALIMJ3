@@ -52,16 +52,13 @@ def test_shopping_and_geocoding_runtime_exports() -> None:
     assert callable(reverse_geocode)
 
 
-def test_sports_games_news_providers_are_keyless() -> None:
-    assert get_provider("jolpica_f1").auth == "No"
-    assert get_provider("freetogame_games").auth == "No"
-    assert get_provider("freetogame_game").auth == "No"
-    assert get_provider("spaceflight_news").auth == "No"
+def test_next_phase_providers_are_keyless() -> None:
+    assert get_provider("artic_search").auth == "No"
+    assert get_provider("thecolorapi").auth == "No"
+    assert get_provider("isgd_shortener").auth == "No"
+    assert get_provider("opensky_states").auth == "No"
 
 
-def test_sports_games_news_runtime_exports() -> None:
-    from bot.services.api_hub import get_f1_data, search_games, get_game, search_spaceflight_news
-    assert callable(get_f1_data)
-    assert callable(search_games)
-    assert callable(get_game)
-    assert callable(search_spaceflight_news)
+def test_next_phase_runtime_exports() -> None:
+    from bot.services.api_hub import search_art, get_color_info, shorten_url, get_aircraft_states
+    assert all(callable(x) for x in (search_art, get_color_info, shorten_url, get_aircraft_states))
