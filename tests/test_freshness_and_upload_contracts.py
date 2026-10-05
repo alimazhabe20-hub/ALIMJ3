@@ -9,7 +9,7 @@ def test_live_router_requires_tools_for_time_sensitive_requests():
     assert select_capability_tool("آخرین اخبار آیفون 18 چیست؟") == "web_search"
     assert select_capability_tool("قیمت بیت کوین الان چنده؟") == "get_crypto_price"
     assert select_capability_tool("هوای تهران امروز چطوره؟") == "get_weather"
-    assert select_capability_tool("فلسفه چیست؟") is None
+    assert select_capability_tool("فلسفه چیست؟") == "hub_smart_public_api"
 
 
 def test_web_search_is_marked_live_and_has_no_stale_fallback():
