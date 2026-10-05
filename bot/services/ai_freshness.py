@@ -1,8 +1,8 @@
-"""Temporal routing for AI requests.
+"""Freshness routing for AI requests.
 
-Classifies only requests whose answers are time-sensitive. Static/general questions
-remain untouched; time-sensitive questions are routed to a live tool when one is
-available. The current year/date always comes from the runtime clock.
+Requests whose answer can change with time must use a live tool before the model
+is allowed to answer.  This module deliberately does not contain provider logic;
+it only classifies the user request and supplies a safe instruction.
 """
 from __future__ import annotations
 
@@ -16,85 +16,93 @@ class FreshnessDecision:
     required: bool
     tool: str | None
     reason: str
-    category: str
-    reference_date: str
-    reference_year: int
 
 
-def _norm(text: str) -> str:
-    return (text or "").strip().replace("ي", "ی").replace("ك", "ک")
-
-
-# Explicit temporal language. Do NOT treat the word «جدید» by itself as live;
-# it is only live when the subject is time-sensitive (movie/news/product/etc.).
-_TIME_MARKERS = re.compile(
-    r"(?:امروز|الان|همین\s*الان|فعلی|فعلاً|در\s*حال\s*حاضر|این\s*(?:روز|هفته|ماه|سال)|"
-    r"امسال|سال\s*جاری|اخیراً|اخیر|تازه|جدیدترین|آخرین|به.?روز(?:ترین)?|تا\s*الان|"
-    r"today|now|current|latest|recent|newest|live|real.?time|this\s+(?:week|month|year)|"
-    r"\b202[0-9]\b|\b203[0-9]\b)", re.I,
+_LIVE_MARKERS = re.compile(
+    r"(?:امروز|الان|همین الان|فعلی|فعلاً|فعلیه|جدیدترین|آخرین|جدیدترین|به.?روز|به.?روزترین|روز|این روزها|2026|2027|latest|current|today|now|newest|recent|live|real.?time)",
+    re.I,
 )
-_NEWS = re.compile(r"(?:خبر|اخبار|خبر\s*جدید|آخرین\s*خبر|چه\s*خبر|news|breaking|headline)", re.I)
-_MARKET = re.compile(r"(?:قیمت|نرخ|بیت.?کوین|bitcoin|اتریوم|ethereum|تتر|usdt|کریپتو|رمزارز|طلا|xau|دلار|یورو|سکه|ارز|stock|سهام)", re.I)
-_WEATHER = re.compile(r"(?:هوا|آب.?وهوا|دما|دمای|باران|برف|رطوبت|پیش.?بینی\s*هوا|weather|forecast|air quality)", re.I)
-_PRODUCT = re.compile(r"(?:خرید|بخر|فروشگاه|فروشنده|قیمت.*(?:گوشی|آیفون|iphone|لپ.?تاپ|تلویزیون|کفش|محصول|کالا)|(?:گوشی|آیفون|iphone|لپ.?تاپ|تلویزیون|کفش|محصول|کالا).*(?:قیمت|خرید|موجودی)|قیمت\s*روز|لینک\s*خرید|ارزان.?ترین|موجودی|price.*product|buy|shop)", re.I)
-_MOVIE = re.compile(r"(?:فیلم|سریال|movie|series|show|IMDb|imdb|سینما)", re.I)
-_MOVIE_FRESH = re.compile(r"(?:فیلم|سریال|movie|series|show).*(?:جدید|تازه|امسال|این\s*(?:ماه|سال)|اخیر|جدیدترین|آخرین)|(?:جدیدترین|آخرین|تازه|جدید).*(?:فیلم|سریال|movie|series)", re.I)
-
-
-def current_datetime() -> datetime:
-    return datetime.now(timezone.utc)
+_NEWS_MARKERS = re.compile(
+    r"(?:خبر|اخبار|آخرین خبر|خبر جدید|چه خبر|news|breaking|headline)", re.I
+)
+_PRODUCT_MARKERS = re.compile(
+    r"(?:خرید|بخر|فروشگاه|فروشنده|قیمت.*(?:گوشی|آیفون|iphone|لپ.?تاپ|تلویزیون|کفش|خمیر|محصول|کالا)|"
+    r"(?:گوشی|آیفون|iphone|لپ.?تاپ|تلویزیون|کفش|خمیر|محصول|کالا).*(?:قیمت|خرید|موجودی)|"
+    r"قیمت روز محصول|لینک خرید|ارزان.?ترین|موجودی|price.*product|buy|shop)",
+    re.I,
+)
+_MARKET_MARKERS = re.compile(
+    r"(?:بیت.?کوین|bitcoin|اتریوم|ethereum|تتر|usdt|کریپتو|رمزارز|طلا|xau|دلار|یورو|سکه|ارز|"
+    r"قیمت.*(?:دلار|یورو|طلا|سکه|بیت|اتریوم|تتر)|نرخ.*(?:دلار|یورو|ارز))",
+    re.I,
+)
+_WEATHER_MARKERS = re.compile(
+    r"(?:هوا|آب.?وهوا|دمای|باران|برف|رطوبت|weather|forecast|air quality|کیفیت هوا)", re.I
+)
+_DATETIME_MARKERS = re.compile(
+    r"(?:تاریخ\s*(?:دقیق|فعلی|الان|امروز)|امروز\s*چندمه|الان\s*(?:چه\s*)?تاریخ|"
+    r"الان\s*(?:ساعت|چه\s*ساعتی)|ساعت\s*الان|current\s*(?:date|time|datetime)|"
+    r"today(?:\s*date)?|what\s*time\s*is\s*it|right\s*now)", re.I
+)
+_MOVIE_MARKERS = re.compile(
+    r"(?:فیلم|سریال|movie|series|IMDb|فیلم\s*(?:جدید|تازه|امسال|این ماه|اخیر)|جدیدترین\s*(?:فیلم|سریال)|آخرین\s*(?:فیلم|سریال))", re.I
+)
 
 
 def is_live_required(text: str) -> bool:
-    q = _norm(text)
+    """Return True when answering from model memory would be unsafe/stale."""
+    q = (text or "").strip()
     if not q:
         return False
-    # Subject-specific dynamic data.
-    if _NEWS.search(q) or _MARKET.search(q) or _WEATHER.search(q) or _PRODUCT.search(q):
-        return True
-    # Movie/TV is live only when the user asks for current/new/recent info.
-    if _MOVIE_FRESH.search(q):
-        return True
-    # Generic temporal language is live, but a normal static question is not.
-    return bool(_TIME_MARKERS.search(q))
+    return bool(
+        _DATETIME_MARKERS.search(q)
+        or _LIVE_MARKERS.search(q)
+        or _NEWS_MARKERS.search(q)
+        or _PRODUCT_MARKERS.search(q)
+        or _MARKET_MARKERS.search(q)
+        or _WEATHER_MARKERS.search(q)
+        or _MOVIE_MARKERS.search(q)
+    )
 
 
 def classify(text: str) -> FreshnessDecision:
-    q = _norm(text)
-    now = current_datetime()
-    date = now.date().isoformat()
-    year = now.year
-    if not q or not is_live_required(q):
-        return FreshnessDecision(False, None, "static_or_general", "general", date, year)
-    if _PRODUCT.search(q):
-        return FreshnessDecision(True, "search_shopping", "product/shopping data can change", "shopping", date, year)
-    if _WEATHER.search(q):
-        return FreshnessDecision(True, None, "weather data changes continuously", "weather", date, year)
-    if _MARKET.search(q):
-        return FreshnessDecision(True, None, "market data changes continuously", "market", date, year)
-    if _NEWS.search(q):
-        return FreshnessDecision(True, "web_search", "news must be verified live", "news", date, year)
-    if _MOVIE_FRESH.search(q):
-        return FreshnessDecision(True, "hub_movie_tv_latest", "current movie/TV catalog is required", "movie_tv", date, year)
-    return FreshnessDecision(True, "web_search", "time-sensitive information requires live verification", "general_live", date, year)
+    q = (text or "").strip()
+    if not is_live_required(q):
+        return FreshnessDecision(False, None, "static_or_general")
+    if _DATETIME_MARKERS.search(q):
+        return FreshnessDecision(True, "get_current_datetime", "current date/time must come from the real system clock")
+    if _PRODUCT_MARKERS.search(q):
+        return FreshnessDecision(True, "search_shopping", "product/shopping data can change")
+    if _MARKET_MARKERS.search(q):
+        return FreshnessDecision(True, None, "market data can change")
+    if _WEATHER_MARKERS.search(q):
+        return FreshnessDecision(True, None, "weather data can change")
+    if _MOVIE_MARKERS.search(q):
+        return FreshnessDecision(True, "hub_movie_tv_latest", "movie/TV recommendations must use current catalog data")
+    return FreshnessDecision(True, "web_search", "time-sensitive information requires live verification")
 
 
 def today_utc() -> str:
-    return current_datetime().date().isoformat()
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 def build_instruction(text: str) -> str:
-    d = classify(text)
-    if not d.required:
+    decision = classify(text)
+    if not decision.required:
         return ""
-    tool_line = f"ابزار اجباری برای این درخواست: {d.tool}." if d.tool else "ابتدا از ابزار زنده/مرتبط ثبت‌شده استفاده کن و نتیجه آن را مبنا قرار بده."
+    tool_line = (
+        f"ابزار اجباری برای این درخواست: {decision.tool}."
+        if decision.tool
+        else "ابتدا از ابزار زنده/مرتبط ثبت‌شده استفاده کن و نتیجه آن را مبنا قرار بده."
+    )
     return (
         "\n\n[LIVE DATA REQUIRED]\n"
-        f"این سؤال زمان‌مند است ({d.reason}). {tool_line} "
-        "قبل از پاسخ نهایی، داده زنده را بررسی کن. برای اطلاعات فعلی، قیمت، خبر، آب‌وهوا، "
-        "موجودی و پیشنهادهای جدید از حافظه مدل به‌عنوان واقعیت امروز استفاده نکن. "
+        f"این سؤال زمان‌مند است ({decision.reason}). {tool_line} "
+        "قبل از پاسخ نهایی، داده زنده را بررسی کن. از دانش قدیمی مدل برای قیمت، خبر، "
+        "موجودی، وضعیت فعلی یا مشخصات عرضه‌شده به‌عنوان واقعیت امروز استفاده نکن. "
         "اگر ابزار زنده شکست خورد یا داده قابل تأیید نداد، صریحاً بگو اطلاعات فعلی قابل تأیید نیست "
-        "و عدد/خبر/موجودی حدسی ارائه نکن. "
-        f"تاریخ مرجع سیستم: {d.reference_date} UTC و سال جاری: {d.reference_year}. "
-        "برای فیلم/سریال جدید، سال جاری را از همین تاریخ استخراج کن؛ هرگز سال ثابتی مثل 2024 را سال جاری فرض نکن."
+        "و هیچ عدد/خبر/موجودی حدسی ارائه نکن.\n"
+        f"تاریخ مرجع سیستم: {today_utc()} (UTC). "
+        "برای فیلم/سریال جدید، سال فعلی را از تاریخ مرجع استخراج کن و هرگز سال ثابتی مثل 2024 را سال جاری فرض نکن. "
+        "نتایج را بر اساس سال فعلی و سپس سال قبل مرتب کن."
     )
