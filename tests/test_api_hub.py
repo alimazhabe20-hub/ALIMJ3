@@ -50,3 +50,16 @@ def test_shopping_and_geocoding_runtime_exports() -> None:
     assert callable(search_products)
     assert callable(geocode)
     assert callable(reverse_geocode)
+
+
+def test_movie_tv_providers_are_keyless() -> None:
+    for name in ("tvmaze_search", "tvmaze_schedule", "tvmaze_web_schedule", "cinemeta_catalog_movies", "cinemeta_catalog_series"):
+        assert get_provider(name).auth == "No"
+
+
+def test_movie_tv_runtime_exports() -> None:
+    from bot.services.api_hub import movie_tv_intelligence, search_tv, get_movie_catalog, get_series_catalog
+    assert callable(movie_tv_intelligence)
+    assert callable(search_tv)
+    assert callable(get_movie_catalog)
+    assert callable(get_series_catalog)
