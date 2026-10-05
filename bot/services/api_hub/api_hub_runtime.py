@@ -88,69 +88,59 @@ async def reverse_geocode(latitude: float, longitude: float, *, language: str = 
         },
     )
 
-async def get_f1_data(season: str = "current", round_name: str = "next") -> dict[str, Any]:
-    """Fetch Formula 1 schedule/results through the keyless Jolpica API."""
-    season = str(season or "current").strip()
-    round_name = str(round_name or "next").strip()
-    return await api_hub.call("jolpica_f1", params={"season": season, "round": round_name})
 
-
-async def search_free_games(
-    *, platform: str | None = None, genre: str | None = None,
-    sort_by: str | None = None, limit: int = 20,
-) -> Any:
-    params: dict[str, Any] = {}
-    if platform:
-        params["platform"] = str(platform)
-    if genre:
-        params["category"] = str(genre)
-    if sort_by:
-        params["sort-by"] = str(sort_by)
-    data = await api_hub.call("freetogame_games", params=params)
-    if isinstance(data, list):
-        return data[:max(1, min(int(limit), 100))]
-    return data
-
-
-async def search_space_news(query: str | None = None, *, limit: int = 10) -> Any:
-    params: dict[str, Any] = {"limit": max(1, min(int(limit), 50)), "ordering": "-published_at"}
-    if query:
-        params["search"] = str(query).strip()
-    return await api_hub.call("spaceflight_news", params=params)
-
-
-async def search_artworks(query: str, *, limit: int = 10) -> Any:
+async def search_scientific_literature(query: str, *, limit: int = 10) -> dict[str, Any]:
     q = str(query or "").strip()
     if not q:
         raise ValueError("query is required")
-    return await api_hub.call("artic_search", params={"q": q, "limit": max(1, min(int(limit), 100))})
+    return await api_hub.call(
+        "europe_pmc_search",
+        params={"query": q, "format": "json", "pageSize": max(1, min(int(limit), 50)), "resultType": "lite"},
+    )
 
 
-async def get_color(value: str) -> Any:
-    value = str(value or "").strip()
-    if not value:
-        raise ValueError("value is required")
-    return await api_hub.call("thecolorapi", params={"hex": value.lstrip("#")})
+async def search_species(query: str, *, limit: int = 10) -> dict[str, Any]:
+    q = str(query or "").strip()
+    if not q:
+        raise ValueError("query is required")
+    return await api_hub.call(
+        "gbif_species_search",
+        params={"q": q, "limit": max(1, min(int(limit), 50))},
+    )
 
 
-async def shorten_url(url: str) -> Any:
-    url = str(url or "").strip()
-    if not (url.startswith("http://") or url.startswith("https://")):
-        raise ValueError("a valid http(s) URL is required")
-    return await api_hub.call("isgd_shortener", params={"format": "json", "url": url})
+async def search_clinical_trials(query: str, *, limit: int = 10) -> dict[str, Any]:
+    q = str(query or "").strip()
+    if not q:
+        raise ValueError("query is required")
+    return await api_hub.call(
+        "clinical_trials_search",
+        params={"query.term": q, "pageSize": max(1, min(int(limit), 50)), "format": "json"},
+    )
 
 
-async def get_aircraft_states(
-    *, min_latitude: float | None = None, max_latitude: float | None = None,
-    min_longitude: float | None = None, max_longitude: float | None = None,
-) -> Any:
-    params: dict[str, Any] = {}
-    bounds = {
-        "lamin": min_latitude, "lamax": max_latitude,
-        "lomin": min_longitude, "lomax": max_longitude,
-    }
-    for key, value in bounds.items():
-        if value is not None:
-            params[key] = float(value)
-    return await api_hub.call("opensky_states", params=params)
+async def search_cves(keyword: str | None = None, *, cve_id: str | None = None, limit: int = 10) -> dict[str, Any]:
+    params: dict[str, Any] = {"resultsPerPage": max(1, min(int(limit), 20))}
+    if cve_id:
+        params["cveId"] = str(cve_id).strip().upper()
+    elif keyword:
+        params["keywordSearch"] = str(keyword).strip()
+    else:
+        raise ValueError("keyword or cve_id is required")
+    return await api_hub.call("nvd_cves", params=params)
 
+
+async def open_data(
+    *, data_type: str, drilldowns: str | None = None, measures: str | None = None,
+    year: int | str | None = None, filters: str | None = None, limit: int = 20,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {"Geography": "04000US06" if data_type.lower() == "Population" else None}
+    params = {k: v for k, v in params.items() if v is not None}
+    params["drilldowns"] = drilldowns or "Nation"
+    params["measures"] = measures or data_type
+    if year is not None:
+        params["year"] = str(year)
+    if filters:
+        params["properties"] = filters
+    params["limit"] = max(1, min(int(limit), 100))
+    return await api_hub.call("datausa", params=params)

@@ -102,37 +102,29 @@ PROVIDERS: dict[str, APIProvider] = {
         "coin_gecko_simple", "crypto", "https://api.coingecko.com/api/v3/simple/price",
         cache_ttl=20, description="Crypto prices; no key required for public endpoint.",
     ),
-    "jolpica_f1": APIProvider(
-        "jolpica_f1", "sports", "https://api.jolpi.ca/ergast/f1/{season}/{round}.json",
-        cache_ttl=30, description="Formula 1 data compatible with Ergast; no key required.",
-    ),
-    "freetogame_games": APIProvider(
-        "freetogame_games", "games", "https://www.freetogame.com/api/games",
-        cache_ttl=300, description="Free-to-play games catalog; no key required.",
-    ),
-    "spaceflight_news": APIProvider(
-        "spaceflight_news", "news", "https://api.spaceflightnewsapi.net/v4/articles/",
-        cache_ttl=120, description="Spaceflight news articles; no key required.",
-    ),
-    "artic_search": APIProvider(
-        "artic_search", "art", "https://api.artic.edu/api/v1/artworks/search",
-        cache_ttl=3600, description="Art Institute of Chicago artwork search; no key required.",
-    ),
-    "thecolorapi": APIProvider(
-        "thecolorapi", "art", "https://www.thecolorapi.com/id",
-        cache_ttl=86400, description="Color information and conversions; no key required.",
-    ),
-    "isgd_shortener": APIProvider(
-        "isgd_shortener", "url", "https://is.gd/create.php",
-        cache_ttl=300, description="Simple URL shortening; no key required.",
-    ),
-    "opensky_states": APIProvider(
-        "opensky_states", "transportation", "https://opensky-network.org/api/states/all",
-        timeout=15, cache_ttl=15, description="Live aircraft state vectors; no key required for public endpoint.",
-    ),
     "ipma_weather": APIProvider(
         "ipma_weather", "weather", "https://api.ipma.pt/open-data/forecast/meteorology/cities/daily/{city_id}.json",
         cache_ttl=120, description="Portuguese weather data; no key required.",
+    ),
+    "europe_pmc_search": APIProvider(
+        "europe_pmc_search", "science", "https://www.ebi.ac.uk/europepmc/webservices/rest/search",
+        timeout=12, cache_ttl=300, description="Scientific literature search; no key required.",
+    ),
+    "gbif_species_search": APIProvider(
+        "gbif_species_search", "science", "https://api.gbif.org/v1/species/search",
+        timeout=12, cache_ttl=3600, description="Biodiversity/species search; no key required.",
+    ),
+    "clinical_trials_search": APIProvider(
+        "clinical_trials_search", "health", "https://clinicaltrials.gov/api/v2/studies",
+        timeout=12, cache_ttl=600, description="Clinical trials search; no key required.",
+    ),
+    "nvd_cves": APIProvider(
+        "nvd_cves", "security", "https://services.nvd.nist.gov/rest/json/cves/2.0",
+        timeout=15, cache_ttl=300, description="NIST National Vulnerability Database CVE search; API key optional.",
+    ),
+    "datausa": APIProvider(
+        "datausa", "open_data", "https://datausa.io/api/data",
+        timeout=12, cache_ttl=3600, description="Open socioeconomic and demographic data; no key required.",
     ),
 }
 

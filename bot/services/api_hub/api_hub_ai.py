@@ -8,8 +8,8 @@ from __future__ import annotations
 from bot.services.tool_runtime import register_tool
 from bot.services.api_hub import (
     api_call, list_providers, search_products, geocode, reverse_geocode,
-    get_f1_data, search_free_games, search_space_news, search_artworks, get_color,
-    shorten_url, get_aircraft_states,
+    search_scientific_literature, search_species, search_clinical_trials,
+    search_cves, open_data,
 )
 
 
@@ -85,55 +85,44 @@ register_tool(
     handler=_reverse_geocode, keywords=[r"reverse geocode", r"آدرس مختصات"], risk="read", network=True,
 )
 
-register_tool(
-    name="hub_f1",
-    description="داده‌های فرمول یک شامل برنامه و نتایج از Jolpica/Ergast بدون API key.",
-    parameters={"type": "object", "properties": {"season": {"type": "string", "default": "current"}, "round_name": {"type": "string", "default": "next"}}},
-    handler=get_f1_data, keywords=[r"فرمول یک", r"f1", r"formula 1", r"گران پری"], risk="read", network=True,
-)
+
+async def _science_search(query: str, limit: int = 10):
+    return await search_scientific_literature(query, limit=limit)
+
+async def _species_search(query: str, limit: int = 10):
+    return await search_species(query, limit=limit)
+
+async def _clinical_trials(query: str, limit: int = 10):
+    return await search_clinical_trials(query, limit=limit)
+
+async def _cve_search(keyword: str | None = None, cve_id: str | None = None, limit: int = 10):
+    return await search_cves(keyword, cve_id=cve_id, limit=limit)
+
+async def _open_data(data_type: str, drilldowns: str = "Nation", measures: str | None = None, year: int | None = None, filters: str | None = None, limit: int = 20):
+    return await open_data(data_type=data_type, drilldowns=drilldowns, measures=measures, year=year, filters=filters, limit=limit)
 
 register_tool(
-    name="hub_free_games",
-    description="جست‌وجوی بازی‌های رایگان با فیلتر پلتفرم، ژانر و مرتب‌سازی.",
-    parameters={"type": "object", "properties": {"platform": {"type": "string"}, "genre": {"type": "string"}, "sort_by": {"type": "string"}, "limit": {"type": "integer", "default": 20}}},
-    handler=search_free_games, keywords=[r"بازی", r"گیم", r"game", r"free game"], risk="read", network=True,
+    name="hub_science_search", description="جست‌وجوی مقالات علمی و پزشکی در Europe PMC.",
+    parameters={"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","default":10}},"required":["query"]},
+    handler=_science_search, keywords=[r"مقاله علمی",r"تحقیق",r"science",r"paper",r"پژوهش"], risk="read", network=True,
 )
-
 register_tool(
-    name="hub_space_news",
-    description="دریافت و جست‌وجوی اخبار فضایی بدون API key.",
-    parameters={"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "default": 10}}},
-    handler=search_space_news, keywords=[r"اخبار فضایی", r"space news", r"ناسا", r"ماهواره"], risk="read", network=True,
+    name="hub_species_search", description="جست‌وجوی گونه‌ها و داده‌های تنوع زیستی در GBIF.",
+    parameters={"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","default":10}},"required":["query"]},
+    handler=_species_search, keywords=[r"گونه",r"حیوان",r"گیاه",r"species",r"biodiversity"], risk="read", network=True,
 )
-
 register_tool(
-    name="hub_art_search",
-    description="جست‌وجوی آثار هنری در Art Institute of Chicago.",
-    parameters={"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "default": 10}}, "required": ["query"]},
-    handler=search_artworks, keywords=[r"هنر", r"اثر هنری", r"artwork", r"نقاشی"], risk="read", network=True,
+    name="hub_clinical_trials", description="جست‌وجوی مطالعات و کارآزمایی‌های بالینی در ClinicalTrials.gov؛ نتیجه جایگزین تشخیص پزشکی نیست.",
+    parameters={"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","default":10}},"required":["query"]},
+    handler=_clinical_trials, keywords=[r"clinical trial",r"کارآزمایی بالینی",r"مطالعه پزشکی",r"clinicaltrials"], risk="read", network=True,
 )
-
 register_tool(
-    name="hub_color",
-    description="دریافت مشخصات رنگ و تبدیل‌های رنگی از TheColorAPI.",
-    parameters={"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]},
-    handler=get_color, keywords=[r"رنگ", r"hex", r"color"], risk="read", network=True,
+    name="hub_security_cve", description="جست‌وجوی آسیب‌پذیری‌های CVE در NVD؛ داده امنیتی است و اجرای حمله انجام نمی‌دهد.",
+    parameters={"type":"object","properties":{"keyword":{"type":"string"},"cve_id":{"type":"string"},"limit":{"type":"integer","default":10}}},
+    handler=_cve_search, keywords=[r"CVE",r"آسیب پذیری",r"vulnerability",r"NVD",r"امنیت"], risk="read", network=True,
 )
-
 register_tool(
-    name="hub_shorten_url",
-    description="کوتاه‌کردن لینک HTTP/HTTPS با is.gd.",
-    parameters={"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
-    handler=shorten_url, keywords=[r"کوتاه کردن لینک", r"short url", r"shorten url"], risk="read", network=True,
+    name="hub_open_data", description="دریافت داده‌های عمومی اقتصادی و جمعیتی از Data USA.",
+    parameters={"type":"object","properties":{"data_type":{"type":"string"},"drilldowns":{"type":"string","default":"Nation"},"measures":{"type":"string"},"year":{"type":"integer"},"filters":{"type":"string"},"limit":{"type":"integer","default":20}},"required":["data_type"]},
+    handler=_open_data, keywords=[r"داده عمومی",r"open data",r"آمار",r"جمعیت",r"اقتصاد"], risk="read", network=True,
 )
-
-register_tool(
-    name="hub_aircraft_states",
-    description="دریافت وضعیت هواپیماهای قابل مشاهده از OpenSky؛ امکان تعیین محدوده جغرافیایی.",
-    parameters={"type": "object", "properties": {
-        "min_latitude": {"type": "number"}, "max_latitude": {"type": "number"},
-        "min_longitude": {"type": "number"}, "max_longitude": {"type": "number"},
-    }},
-    handler=get_aircraft_states, keywords=[r"هواپیما", r"پرواز", r"flight", r"aircraft", r"opensky"], risk="read", network=True,
-)
-
