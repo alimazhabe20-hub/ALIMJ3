@@ -125,6 +125,40 @@ async def get_series_catalog(*, limit: int = 20) -> dict[str, Any]:
     return {"source": "Cinemeta", "type": "series", "results": metas[: max(1, min(int(limit), 50))]}
 
 
+async def movie_tv_latest(*, content_type: str = "movie", limit: int = 10) -> dict[str, Any]:
+    """Discover current-year/near-current movie or TV releases from live catalogs."""
+    from datetime import datetime, timezone
+    current_year = datetime.now(timezone.utc).year
+    n = max(1, min(int(limit), 20))
+    wanted = str(content_type or "movie").lower()
+    if wanted in {"tv", "series"}: wanted = "series"
+    elif wanted not in {"movie", "series", "both"}: wanted = "movie"
+    async def safe(coro):
+        try: return await coro
+        except Exception: return None
+    movies, series = [], []
+    if wanted in {"movie", "both"}:
+        data = await safe(get_movie_catalog(limit=50)); movies = (data or {}).get("results", []) if isinstance(data, dict) else []
+    if wanted in {"series", "both"}:
+        data = await safe(get_series_catalog(limit=50)); series = (data or {}).get("results", []) if isinstance(data, dict) else []
+    def year_of(item):
+        for key in ("year", "y", "release_year", "released", "releaseInfo", "premiered", "release_date", "releasedate"):
+            value = item.get(key)
+            text = str(value or "").strip()
+            if text[:4].isdigit(): return int(text[:4])
+        return None
+    def prepare(items):
+        out=[]
+        for item in items:
+            if not isinstance(item, dict): continue
+            y=year_of(item)
+            if y is None or y > current_year or y < current_year-1: continue
+            out.append({**item, "year": y})
+        out.sort(key=lambda x: (x.get("year",0), float(x.get("rating") or x.get("imdbRating") or 0)), reverse=True)
+        return out[:n]
+    return {"current_year": current_year, "fallback_year": current_year-1, "content_type": wanted, "movies": prepare(movies), "series": prepare(series), "sources": ["Cinemeta"], "live": True}
+
+
 async def movie_tv_intelligence(*, query: str | None = None, content_type: str = "both", limit: int = 10) -> dict[str, Any]:
     """Multi-source movie/TV discovery with real query search and deduplication.
 

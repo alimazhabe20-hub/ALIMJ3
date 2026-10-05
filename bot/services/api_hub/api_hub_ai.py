@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from bot.services.tool_runtime import register_tool
 from bot.services.api_hub import (
-    api_call, list_providers, search_products, geocode, reverse_geocode, movie_tv_intelligence,
+    api_call, list_providers, search_products, geocode, reverse_geocode, movie_tv_intelligence, movie_tv_latest,
 )
 
 
@@ -121,5 +121,18 @@ register_tool(
     },
     handler=_smart_public_api,
     keywords=[r"انتخاب api", r"smart api", r"api سالم", r"fallback api"],
+    risk="read", network=True,
+)
+
+
+async def _movie_tv_latest(content_type: str = "movie", limit: int = 10):
+    return await movie_tv_latest(content_type=content_type, limit=limit)
+
+register_tool(
+    name="hub_movie_tv_latest",
+    description="پیدا کردن فیلم یا سریال جدید با داده زنده؛ سال جاری از ساعت سیستم گرفته می‌شود و سال ثابت 2024 هرگز به‌عنوان سال جاری استفاده نمی‌شود.",
+    parameters={"type":"object","properties":{"content_type":{"type":"string","enum":["movie","series","both"],"default":"movie"},"limit":{"type":"integer","default":10}}},
+    handler=_movie_tv_latest,
+    keywords=[r"فیلم جدید", r"فیلم تازه", r"جدیدترین فیلم", r"فیلم امسال", r"سریال جدید", r"جدیدترین سریال", r"latest movie", r"new movie"],
     risk="read", network=True,
 )
