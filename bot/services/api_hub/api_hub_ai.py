@@ -8,7 +8,7 @@ from __future__ import annotations
 from bot.services.tool_runtime import register_tool
 from bot.services.api_hub import (
     api_call, list_providers, search_products, geocode, reverse_geocode,
-    get_f1_data, search_games, get_game, search_spaceflight_news,
+    search_art, get_color_info, shorten_url, get_aircraft_states,
 )
 
 
@@ -85,44 +85,45 @@ register_tool(
 )
 
 
-async def _f1(resource: str = "driverstandings", season: str = "current", round: str = "last"):
-    return await get_f1_data(resource, season=season, round=round)
+async def _art_search(query: str, limit: int = 10):
+    return await search_art(query, limit=limit)
 
-async def _games(genre: str | None = None, platform: str | None = None, sort_by: str | None = None, max_results: int = 20):
-    return await search_games(genre=genre, platform=platform, sort_by=sort_by, max_results=max_results)
+async def _color_info(color: str):
+    return await get_color_info(color)
 
-async def _game(game_id: int | str):
-    return await get_game(game_id)
+async def _shorten_url(url: str):
+    return await shorten_url(url)
 
-async def _space_news(query: str | None = None, limit: int = 10):
-    return await search_spaceflight_news(query=query, limit=limit)
+async def _aircraft_states(lamin: float | None = None, lomin: float | None = None, lamax: float | None = None, lomax: float | None = None):
+    return await get_aircraft_states(lamin=lamin, lomin=lomin, lamax=lamax, lomax=lomax)
+
 
 register_tool(
-    name="hub_f1",
-    description="داده‌های فرمول یک شامل برنامه، نتایج و جدول رانندگان/سازندگان بدون API key.",
+    name="hub_art_search",
+    description="جست‌وجوی آثار هنری و اطلاعات تصویر از Art Institute of Chicago بدون API key.",
+    parameters={"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","default":10}},"required":["query"]},
+    handler=_art_search, keywords=[r"هنر", r"اثر هنری", r"art", r"artwork", r"نقاشی"], risk="read", network=True,
+)
+
+register_tool(
+    name="hub_color_info",
+    description="دریافت اطلاعات دقیق رنگ، نام، RGB/HSL و پالت مرتبط از TheColorAPI.",
+    parameters={"type":"object","properties":{"color":{"type":"string"}},"required":["color"]},
+    handler=_color_info, keywords=[r"رنگ", r"color", r"hex", r"rgb"], risk="read", network=True,
+)
+
+register_tool(
+    name="hub_shorten_url",
+    description="کوتاه‌کردن لینک http/https با is.gd بدون API key.",
+    parameters={"type":"object","properties":{"url":{"type":"string"}},"required":["url"]},
+    handler=_shorten_url, keywords=[r"کوتاه کردن لینک", r"short url", r"url کوتاه", r"لینک کوتاه"], risk="read", network=True,
+)
+
+register_tool(
+    name="hub_aircraft_states",
+    description="دریافت وضعیت زنده هواپیماها از OpenSky؛ امکان محدودکردن محدوده جغرافیایی با bounding box.",
     parameters={"type":"object","properties":{
-        "resource":{"type":"string"},"season":{"type":"string","default":"current"},"round":{"type":"string","default":"last"}
-    }}, handler=_f1, keywords=[r"فرمول یک", r"f1", r"formula 1", r"رانندگان", r"مسابقه"], risk="read", network=True,
-)
-
-register_tool(
-    name="hub_games",
-    description="جست‌وجو در کاتالوگ بازی‌های رایگان FreeToGame بدون API key.",
-    parameters={"type":"object","properties":{
-        "genre":{"type":"string"},"platform":{"type":"string"},"sort_by":{"type":"string"},"max_results":{"type":"integer","default":20}
-    }}, handler=_games, keywords=[r"بازی", r"game", r"بازی رایگان", r"free to play"], risk="read", network=True,
-)
-
-register_tool(
-    name="hub_game",
-    description="دریافت جزئیات یک بازی رایگان از FreeToGame.",
-    parameters={"type":"object","properties":{"game_id":{"type":"integer"}},"required":["game_id"]},
-    handler=_game, keywords=[r"جزئیات بازی", r"game details"], risk="read", network=True,
-)
-
-register_tool(
-    name="hub_spaceflight_news",
-    description="جست‌وجو و دریافت اخبار فضایی/پروازهای فضایی از Spaceflight News API بدون API key.",
-    parameters={"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","default":10}}},
-    handler=_space_news, keywords=[r"اخبار فضایی", r"space news", r"ناسا", r"موشک", r"ماهواره"], risk="read", network=True,
+        "lamin":{"type":"number"},"lomin":{"type":"number"},"lamax":{"type":"number"},"lomax":{"type":"number"}
+    }},
+    handler=_aircraft_states, keywords=[r"هواپیما", r"پرواز", r"flight", r"aircraft", r"aviation"], risk="read", network=True,
 )

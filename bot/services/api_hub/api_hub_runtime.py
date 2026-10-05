@@ -89,55 +89,41 @@ async def reverse_geocode(latitude: float, longitude: float, *, language: str = 
     )
 
 
-async def get_f1_data(
-    resource: str = "driverstandings", *, season: str = "current", round: str = "last",
-) -> dict[str, Any]:
-    """Read Formula 1 data from the keyless Jolpica/Ergast-compatible API."""
-    allowed = {"driverstandings", "constructorstandings", "results", "qualifying", "sprint", "schedule"}
-    resource = str(resource or "driverstandings").strip().lower()
-    if resource not in allowed:
-        raise ValueError("unsupported F1 resource")
-    season = str(season or "current").strip()
-    round = str(round or "last").strip()
+async def search_art(query: str, *, limit: int = 10) -> Any:
+    q = str(query or "").strip()
+    if not q:
+        raise ValueError("query is required")
     return await api_hub.call(
-        "jolpica_f1",
-        params={"season": season, "round": round, "resource": resource},
+        "artic_search",
+        params={
+            "q": q,
+            "limit": max(1, min(int(limit), 30)),
+            "fields": "id,title,artist_display,date_display,image_id,thumbnail,description",
+        },
     )
 
 
-async def search_games(
-    *, genre: str | None = None, platform: str | None = None,
-    sort_by: str | None = None, max_results: int = 20,
-) -> Any:
-    """Search the FreeToGame catalog without an API key."""
-    params: dict[str, Any] = {}
-    if genre:
-        params["genre"] = str(genre).strip()
-    if platform:
-        params["platform"] = str(platform).strip()
-    if sort_by:
-        params["sort-by"] = str(sort_by).strip()
-    data = await api_hub.call("freetogame_games", params=params)
-    if isinstance(data, list):
-        return data[:max(1, min(int(max_results), 50))]
-    return data
-
-
-async def get_game(game_id: int | str) -> Any:
-    value = str(game_id).strip()
+async def get_color_info(color: str) -> Any:
+    value = str(color or "").strip().lstrip("#")
     if not value:
-        raise ValueError("game_id is required")
-    return await api_hub.call("freetogame_game", params={"id": value})
+        raise ValueError("color is required")
+    return await api_hub.call("thecolorapi", params={"hex": value})
 
 
-async def search_spaceflight_news(
-    *, query: str | None = None, limit: int = 10, ordering: str = "-published_at",
-) -> dict[str, Any]:
-    """Fetch recent spaceflight news; optional query filters title/summary fields."""
-    params: dict[str, Any] = {
-        "limit": max(1, min(int(limit), 20)),
-        "ordering": ordering if ordering in {"published_at", "-published_at", "updated_at", "-updated_at"} else "-published_at",
-    }
-    if query and str(query).strip():
-        params["search"] = str(query).strip()
-    return await api_hub.call("spaceflight_news", params=params)
+async def shorten_url(url: str) -> Any:
+    value = str(url or "").strip()
+    if not value or not (value.startswith("http://") or value.startswith("https://")):
+        raise ValueError("a valid http(s) URL is required")
+    return await api_hub.call("isgd_shortener", params={"format": "json", "url": value})
+
+
+async def get_aircraft_states(
+    *, lamin: float | None = None, lomin: float | None = None,
+    lamax: float | None = None, lomax: float | None = None,
+) -> Any:
+    params: dict[str, Any] = {}
+    bounds = {"lamin": lamin, "lomin": lomin, "lamax": lamax, "lomax": lomax}
+    for key, value in bounds.items():
+        if value is not None:
+            params[key] = float(value)
+    return await api_hub.call("opensky_states", params=params)
