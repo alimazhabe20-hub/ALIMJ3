@@ -6,7 +6,9 @@ instead of adding a large number of Telegram buttons.
 from __future__ import annotations
 
 from bot.services.tool_runtime import register_tool
-from bot.services.api_hub import api_call, list_providers
+from bot.services.api_hub import (
+    api_call, list_providers, search_products, geocode, reverse_geocode, smart_lookup,
+)
 
 
 def _provider_names() -> str:
@@ -35,4 +37,67 @@ register_tool(
     keywords=[r"api hub", r"api عمومی", r"public api", r"اطلاعات عمومی"],
     risk="read",
     network=True,
+)
+
+
+async def _shopping_search(query: str, country: str = "US", language: str = "en", max_results: int = 10, min_price: float | None = None, max_price: float | None = None, free_shipping: bool | None = None):
+    return await search_products(
+        query, country=country, language=language, max_results=max_results,
+        min_price=min_price, max_price=max_price, free_shipping=free_shipping,
+    )
+
+
+async def _geocode(query: str, limit: int = 5, language: str = "fa"):
+    return await geocode(query, limit=limit, language=language)
+
+
+async def _reverse_geocode(latitude: float, longitude: float, language: str = "fa"):
+    return await reverse_geocode(latitude, longitude, language=language)
+
+
+register_tool(
+    name="hub_shopping_search",
+    description="جست‌وجوی کالای واقعی در AliExpress از طریق OneFindMe؛ قیمت، امتیاز، تعداد سفارش و لینک را برمی‌گرداند.",
+    parameters={"type": "object", "properties": {
+        "query": {"type": "string"}, "country": {"type": "string", "default": "US"},
+        "language": {"type": "string", "default": "en"}, "max_results": {"type": "integer", "default": 10},
+        "min_price": {"type": "number"}, "max_price": {"type": "number"},
+        "free_shipping": {"type": "boolean"},
+    }, "required": ["query"]},
+    handler=_shopping_search,
+    keywords=[r"خرید", r"قیمت کالا", r"محصول", r"shopping", r"product search", r"کفش", r"لباس"],
+    risk="read", network=True,
+)
+
+register_tool(
+    name="hub_geocode",
+    description="تبدیل نام مکان یا آدرس به مختصات جغرافیایی با Nominatim/OpenStreetMap.",
+    parameters={"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "default": 5}, "language": {"type": "string", "default": "fa"}}, "required": ["query"]},
+    handler=_geocode, keywords=[r"موقعیت", r"مختصات", r"آدرس", r"geocode", r"coordinates"], risk="read", network=True,
+)
+
+register_tool(
+    name="hub_reverse_geocode",
+    description="تبدیل latitude/longitude به آدرس و نام مکان.",
+    parameters={"type": "object", "properties": {"latitude": {"type": "number"}, "longitude": {"type": "number"}, "language": {"type": "string", "default": "fa"}}, "required": ["latitude", "longitude"]},
+    handler=_reverse_geocode, keywords=[r"reverse geocode", r"آدرس مختصات"], risk="read", network=True,
+)
+
+
+async def _smart_lookup(query: str, category: str | None = None):
+    return await smart_lookup(query, category=category)
+
+
+register_tool(
+    name="hub_smart_lookup",
+    description=(
+        "مسیریاب هوشمند API Hub؛ بر اساس درخواست کاربر بهترین API عمومی بدون کلید را برای کتاب، انیمه، موسیقی، سریال، خبر، بازی، نقل‌قول، جوک، کریپتو و علم انتخاب می‌کند."
+    ),
+    parameters={"type": "object", "properties": {
+        "query": {"type": "string", "description": "درخواست کاربر"},
+        "category": {"type": "string", "description": "اختیاری: anime, book, music, tv, news, game, quote, joke, crypto, science"},
+    }, "required": ["query"]},
+    handler=_smart_lookup,
+    keywords=[r"انیمه", r"کتاب", r"آهنگ", r"موسیقی", r"سریال", r"اخبار", r"بازی", r"جوک", r"نقل قول", r"کریپتو", r"مقاله علمی", r"anime", r"book", r"music", r"news", r"game"],
+    risk="read", network=True,
 )
