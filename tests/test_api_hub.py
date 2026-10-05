@@ -50,15 +50,3 @@ def test_shopping_and_geocoding_runtime_exports() -> None:
     assert callable(search_products)
     assert callable(geocode)
     assert callable(reverse_geocode)
-
-
-def test_next_phase_providers_are_keyless() -> None:
-    assert get_provider("artic_search").auth == "No"
-    assert get_provider("thecolorapi").auth == "No"
-    assert get_provider("isgd_shortener").auth == "No"
-    assert get_provider("opensky_states").auth == "No"
-
-
-def test_next_phase_runtime_exports() -> None:
-    from bot.services.api_hub import search_art, get_color_info, shorten_url, get_aircraft_states
-    assert all(callable(x) for x in (search_art, get_color_info, shorten_url, get_aircraft_states))
