@@ -99,3 +99,30 @@ def test_smart_provider_selection() -> None:
     from bot.services.api_hub.api_hub import APIHub
     hub = APIHub()
     assert hub.choose_provider("weather") in {"open_meteo_forecast", "ipma_weather"}
+
+
+def test_movie_intelligence_uses_real_query_provider(monkeypatch) -> None:
+    from bot.services.api_hub import movie_tv_intelligence
+    from bot.services.api_hub.api_hub_runtime import api_hub
+
+    async def fake_call(name, *, params=None, **kwargs):
+        assert name == "imdb_suggestion"
+        assert params == {"query": "Inception"}
+        return {"d": [{"id": "tt1375666", "l": "Inception", "y": 2010, "q": "feature", "rank": 1, "i": {"imageUrl": "https://example.invalid/inception.jpg"}}]}
+
+    monkeypatch.setattr(api_hub, "call", fake_call)
+    result = __import__("asyncio").run(movie_tv_intelligence(query="Inception", content_type="movie", limit=5))
+    assert result["movies"][0]["imdb_id"] == "tt1375666"
+    assert result["movies"][0]["title"] == "Inception"
+
+
+def test_registry_has_no_fake_opencage_provider() -> None:
+    from bot.services.api_hub import get_provider
+    assert get_provider("opencage_placeholder") is None
+
+
+def test_urlhaus_provider_has_valid_limit_path() -> None:
+    from bot.services.api_hub import get_provider
+    provider = get_provider("urlhaus")
+    assert provider is not None
+    assert provider.base_url.endswith("/recent/limit/10/")
