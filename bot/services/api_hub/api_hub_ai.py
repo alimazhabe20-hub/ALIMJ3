@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from bot.services.tool_runtime import register_tool
 from bot.services.api_hub import (
-    api_call, list_providers, search_products, geocode, reverse_geocode, movie_tv_intelligence, movie_tv_latest,
+    api_call, list_providers, search_products, geocode, reverse_geocode, smart_api_query,
 )
 
 
@@ -84,55 +84,41 @@ register_tool(
 )
 
 
-async def _movie_tv(query: str | None = None, content_type: str = "both", limit: int = 10):
-    return await movie_tv_intelligence(query=query, content_type=content_type, limit=limit)
-
-register_tool(
-    name="hub_movie_tv_intelligence",
-    description="پیشنهاد و کشف فیلم و سریال با منابع عمومی بدون کلید؛ شامل IMDb ID/امتیازهای ارائه‌شده توسط Cinemeta و اطلاعات پخش TVmaze. این ابزار ادعا نمی‌کند API رسمی IMDb است.",
-    parameters={"type": "object", "properties": {
-        "query": {"type": "string"},
-        "content_type": {"type": "string", "enum": ["movie", "series", "both"], "default": "both"},
-        "limit": {"type": "integer", "default": 10},
-    }},
-    handler=_movie_tv,
-    keywords=[r"فیلم", r"سریال", r"فیلم این ماه", r"سریال این ماه", r"بهترین فیلم", r"بهترین سریال", r"movie", r"series", r"IMDb"],
-    risk="read", network=True,
-)
-
-from bot.services.api_hub import smart_api_query
-
-
-async def _smart_public_api(category: str, params: dict | None = None):
-    """Route a read-only request to the healthiest keyless provider."""
-    return await smart_api_query(category, params or {})
-
+async def _smart_public_api(query: str, max_results: int = 10):
+    result = await smart_api_query(query, max_results=max_results)
+    if result.get("handled"):
+        return result
+    # Unknown public-API request: let the existing web-search capability take
+    # over rather than pretending an API exists.
+    try:
+        from bot.services.ai_extras import web_search
+        web_result = await web_search(query)
+        return {
+            "handled": True,
+            "source": "web_search_fallback",
+            "query": query,
+            "results": web_result,
+        }
+    except Exception as exc:
+        return {
+            "handled": False,
+            "source": result.get("source"),
+            "query": query,
+            "error": str(exc)[:300],
+        }
 
 register_tool(
     name="hub_smart_public_api",
-    description="انتخاب خودکار سالم‌ترین API بدون کلید بر اساس دسته‌بندی، با fallback داخلی.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "category": {"type": "string", "description": "مثلاً weather, books, music, video, science, security"},
-            "params": {"type": "object"},
-        },
-        "required": ["category"],
-    },
+    description=(
+        "Fallback هوشمند برای درخواست‌هایی که ابزار اختصاصی ندارند. ابتدا APIهای عمومی "
+        "بدون کلید را با توجه به موضوع امتحان می‌کند و اگر API مناسب/در دسترس نبود، "
+        "به جستجوی وب موجود ربات fallback می‌کند. از ادعای نتیجه ساختگی خودداری می‌کند."
+    ),
+    parameters={"type": "object", "properties": {
+        "query": {"type": "string"},
+        "max_results": {"type": "integer", "default": 10},
+    }, "required": ["query"]},
     handler=_smart_public_api,
-    keywords=[r"انتخاب api", r"smart api", r"api سالم", r"fallback api"],
-    risk="read", network=True,
-)
-
-
-async def _movie_tv_latest(content_type: str = "movie", limit: int = 10):
-    return await movie_tv_latest(content_type=content_type, limit=limit)
-
-register_tool(
-    name="hub_movie_tv_latest",
-    description="پیدا کردن فیلم یا سریال جدید با داده زنده؛ سال جاری از ساعت سیستم گرفته می‌شود و سال ثابت 2024 هرگز به‌عنوان سال جاری استفاده نمی‌شود.",
-    parameters={"type":"object","properties":{"content_type":{"type":"string","enum":["movie","series","both"],"default":"movie"},"limit":{"type":"integer","default":10}}},
-    handler=_movie_tv_latest,
-    keywords=[r"فیلم جدید", r"فیلم تازه", r"جدیدترین فیلم", r"فیلم امسال", r"سریال جدید", r"جدیدترین سریال", r"latest movie", r"new movie"],
+    keywords=[r"fallback", r"api عمومی", r"public api", r"اطلاعاتی که ابزار اختصاصی ندارد"],
     risk="read", network=True,
 )
