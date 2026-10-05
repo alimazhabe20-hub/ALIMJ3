@@ -8,7 +8,8 @@ from __future__ import annotations
 from bot.services.tool_runtime import register_tool
 from bot.services.api_hub import (
     api_call, list_providers, search_products, geocode, reverse_geocode,
-    search_art, get_color_info, shorten_url, get_aircraft_states,
+    get_f1_data, search_free_games, search_space_news, search_artworks, get_color,
+    shorten_url, get_aircraft_states,
 )
 
 
@@ -84,46 +85,55 @@ register_tool(
     handler=_reverse_geocode, keywords=[r"reverse geocode", r"آدرس مختصات"], risk="read", network=True,
 )
 
-
-async def _art_search(query: str, limit: int = 10):
-    return await search_art(query, limit=limit)
-
-async def _color_info(color: str):
-    return await get_color_info(color)
-
-async def _shorten_url(url: str):
-    return await shorten_url(url)
-
-async def _aircraft_states(lamin: float | None = None, lomin: float | None = None, lamax: float | None = None, lomax: float | None = None):
-    return await get_aircraft_states(lamin=lamin, lomin=lomin, lamax=lamax, lomax=lomax)
-
-
 register_tool(
-    name="hub_art_search",
-    description="جست‌وجوی آثار هنری و اطلاعات تصویر از Art Institute of Chicago بدون API key.",
-    parameters={"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","default":10}},"required":["query"]},
-    handler=_art_search, keywords=[r"هنر", r"اثر هنری", r"art", r"artwork", r"نقاشی"], risk="read", network=True,
+    name="hub_f1",
+    description="داده‌های فرمول یک شامل برنامه و نتایج از Jolpica/Ergast بدون API key.",
+    parameters={"type": "object", "properties": {"season": {"type": "string", "default": "current"}, "round_name": {"type": "string", "default": "next"}}},
+    handler=get_f1_data, keywords=[r"فرمول یک", r"f1", r"formula 1", r"گران پری"], risk="read", network=True,
 )
 
 register_tool(
-    name="hub_color_info",
-    description="دریافت اطلاعات دقیق رنگ، نام، RGB/HSL و پالت مرتبط از TheColorAPI.",
-    parameters={"type":"object","properties":{"color":{"type":"string"}},"required":["color"]},
-    handler=_color_info, keywords=[r"رنگ", r"color", r"hex", r"rgb"], risk="read", network=True,
+    name="hub_free_games",
+    description="جست‌وجوی بازی‌های رایگان با فیلتر پلتفرم، ژانر و مرتب‌سازی.",
+    parameters={"type": "object", "properties": {"platform": {"type": "string"}, "genre": {"type": "string"}, "sort_by": {"type": "string"}, "limit": {"type": "integer", "default": 20}}},
+    handler=search_free_games, keywords=[r"بازی", r"گیم", r"game", r"free game"], risk="read", network=True,
+)
+
+register_tool(
+    name="hub_space_news",
+    description="دریافت و جست‌وجوی اخبار فضایی بدون API key.",
+    parameters={"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "default": 10}}},
+    handler=search_space_news, keywords=[r"اخبار فضایی", r"space news", r"ناسا", r"ماهواره"], risk="read", network=True,
+)
+
+register_tool(
+    name="hub_art_search",
+    description="جست‌وجوی آثار هنری در Art Institute of Chicago.",
+    parameters={"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "default": 10}}, "required": ["query"]},
+    handler=search_artworks, keywords=[r"هنر", r"اثر هنری", r"artwork", r"نقاشی"], risk="read", network=True,
+)
+
+register_tool(
+    name="hub_color",
+    description="دریافت مشخصات رنگ و تبدیل‌های رنگی از TheColorAPI.",
+    parameters={"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]},
+    handler=get_color, keywords=[r"رنگ", r"hex", r"color"], risk="read", network=True,
 )
 
 register_tool(
     name="hub_shorten_url",
-    description="کوتاه‌کردن لینک http/https با is.gd بدون API key.",
-    parameters={"type":"object","properties":{"url":{"type":"string"}},"required":["url"]},
-    handler=_shorten_url, keywords=[r"کوتاه کردن لینک", r"short url", r"url کوتاه", r"لینک کوتاه"], risk="read", network=True,
+    description="کوتاه‌کردن لینک HTTP/HTTPS با is.gd.",
+    parameters={"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+    handler=shorten_url, keywords=[r"کوتاه کردن لینک", r"short url", r"shorten url"], risk="read", network=True,
 )
 
 register_tool(
     name="hub_aircraft_states",
-    description="دریافت وضعیت زنده هواپیماها از OpenSky؛ امکان محدودکردن محدوده جغرافیایی با bounding box.",
-    parameters={"type":"object","properties":{
-        "lamin":{"type":"number"},"lomin":{"type":"number"},"lamax":{"type":"number"},"lomax":{"type":"number"}
+    description="دریافت وضعیت هواپیماهای قابل مشاهده از OpenSky؛ امکان تعیین محدوده جغرافیایی.",
+    parameters={"type": "object", "properties": {
+        "min_latitude": {"type": "number"}, "max_latitude": {"type": "number"},
+        "min_longitude": {"type": "number"}, "max_longitude": {"type": "number"},
     }},
-    handler=_aircraft_states, keywords=[r"هواپیما", r"پرواز", r"flight", r"aircraft", r"aviation"], risk="read", network=True,
+    handler=get_aircraft_states, keywords=[r"هواپیما", r"پرواز", r"flight", r"aircraft", r"opensky"], risk="read", network=True,
 )
+

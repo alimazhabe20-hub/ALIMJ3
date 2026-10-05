@@ -102,22 +102,33 @@ PROVIDERS: dict[str, APIProvider] = {
         "coin_gecko_simple", "crypto", "https://api.coingecko.com/api/v3/simple/price",
         cache_ttl=20, description="Crypto prices; no key required for public endpoint.",
     ),
+    "jolpica_f1": APIProvider(
+        "jolpica_f1", "sports", "https://api.jolpi.ca/ergast/f1/{season}/{round}.json",
+        cache_ttl=30, description="Formula 1 data compatible with Ergast; no key required.",
+    ),
+    "freetogame_games": APIProvider(
+        "freetogame_games", "games", "https://www.freetogame.com/api/games",
+        cache_ttl=300, description="Free-to-play games catalog; no key required.",
+    ),
+    "spaceflight_news": APIProvider(
+        "spaceflight_news", "news", "https://api.spaceflightnewsapi.net/v4/articles/",
+        cache_ttl=120, description="Spaceflight news articles; no key required.",
+    ),
     "artic_search": APIProvider(
-        "artic_search", "image_art", "https://api.artic.edu/api/v1/artworks/search",
-        timeout=12, cache_ttl=900,
-        description="Art Institute of Chicago artwork search and image metadata; no key required.",
+        "artic_search", "art", "https://api.artic.edu/api/v1/artworks/search",
+        cache_ttl=3600, description="Art Institute of Chicago artwork search; no key required.",
     ),
     "thecolorapi": APIProvider(
-        "thecolorapi", "image_art", "https://www.thecolorapi.com/id",
-        cache_ttl=3600, description="Color information and palettes; no key required.",
+        "thecolorapi", "art", "https://www.thecolorapi.com/id",
+        cache_ttl=86400, description="Color information and conversions; no key required.",
     ),
     "isgd_shortener": APIProvider(
-        "isgd_shortener", "url_tools", "https://is.gd/create.php",
-        timeout=10, cache_ttl=300, description="URL shortening; no key required.",
+        "isgd_shortener", "url", "https://is.gd/create.php",
+        cache_ttl=300, description="Simple URL shortening; no key required.",
     ),
     "opensky_states": APIProvider(
         "opensky_states", "transportation", "https://opensky-network.org/api/states/all",
-        timeout=15, cache_ttl=15, description="Live aircraft state vectors; public endpoint, no API key required.",
+        timeout=15, cache_ttl=15, description="Live aircraft state vectors; no key required for public endpoint.",
     ),
     "ipma_weather": APIProvider(
         "ipma_weather", "weather", "https://api.ipma.pt/open-data/forecast/meteorology/cities/daily/{city_id}.json",

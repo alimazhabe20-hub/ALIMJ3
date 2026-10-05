@@ -88,42 +88,69 @@ async def reverse_geocode(latitude: float, longitude: float, *, language: str = 
         },
     )
 
+async def get_f1_data(season: str = "current", round_name: str = "next") -> dict[str, Any]:
+    """Fetch Formula 1 schedule/results through the keyless Jolpica API."""
+    season = str(season or "current").strip()
+    round_name = str(round_name or "next").strip()
+    return await api_hub.call("jolpica_f1", params={"season": season, "round": round_name})
 
-async def search_art(query: str, *, limit: int = 10) -> Any:
+
+async def search_free_games(
+    *, platform: str | None = None, genre: str | None = None,
+    sort_by: str | None = None, limit: int = 20,
+) -> Any:
+    params: dict[str, Any] = {}
+    if platform:
+        params["platform"] = str(platform)
+    if genre:
+        params["category"] = str(genre)
+    if sort_by:
+        params["sort-by"] = str(sort_by)
+    data = await api_hub.call("freetogame_games", params=params)
+    if isinstance(data, list):
+        return data[:max(1, min(int(limit), 100))]
+    return data
+
+
+async def search_space_news(query: str | None = None, *, limit: int = 10) -> Any:
+    params: dict[str, Any] = {"limit": max(1, min(int(limit), 50)), "ordering": "-published_at"}
+    if query:
+        params["search"] = str(query).strip()
+    return await api_hub.call("spaceflight_news", params=params)
+
+
+async def search_artworks(query: str, *, limit: int = 10) -> Any:
     q = str(query or "").strip()
     if not q:
         raise ValueError("query is required")
-    return await api_hub.call(
-        "artic_search",
-        params={
-            "q": q,
-            "limit": max(1, min(int(limit), 30)),
-            "fields": "id,title,artist_display,date_display,image_id,thumbnail,description",
-        },
-    )
+    return await api_hub.call("artic_search", params={"q": q, "limit": max(1, min(int(limit), 100))})
 
 
-async def get_color_info(color: str) -> Any:
-    value = str(color or "").strip().lstrip("#")
+async def get_color(value: str) -> Any:
+    value = str(value or "").strip()
     if not value:
-        raise ValueError("color is required")
-    return await api_hub.call("thecolorapi", params={"hex": value})
+        raise ValueError("value is required")
+    return await api_hub.call("thecolorapi", params={"hex": value.lstrip("#")})
 
 
 async def shorten_url(url: str) -> Any:
-    value = str(url or "").strip()
-    if not value or not (value.startswith("http://") or value.startswith("https://")):
+    url = str(url or "").strip()
+    if not (url.startswith("http://") or url.startswith("https://")):
         raise ValueError("a valid http(s) URL is required")
-    return await api_hub.call("isgd_shortener", params={"format": "json", "url": value})
+    return await api_hub.call("isgd_shortener", params={"format": "json", "url": url})
 
 
 async def get_aircraft_states(
-    *, lamin: float | None = None, lomin: float | None = None,
-    lamax: float | None = None, lomax: float | None = None,
+    *, min_latitude: float | None = None, max_latitude: float | None = None,
+    min_longitude: float | None = None, max_longitude: float | None = None,
 ) -> Any:
     params: dict[str, Any] = {}
-    bounds = {"lamin": lamin, "lomin": lomin, "lamax": lamax, "lomax": lomax}
+    bounds = {
+        "lamin": min_latitude, "lamax": max_latitude,
+        "lomin": min_longitude, "lomax": max_longitude,
+    }
     for key, value in bounds.items():
         if value is not None:
             params[key] = float(value)
     return await api_hub.call("opensky_states", params=params)
+
