@@ -126,11 +126,20 @@ async def get_series_catalog(*, limit: int = 20) -> dict[str, Any]:
 
 
 async def movie_tv_intelligence(*, query: str | None = None, content_type: str = "both", limit: int = 10) -> dict[str, Any]:
-    """Multi-source movie/TV discovery with deduplication and transparent source labels."""
+    """Multi-source movie/TV discovery with real query search and deduplication.
+
+    Query mode uses TVmaze for series and IMDb's public suggestion endpoint for
+    movie/general title discovery. Catalog mode uses Cinemeta when no query is
+    supplied. IMDb is intentionally described as an unofficial public endpoint,
+    not an official IMDb API.
+    """
     import asyncio
+
     q = str(query or "").strip()
     n = max(1, min(int(limit), 20))
-    wanted = content_type.lower()
+    wanted = str(content_type or "both").lower()
+    if wanted not in {"movie", "series", "tv", "both"}:
+        wanted = "both"
     result: dict[str, Any] = {"query": q or None, "sources": [], "movies": [], "series": []}
 
     async def safe(coro, source):
@@ -145,37 +154,86 @@ async def movie_tv_intelligence(*, query: str | None = None, content_type: str =
         if wanted in {"series", "tv", "both"}:
             tasks.append(safe(search_tv(q, limit=n), "TVmaze"))
         if wanted in {"movie", "both"}:
-            tasks.append(safe(api_hub.call("cinemeta_catalog_movies"), "Cinemeta"))
+            tasks.append(safe(api_hub.call("imdb_suggestion", params={"query": q}), "IMDb suggestion"))
     else:
         if wanted in {"movie", "both"}:
-            tasks.append(safe(get_movie_catalog(limit=n), "Cinemeta"))
+            tasks.append(safe(get_movie_catalog(limit=n), "Cinemeta movies"))
         if wanted in {"series", "tv", "both"}:
-            tasks.append(safe(get_series_catalog(limit=n), "Cinemeta"))
-            tasks.append(safe(get_tv_schedule(limit=n) if False else get_tv_schedule(), "TVmaze schedule"))
+            tasks.append(safe(get_series_catalog(limit=n), "Cinemeta series"))
+            tasks.append(safe(get_tv_schedule(), "TVmaze schedule"))
 
     results = await asyncio.gather(*tasks)
-    seen: set[str] = set()
+    seen_movies: set[str] = set()
+    seen_series: set[str] = set()
+
     for source, data in results:
         if data is None:
             continue
         result["sources"].append(source)
+
         if source == "TVmaze":
             items = data.get("results", []) if isinstance(data, dict) else []
             for item in items:
                 show = item.get("show", {}) if isinstance(item, dict) else {}
-                key = str(show.get("id") or show.get("externals", {}).get("imdb") or show.get("name"))
-                if key and key not in seen:
-                    seen.add(key); result["series"].append({"title": show.get("name"), "rating": (show.get("rating") or {}).get("average"), "premiered": show.get("premiered"), "genres": show.get("genres", []), "imdb_id": (show.get("externals") or {}).get("imdb"), "url": show.get("url"), "source": source})
-        elif source == "Cinemeta":
-            metas = data.get("metas", []) if isinstance(data, dict) else []
-            target = result["movies"] if "movie" in wanted or wanted == "both" else result["series"]
-            for item in metas[:n]:
-                key = str(item.get("imdb_id") or item.get("id") or item.get("name"))
-                if key and key not in seen:
-                    seen.add(key); target.append({**item, "source": source, "rating": item.get("imdbRating", item.get("rating"))})
+                key = str(show.get("id") or show.get("externals", {}).get("imdb") or show.get("name") or "").strip().lower()
+                if not key or key in seen_series:
+                    continue
+                seen_series.add(key)
+                result["series"].append({
+                    "title": show.get("name"),
+                    "rating": (show.get("rating") or {}).get("average"),
+                    "premiered": show.get("premiered"),
+                    "genres": show.get("genres", []),
+                    "imdb_id": (show.get("externals") or {}).get("imdb"),
+                    "url": show.get("url"),
+                    "source": source,
+                })
+
+        elif source == "IMDb suggestion":
+            items = data.get("d", []) if isinstance(data, dict) else []
+            for item in items:
+                title = item.get("l") or item.get("title")
+                if not title:
+                    continue
+                item_type = str(item.get("q") or "").lower()
+                is_series = item_type in {"tvseries", "tvminiseries", "tvshort", "tvepisode", "tvmovie"}
+                key = str(item.get("id") or title).strip().lower()
+                target = result["series"] if is_series else result["movies"]
+                seen = seen_series if is_series else seen_movies
+                if key in seen:
+                    continue
+                seen.add(key)
+                target.append({
+                    "title": title,
+                    "year": item.get("y"),
+                    "kind": item.get("q"),
+                    "imdb_id": item.get("id"),
+                    "rank": item.get("rank"),
+                    "image": (item.get("i") or {}).get("imageUrl"),
+                    "source": source,
+                })
+
+        elif source == "Cinemeta movies":
+            metas = data.get("results", []) if isinstance(data, dict) else []
+            for item in metas:
+                key = str(item.get("imdb_id") or item.get("id") or item.get("name") or "").strip().lower()
+                if not key or key in seen_movies:
+                    continue
+                seen_movies.add(key)
+                result["movies"].append({**item, "source": "Cinemeta", "rating": item.get("imdbRating", item.get("rating"))})
+
+        elif source == "Cinemeta series":
+            metas = data.get("results", []) if isinstance(data, dict) else []
+            for item in metas:
+                key = str(item.get("imdb_id") or item.get("id") or item.get("name") or "").strip().lower()
+                if not key or key in seen_series:
+                    continue
+                seen_series.add(key)
+                result["series"].append({**item, "source": "Cinemeta", "rating": item.get("imdbRating", item.get("rating"))})
+
         else:
-            # Schedule is supplementary evidence; preserve it separately.
             result["schedule"] = data
+
     result["movies"] = result["movies"][:n]
     result["series"] = result["series"][:n]
     return result

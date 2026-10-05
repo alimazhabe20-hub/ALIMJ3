@@ -127,6 +127,7 @@ PROVIDERS: dict[str, APIProvider] = {
 
 # Additional keyless providers consolidated from the project's public-API catalog.
 _EXTRA = [
+    APIProvider("imdb_suggestion", "video", "https://v3.sg.media-imdb.com/suggestion/x/{query}.json", timeout=12, cache_ttl=300, description="Unofficial public IMDb suggestion endpoint; not an official IMDb API."),
     APIProvider("jikan_anime", "anime", "https://api.jikan.moe/v4/anime", timeout=15, cache_ttl=300),
     APIProvider("freetogame_games", "games", "https://www.freetogame.com/api/games", timeout=15, cache_ttl=300),
     APIProvider("spaceflight_news", "news", "https://api.spaceflightnewsapi.net/v4/articles/", timeout=15, cache_ttl=120),
@@ -134,7 +135,7 @@ _EXTRA = [
     APIProvider("gbif", "science", "https://api.gbif.org/v1/species/match", timeout=12, cache_ttl=3600),
     APIProvider("clinical_trials", "health", "https://clinicaltrials.gov/api/v2/studies", timeout=15, cache_ttl=300),
     APIProvider("nvd_cves", "security", "https://services.nvd.nist.gov/rest/json/cves/2.0", timeout=15, cache_ttl=300),
-    APIProvider("urlhaus", "security", "https://urlhaus-api.abuse.ch/v1/urls/recent/limit/", timeout=15, cache_ttl=120),
+    APIProvider("urlhaus", "security", "https://urlhaus-api.abuse.ch/v1/urls/recent/limit/10/", timeout=15, cache_ttl=120),
     APIProvider("data_usa", "open_data", "https://api.datausa.io/tesseract/data.jsonrecords", timeout=15, cache_ttl=600),
     APIProvider("fruityvice", "food", "https://www.fruityvice.com/api/fruit/all", timeout=12, cache_ttl=3600),
     APIProvider("cat_facts", "animals", "https://catfact.ninja/fact", timeout=10, cache_ttl=60),
@@ -146,7 +147,6 @@ _EXTRA = [
     APIProvider("universities", "education", "http://universities.hipolabs.com/search", timeout=12, cache_ttl=3600),
     APIProvider("nhtsa_vpic", "vehicle", "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValuesExtended/{vin}?format=json", timeout=15, cache_ttl=3600),
     APIProvider("nhtsa_models", "vehicle", "https://vpic.nhtsa.dot.gov/api/vehicles/GetModelsForMake/{make}?format=json", timeout=15, cache_ttl=3600),
-    APIProvider("opencage_placeholder", "geocoding", "https://nominatim.openstreetmap.org/search", timeout=12, cache_ttl=3600, headers={"Accept": "application/json", "User-Agent": "ALIMJBot/3.0 (+public-api-hub)"}),
     APIProvider("transitland", "transportation", "https://transit.land/api/v2/rest/stops", timeout=15, cache_ttl=300),
     APIProvider("hackernews", "social", "https://hacker-news.firebaseio.com/v0/topstories.json", timeout=10, cache_ttl=60),
 ]
