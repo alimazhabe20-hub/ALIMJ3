@@ -20,6 +20,12 @@ class APIHub:
         self._cache: dict[str, tuple[float, Any]] = {}
         self._lock = asyncio.Lock()
         self._client: httpx.AsyncClient | None = None
+        # Local circuit-breaker/health state. It intentionally lives in memory so
+        # provider failures never persist across deployments or leak secrets.
+        self._health: dict[str, dict[str, float]] = {}
+        self._failure_threshold = 3
+        self._cooldown_base = 30.0
+        self._cooldown_max = 300.0
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -58,6 +64,67 @@ class APIHub:
                 for k in expired[:256]:
                     self._cache.pop(k, None)
 
+    def _state(self, provider_name: str) -> dict[str, float]:
+        return self._health.setdefault(provider_name, {
+            "failures": 0.0, "successes": 0.0, "latency_ms": 0.0,
+            "opened_until": 0.0, "last_error": 0.0,
+        })
+
+    def _is_open(self, provider_name: str) -> bool:
+        return self._state(provider_name)["opened_until"] > time.monotonic()
+
+    def _record_success(self, provider_name: str, latency_ms: float) -> None:
+        state = self._state(provider_name)
+        state["successes"] += 1
+        state["failures"] = 0
+        state["opened_until"] = 0
+        previous = state["latency_ms"]
+        state["latency_ms"] = latency_ms if previous <= 0 else previous * 0.7 + latency_ms * 0.3
+
+    def _record_failure(self, provider_name: str) -> None:
+        state = self._state(provider_name)
+        state["failures"] += 1
+        state["last_error"] = time.monotonic()
+        if state["failures"] >= self._failure_threshold:
+            exponent = min(int(state["failures"]) - self._failure_threshold, 4)
+            state["opened_until"] = time.monotonic() + min(self._cooldown_max, self._cooldown_base * (2 ** exponent))
+
+    def _health_score(self, provider_name: str) -> float:
+        state = self._state(provider_name)
+        if state["opened_until"] > time.monotonic():
+            return -1e9
+        failures = state["failures"]
+        latency = state["latency_ms"] or 500.0
+        return 100.0 - failures * 20.0 - min(latency / 100.0, 30.0)
+
+    def select_provider(self, provider_names: list[str]) -> str:
+        """Pick the healthiest available provider without making a network call."""
+        candidates = [name for name in provider_names if get_provider(name) is not None and not self._is_open(name)]
+        if not candidates:
+            raise RuntimeError("No healthy API providers are currently available")
+        return max(candidates, key=self._health_score)
+
+    async def call_with_fallback(
+        self, provider_names: list[str], *, params: dict[str, Any] | None = None,
+        retries: int = 1, timeout: float | None = None,
+    ) -> Any:
+        """Call the healthiest provider first, then fail over to the remaining ones."""
+        ordered = sorted(
+            {name for name in provider_names if get_provider(name) is not None},
+            key=self._health_score, reverse=True,
+        )
+        if not ordered:
+            raise KeyError("No valid API providers supplied")
+        last_error: Exception | None = None
+        for name in ordered:
+            if self._is_open(name):
+                continue
+            try:
+                return await self.call(name, params=params, retries=retries, timeout=timeout)
+            except Exception as exc:
+                last_error = exc
+        raise last_error or RuntimeError("All API providers failed")
+
     async def call(
         self,
         provider_name: str,
@@ -69,6 +136,8 @@ class APIHub:
         provider = get_provider(provider_name)
         if provider is None:
             raise KeyError(f"Unknown API provider: {provider_name}")
+        if self._is_open(provider_name):
+            raise RuntimeError(f"API provider is temporarily unavailable: {provider_name}")
 
         supplied = dict(params or {})
         merged_params = dict(provider.params)
@@ -90,6 +159,7 @@ class APIHub:
         request_timeout = float(timeout or provider.timeout)
 
         for attempt in range(max(0, retries) + 1):
+            started = time.perf_counter()
             try:
                 response = await client.request(
                     provider.method,
@@ -103,9 +173,11 @@ class APIHub:
                     continue
                 response.raise_for_status()
                 data = response.json()
+                self._record_success(provider.name, (time.perf_counter() - started) * 1000.0)
                 await self._cache_set(cache_key, data, provider.cache_ttl)
                 return data
             except (httpx.HTTPError, ValueError) as exc:
+                self._record_failure(provider.name)
                 last_error = exc
                 if attempt < retries:
                     await asyncio.sleep(min(2.5, 0.25 * (2**attempt) + random.random() * 0.15))
@@ -115,17 +187,22 @@ class APIHub:
         raise last_error or RuntimeError(f"API provider failed: {provider.name}")
 
     def provider_status(self) -> list[dict[str, Any]]:
-        """Return lightweight local health state without making network calls."""
+        """Return local provider health and circuit-breaker state."""
         from .api_hub_registry import list_providers
         now = time.monotonic()
         rows = []
         for provider in list_providers():
+            state = self._state(provider.name)
+            cooldown = max(0.0, state["opened_until"] - now)
             rows.append({
                 "key": provider.name,
                 "category": provider.category,
-                "failures": 0,
-                "cooldown_seconds": 0,
-                "healthy": True,
+                "failures": int(state["failures"]),
+                "successes": int(state["successes"]),
+                "latency_ms": round(state["latency_ms"], 1),
+                "cooldown_seconds": round(cooldown, 1),
+                "healthy": cooldown <= 0,
+                "score": round(self._health_score(provider.name), 2),
                 "checked_at": now,
             })
         return rows
@@ -135,6 +212,7 @@ class APIHub:
             await self._client.aclose()
         self._client = None
         self._cache.clear()
+        self._health.clear()
 
 
 api_hub = APIHub()
