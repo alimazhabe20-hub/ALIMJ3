@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from bot.services.tool_runtime import register_tool
 from bot.services.api_hub import (
-    api_call, list_providers, search_products, geocode, reverse_geocode, smart_lookup,
+    api_call, list_providers, search_products, geocode, reverse_geocode, movie_tv_intelligence,
 )
 
 
@@ -84,20 +84,18 @@ register_tool(
 )
 
 
-async def _smart_lookup(query: str, category: str | None = None):
-    return await smart_lookup(query, category=category)
-
+async def _movie_tv(query: str | None = None, content_type: str = "both", limit: int = 10):
+    return await movie_tv_intelligence(query=query, content_type=content_type, limit=limit)
 
 register_tool(
-    name="hub_smart_lookup",
-    description=(
-        "مسیریاب هوشمند API Hub؛ بر اساس درخواست کاربر بهترین API عمومی بدون کلید را برای کتاب، انیمه، موسیقی، سریال، خبر، بازی، نقل‌قول، جوک، کریپتو و علم انتخاب می‌کند."
-    ),
+    name="hub_movie_tv_intelligence",
+    description="پیشنهاد و کشف فیلم و سریال با منابع عمومی بدون کلید؛ شامل IMDb ID/امتیازهای ارائه‌شده توسط Cinemeta و اطلاعات پخش TVmaze. این ابزار ادعا نمی‌کند API رسمی IMDb است.",
     parameters={"type": "object", "properties": {
-        "query": {"type": "string", "description": "درخواست کاربر"},
-        "category": {"type": "string", "description": "اختیاری: anime, book, music, tv, news, game, quote, joke, crypto, science"},
-    }, "required": ["query"]},
-    handler=_smart_lookup,
-    keywords=[r"انیمه", r"کتاب", r"آهنگ", r"موسیقی", r"سریال", r"اخبار", r"بازی", r"جوک", r"نقل قول", r"کریپتو", r"مقاله علمی", r"anime", r"book", r"music", r"news", r"game"],
+        "query": {"type": "string"},
+        "content_type": {"type": "string", "enum": ["movie", "series", "both"], "default": "both"},
+        "limit": {"type": "integer", "default": 10},
+    }},
+    handler=_movie_tv,
+    keywords=[r"فیلم", r"سریال", r"فیلم این ماه", r"سریال این ماه", r"بهترین فیلم", r"بهترین سریال", r"movie", r"series", r"IMDb"],
     risk="read", network=True,
 )

@@ -89,52 +89,66 @@ async def reverse_geocode(latitude: float, longitude: float, *, language: str = 
     )
 
 
-# Lightweight semantic router for AI: maps common user intents to keyless providers.
-_SMART_ROUTES = {
-    "book": ("open_library_search", lambda q: {"q": q, "limit": 10}),
-    "anime": ("jikan_anime_search", lambda q: {"q": q}),
-    "music": ("itunes_search", lambda q: {"term": q, "media": "music", "limit": 10}),
-    "tv": ("tvmaze_search", lambda q: {"q": q}),
-    "news": ("hackernews_search", lambda q: {"query": q}),
-    "quote": ("quotable", lambda q: {"tags": q} if q else {}),
-    "joke": ("jokeapi", lambda q: {"safe-mode": "true", "type": "single,twopart"}),
-    "crypto": ("coin_gecko_simple", lambda q: {"ids": q, "vs_currencies": "usd"}),
-    "country": ("rest_countries", lambda q: {}),
-    "weather": ("open_meteo_forecast", lambda q: {}),
-    "game": ("freetogame", lambda q: {"search": q}),
-    "science": ("europe_pmc", lambda q: {"query": q, "format": "json"}),
-}
-
-
-def _smart_category(text: str) -> str | None:
-    t = str(text or "").lower()
-    groups = {
-        "anime": ("انیمه", "anime", "مانگا", "manga"),
-        "book": ("کتاب", "رمان", "نویسنده", "book", "novel"),
-        "music": ("آهنگ", "موسیقی", "خواننده", "music", "song"),
-        "tv": ("سریال", "فیلم", "tv", "show", "series"),
-        "news": ("خبر", "اخبار", "news"),
-        "quote": ("نقل قول", "جمله انگیزشی", "quote"),
-        "joke": ("جوک", "لطیفه", "joke"),
-        "crypto": ("کریپتو", "ارز دیجیتال", "بیت کوین", "bitcoin", "crypto"),
-        "game": ("بازی", "game", "گیمر"),
-        "science": ("مقاله علمی", "تحقیق علمی", "science", "paper"),
-    }
-    for name, keys in groups.items():
-        if any(k in t for k in keys):
-            return name
-    return None
-
-
-async def smart_lookup(query: str, category: str | None = None) -> Any:
+async def search_tv(query: str, *, limit: int = 10) -> dict[str, Any]:
     q = str(query or "").strip()
     if not q:
         raise ValueError("query is required")
-    cat = (category or _smart_category(q))
-    if not cat or cat not in _SMART_ROUTES:
-        return {"ok": False, "message": "No confident API category matched", "query": q}
-    provider, builder = _SMART_ROUTES[cat]
-    params = builder(q)
-    if cat == "country":
-        params = {}
-    return {"category": cat, "provider": provider, "data": await api_hub.call(provider, params=params)}
+    data = await api_hub.call("tvmaze_search", params={"q": q})
+    return {"source": "TVmaze", "results": data[: max(1, min(int(limit), 20))] if isinstance(data, list) else data}
+
+
+async def get_tv_schedule(date: str | None = None, *, country: str = "US") -> Any:
+    params: dict[str, Any] = {"country": str(country or "US").upper()}
+    if date:
+        params["date"] = str(date)
+    return await api_hub.call("tvmaze_schedule", params=params)
+
+
+async def get_web_tv_schedule(date: str | None = None, *, country: str | None = None) -> Any:
+    params: dict[str, Any] = {}
+    if date:
+        params["date"] = str(date)
+    if country is not None:
+        params["country"] = str(country).upper()
+    return await api_hub.call("tvmaze_web_schedule", params=params)
+
+
+async def get_movie_catalog(*, limit: int = 20) -> dict[str, Any]:
+    data = await api_hub.call("cinemeta_catalog_movies")
+    metas = data.get("metas", []) if isinstance(data, dict) else []
+    return {"source": "Cinemeta", "type": "movie", "results": metas[: max(1, min(int(limit), 50))]}
+
+
+async def get_series_catalog(*, limit: int = 20) -> dict[str, Any]:
+    data = await api_hub.call("cinemeta_catalog_series")
+    metas = data.get("metas", []) if isinstance(data, dict) else []
+    return {"source": "Cinemeta", "type": "series", "results": metas[: max(1, min(int(limit), 50))]}
+
+
+async def movie_tv_intelligence(*, query: str | None = None, content_type: str = "both", limit: int = 10) -> dict[str, Any]:
+    """Combine keyless movie/TV discovery sources without claiming IMDb is a first-party API."""
+    q = str(query or "").strip()
+    n = max(1, min(int(limit), 20))
+    result: dict[str, Any] = {"query": q or None, "sources": [], "movies": [], "series": []}
+    if q:
+        tv = await search_tv(q, limit=n)
+        result["series"] = tv.get("results", []) if isinstance(tv, dict) else []
+        result["sources"].append("TVmaze")
+        # Cinemeta supports path-based search; use a direct provider dynamically only when the query is requested.
+        from .api_hub_registry import APIProvider
+        from .api_hub import api_hub as _hub
+        # Keep the registry keyless and stable by querying the catalog endpoint through the generic hub is not possible
+        # for a path segment, so rely on TVmaze for search and Cinemeta for ranked catalogues.
+        catalog = await get_movie_catalog(limit=n)
+        result["movies"] = catalog.get("results", [])
+        result["sources"].append("Cinemeta")
+    else:
+        if content_type.lower() in {"movie", "both"}:
+            movies = await get_movie_catalog(limit=n)
+            result["movies"] = movies.get("results", [])
+            result["sources"].append("Cinemeta")
+        if content_type.lower() in {"series", "tv", "both"}:
+            series = await get_series_catalog(limit=n)
+            result["series"] = series.get("results", [])
+            result["sources"].append("Cinemeta")
+    return result
