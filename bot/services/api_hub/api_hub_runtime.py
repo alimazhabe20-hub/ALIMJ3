@@ -126,29 +126,91 @@ async def get_series_catalog(*, limit: int = 20) -> dict[str, Any]:
 
 
 async def movie_tv_intelligence(*, query: str | None = None, content_type: str = "both", limit: int = 10) -> dict[str, Any]:
-    """Combine keyless movie/TV discovery sources without claiming IMDb is a first-party API."""
+    """Multi-source movie/TV discovery with deduplication and transparent source labels."""
+    import asyncio
     q = str(query or "").strip()
     n = max(1, min(int(limit), 20))
+    wanted = content_type.lower()
     result: dict[str, Any] = {"query": q or None, "sources": [], "movies": [], "series": []}
+
+    async def safe(coro, source):
+        try:
+            value = await coro
+            return source, value
+        except Exception:
+            return source, None
+
+    tasks = []
     if q:
-        tv = await search_tv(q, limit=n)
-        result["series"] = tv.get("results", []) if isinstance(tv, dict) else []
-        result["sources"].append("TVmaze")
-        # Cinemeta supports path-based search; use a direct provider dynamically only when the query is requested.
-        from .api_hub_registry import APIProvider
-        from .api_hub import api_hub as _hub
-        # Keep the registry keyless and stable by querying the catalog endpoint through the generic hub is not possible
-        # for a path segment, so rely on TVmaze for search and Cinemeta for ranked catalogues.
-        catalog = await get_movie_catalog(limit=n)
-        result["movies"] = catalog.get("results", [])
-        result["sources"].append("Cinemeta")
+        if wanted in {"series", "tv", "both"}:
+            tasks.append(safe(search_tv(q, limit=n), "TVmaze"))
+        if wanted in {"movie", "both"}:
+            tasks.append(safe(api_hub.call("cinemeta_catalog_movies"), "Cinemeta"))
     else:
-        if content_type.lower() in {"movie", "both"}:
-            movies = await get_movie_catalog(limit=n)
-            result["movies"] = movies.get("results", [])
-            result["sources"].append("Cinemeta")
-        if content_type.lower() in {"series", "tv", "both"}:
-            series = await get_series_catalog(limit=n)
-            result["series"] = series.get("results", [])
-            result["sources"].append("Cinemeta")
+        if wanted in {"movie", "both"}:
+            tasks.append(safe(get_movie_catalog(limit=n), "Cinemeta"))
+        if wanted in {"series", "tv", "both"}:
+            tasks.append(safe(get_series_catalog(limit=n), "Cinemeta"))
+            tasks.append(safe(get_tv_schedule(limit=n) if False else get_tv_schedule(), "TVmaze schedule"))
+
+    results = await asyncio.gather(*tasks)
+    seen: set[str] = set()
+    for source, data in results:
+        if data is None:
+            continue
+        result["sources"].append(source)
+        if source == "TVmaze":
+            items = data.get("results", []) if isinstance(data, dict) else []
+            for item in items:
+                show = item.get("show", {}) if isinstance(item, dict) else {}
+                key = str(show.get("id") or show.get("externals", {}).get("imdb") or show.get("name"))
+                if key and key not in seen:
+                    seen.add(key); result["series"].append({"title": show.get("name"), "rating": (show.get("rating") or {}).get("average"), "premiered": show.get("premiered"), "genres": show.get("genres", []), "imdb_id": (show.get("externals") or {}).get("imdb"), "url": show.get("url"), "source": source})
+        elif source == "Cinemeta":
+            metas = data.get("metas", []) if isinstance(data, dict) else []
+            target = result["movies"] if "movie" in wanted or wanted == "both" else result["series"]
+            for item in metas[:n]:
+                key = str(item.get("imdb_id") or item.get("id") or item.get("name"))
+                if key and key not in seen:
+                    seen.add(key); target.append({**item, "source": source, "rating": item.get("imdbRating", item.get("rating"))})
+        else:
+            # Schedule is supplementary evidence; preserve it separately.
+            result["schedule"] = data
+    result["movies"] = result["movies"][:n]
+    result["series"] = result["series"][:n]
     return result
+
+
+async def smart_api_query(category: str, params: dict[str, Any] | None = None, *, candidates: list[str] | None = None) -> Any:
+    """Choose the healthiest provider in a category and fall back automatically."""
+    from .api_hub import FALLBACK_CHAINS
+    chain = tuple(candidates or FALLBACK_CHAINS.get(category, ()))
+    if not chain:
+        from .api_hub_registry import list_providers
+        chain = tuple(p.name for p in list_providers(category))
+    if not chain:
+        raise ValueError(f"No providers registered for category: {category}")
+    return await api_hub.call_with_fallback(chain, params=params or {}, retries=1)
+
+
+async def search_anime(query: str, *, limit: int = 10) -> Any:
+    return await api_hub.call("jikan_anime", params={"q": str(query).strip(), "limit": max(1, min(int(limit), 25))})
+
+
+async def search_games(*, category: str | None = None, platform: str | None = None) -> Any:
+    params: dict[str, Any] = {}
+    if category: params["category"] = category
+    if platform: params["platform"] = platform
+    return await api_hub.call("freetogame_games", params=params)
+
+
+async def search_science(query: str, *, page_size: int = 10) -> Any:
+    return await api_hub.call("europe_pmc", params={"query": str(query).strip(), "pageSize": max(1, min(int(page_size), 50))})
+
+
+async def search_health(query: str, *, page_size: int = 10) -> Any:
+    return await api_hub.call("clinical_trials", params={"query.term": str(query).strip(), "pageSize": max(1, min(int(page_size), 50))})
+
+
+async def search_security(query: str, *, limit: int = 10) -> Any:
+    return await api_hub.call("nvd_cves", params={"keywordSearch": str(query).strip(), "resultsPerPage": max(1, min(int(limit), 20))})

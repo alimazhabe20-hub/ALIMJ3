@@ -125,6 +125,35 @@ PROVIDERS: dict[str, APIProvider] = {
 }
 
 
+# Additional keyless providers consolidated from the project's public-API catalog.
+_EXTRA = [
+    APIProvider("jikan_anime", "anime", "https://api.jikan.moe/v4/anime", timeout=15, cache_ttl=300),
+    APIProvider("freetogame_games", "games", "https://www.freetogame.com/api/games", timeout=15, cache_ttl=300),
+    APIProvider("spaceflight_news", "news", "https://api.spaceflightnewsapi.net/v4/articles/", timeout=15, cache_ttl=120),
+    APIProvider("europe_pmc", "science", "https://www.ebi.ac.uk/europepmc/webservices/rest/search", timeout=15, cache_ttl=300, params={"format": "json"}),
+    APIProvider("gbif", "science", "https://api.gbif.org/v1/species/match", timeout=12, cache_ttl=3600),
+    APIProvider("clinical_trials", "health", "https://clinicaltrials.gov/api/v2/studies", timeout=15, cache_ttl=300),
+    APIProvider("nvd_cves", "security", "https://services.nvd.nist.gov/rest/json/cves/2.0", timeout=15, cache_ttl=300),
+    APIProvider("urlhaus", "security", "https://urlhaus-api.abuse.ch/v1/urls/recent/limit/", timeout=15, cache_ttl=120),
+    APIProvider("data_usa", "open_data", "https://api.datausa.io/tesseract/data.jsonrecords", timeout=15, cache_ttl=600),
+    APIProvider("fruityvice", "food", "https://www.fruityvice.com/api/fruit/all", timeout=12, cache_ttl=3600),
+    APIProvider("cat_facts", "animals", "https://catfact.ninja/fact", timeout=10, cache_ttl=60),
+    APIProvider("dog_facts", "animals", "https://dogapi.dog/api/v2/facts", timeout=10, cache_ttl=60),
+    APIProvider("wiktionary", "dictionary", "https://en.wiktionary.org/w/api.php", timeout=12, cache_ttl=300, params={"action": "query", "format": "json", "prop": "extracts", "explaintext": 1}),
+    APIProvider("datamuse", "text", "https://api.datamuse.com/words", timeout=10, cache_ttl=300),
+    APIProvider("arbeitnow_jobs", "jobs", "https://www.arbeitnow.com/api/job-board-api", timeout=15, cache_ttl=300),
+    APIProvider("packagist", "development", "https://packagist.org/search.json", timeout=12, cache_ttl=300),
+    APIProvider("universities", "education", "http://universities.hipolabs.com/search", timeout=12, cache_ttl=3600),
+    APIProvider("nhtsa_vpic", "vehicle", "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValuesExtended/{vin}?format=json", timeout=15, cache_ttl=3600),
+    APIProvider("nhtsa_models", "vehicle", "https://vpic.nhtsa.dot.gov/api/vehicles/GetModelsForMake/{make}?format=json", timeout=15, cache_ttl=3600),
+    APIProvider("opencage_placeholder", "geocoding", "https://nominatim.openstreetmap.org/search", timeout=12, cache_ttl=3600, headers={"Accept": "application/json", "User-Agent": "ALIMJBot/3.0 (+public-api-hub)"}),
+    APIProvider("transitland", "transportation", "https://transit.land/api/v2/rest/stops", timeout=15, cache_ttl=300),
+    APIProvider("hackernews", "social", "https://hacker-news.firebaseio.com/v0/topstories.json", timeout=10, cache_ttl=60),
+]
+for _provider in _EXTRA:
+    PROVIDERS.setdefault(_provider.name, _provider)
+
+
 # Stable aliases kept for older integrations/tests.
 PROVIDER_ALIASES = {
     "open_meteo": "open_meteo_forecast",

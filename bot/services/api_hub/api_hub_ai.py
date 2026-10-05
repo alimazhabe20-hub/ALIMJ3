@@ -99,3 +99,27 @@ register_tool(
     keywords=[r"فیلم", r"سریال", r"فیلم این ماه", r"سریال این ماه", r"بهترین فیلم", r"بهترین سریال", r"movie", r"series", r"IMDb"],
     risk="read", network=True,
 )
+
+from bot.services.api_hub import smart_api_query
+
+
+async def _smart_public_api(category: str, params: dict | None = None):
+    """Route a read-only request to the healthiest keyless provider."""
+    return await smart_api_query(category, params or {})
+
+
+register_tool(
+    name="hub_smart_public_api",
+    description="انتخاب خودکار سالم‌ترین API بدون کلید بر اساس دسته‌بندی، با fallback داخلی.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "category": {"type": "string", "description": "مثلاً weather, books, music, video, science, security"},
+            "params": {"type": "object"},
+        },
+        "required": ["category"],
+    },
+    handler=_smart_public_api,
+    keywords=[r"انتخاب api", r"smart api", r"api سالم", r"fallback api"],
+    risk="read", network=True,
+)
