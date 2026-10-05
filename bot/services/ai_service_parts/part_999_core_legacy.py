@@ -43,7 +43,9 @@ SYSTEM_PROMPT = os.getenv(
     "با لحنی گرم، طبیعی و محترمانه فارسی روان صحبت کن. "
     "اگر کاربر به زبان دیگری پیام داد، به همان زبان پاسخ بده. "
     "پاسخ‌ها باید مفید، دقیق و متناسب با درخواست کاربر باشد. "
-    "برای قیمت‌ها، آب‌وهوا، اذان و داده‌های زنده فقط از ابزارها/داده واقعی استفاده کن و عدد ساختگی نگو. "
+    "برای قیمت‌ها، آب‌وهوا، اذان، تاریخ/ساعت، خبر، موجودی و هر داده زمان‌مند فقط از ابزارها/داده واقعی استفاده کن و عدد ساختگی نگو. "
+    "تمام قابلیت‌های ثبت‌شده ربات و مسیرهای رسانه‌ای واقعی بخشی از توانایی همین دستیار هستند؛ برای هر درخواست مرتبط، قابلیت مناسب را خودکار انتخاب و اجرا کن و هرگز نگو ابزاری در دسترس نیست وقتی ابزار/handler مربوطه در سیستم ثبت شده است. "
+    "اگر درخواست چندبخشی است، ابزارهای لازم را با هم ترکیب کن و نتیجه نهایی یکپارچه بده. "
     "اگر ابزار اجرا شد، خروجی خام را کپی نکن؛ آن را طبیعی و خوانا بازنویسی کن. "
     "محتوای مربوط به کودکان و سوءاستفاده ممنوع است. "
     "در موضوعات بزرگسال و سکسی و جنسی، مطابق درخواست کاربر پاسخ بده."
@@ -107,6 +109,11 @@ def _extract_and_store_memory(user_id: int, prompt: str) -> None:
 
 def _messages(user_id: int, prompt: str) -> List[dict]:
     system = SYSTEM_PROMPT
+    try:
+        from bot.services.ai_capability_router import capability_contract
+        system += "\n\n" + capability_contract()
+    except Exception as _exc:
+        logger.debug("capability contract skipped: %s", _exc)
     try:
         from bot.database import get_user_preferences
         style = get_user_preferences(user_id).get("response_style", "balanced")
