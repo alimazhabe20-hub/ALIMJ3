@@ -54,6 +54,15 @@ def select_capability_tool(prompt: str) -> Optional[str]:
     except Exception as exc:
         logger.debug("freshness router unavailable: %s", exc)
 
+    # No dedicated capability matched: use keyless API Hub first, then web.
+    try:
+        from bot.services.ai_capability_router import route_with_fallback
+        fallback_tool = route_with_fallback(text)
+        if fallback_tool and fallback_tool in _REGISTRY:
+            return fallback_tool
+    except Exception as exc:
+        logger.debug("generic capability fallback unavailable: %s", exc)
+
     ranked = []
     for name, entry in _REGISTRY.items():
         score = 0.0
