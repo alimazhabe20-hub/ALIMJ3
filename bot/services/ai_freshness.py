@@ -39,6 +39,10 @@ _MARKET_MARKERS = re.compile(
 _WEATHER_MARKERS = re.compile(
     r"(?:هوا|آب.?وهوا|دمای|باران|برف|رطوبت|weather|forecast|air quality|کیفیت هوا)", re.I
 )
+_MOVIE_MARKERS = re.compile(
+    r"(?:فیلم|سریال|movie|series|IMDb|فیلم\s*(?:جدید|تازه|امسال|این ماه|اخیر)|"
+    r"جدیدترین\s*(?:فیلم|سریال)|آخرین\s*(?:فیلم|سریال))", re.I
+)
 
 
 def is_live_required(text: str) -> bool:
@@ -52,6 +56,7 @@ def is_live_required(text: str) -> bool:
         or _PRODUCT_MARKERS.search(q)
         or _MARKET_MARKERS.search(q)
         or _WEATHER_MARKERS.search(q)
+        or _MOVIE_MARKERS.search(q)
     )
 
 
@@ -65,6 +70,8 @@ def classify(text: str) -> FreshnessDecision:
         return FreshnessDecision(True, None, "market data can change")
     if _WEATHER_MARKERS.search(q):
         return FreshnessDecision(True, None, "weather data can change")
+    if _MOVIE_MARKERS.search(q):
+        return FreshnessDecision(True, "hub_movie_tv_latest", "movie/TV recommendations must use current catalog data")
     return FreshnessDecision(True, "web_search", "time-sensitive information requires live verification")
 
 
