@@ -1,4 +1,47 @@
-# Auto-split part 16: search_shopping
+def _shopping_digits(text: str) -> str:
+    table = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+    return str(text or "").translate(table)
+
+
+def _shopping_budget(text: str) -> int:
+    import re
+    t = _shopping_digits(text).replace(",", "").replace("٬", "")
+    patterns = [
+        r"(?:بودجه|تا|زیر|حداکثر|حدود|حد)\s*(\d+(?:\.\d+)?)\s*(?:میلیون|م)\b",
+        r"(\d+(?:\.\d+)?)\s*(?:میلیون|م)\s*(?:تومان|تومن)?",
+        r"(?:بودجه|تا|زیر|حداکثر|حدود|حد)\s*(\d{5,})\s*(?:تومان|تومن)?",
+    ]
+    for pat in patterns:
+        m = re.search(pat, t, re.I)
+        if not m: continue
+        try:
+            n=float(m.group(1))
+            if "میلیون" in m.group(0) or re.search(r"\d+(?:\.\d+)?\s*م\b",m.group(0)): n*=1_000_000
+            if n>=100_000: return int(n)
+        except Exception: pass
+    return 0
+
+
+def _shopping_is_phone(text: str) -> bool:
+    import re
+    return bool(re.search(r"گوشی|موبایل|اسمارت\s*فون|smart\s*phone|iphone|آیفون|سامسونگ|شیائومی|پوکو|honor|oneplus|pixel", str(text or ""), re.I))
+
+
+def _shopping_query_variants(query: str, budget: int = 0) -> list[str]:
+    q=str(query or "").strip()
+    out=[q]
+    if budget:
+        b=f"{budget:,}"
+        out += [f"بهترین گوشی تا {b} تومان", f"گوشی موبایل تا {b} تومان", f"گوشی خوب تا {b} تومان قیمت خرید", f"گوشی تا {b} تومان ترب", f"گوشی تا {b} تومان دیجی کالا"]
+        if _shopping_is_phone(q):
+            out += [f"سامسونگ تا {b} تومان گوشی", f"شیائومی تا {b} تومان گوشی", f"پوکو تا {b} تومان گوشی", f"آنر تا {b} تومان گوشی", f"آیفون تا {b} تومان گوشی"]
+    seen=set(); result=[]
+    for x in out:
+        x=" ".join(x.split())
+        if x and x not in seen: seen.add(x); result.append(x)
+    return result
+
+
 async def search_shopping(
     query: str = "",
     source: str = "all",
@@ -14,6 +57,9 @@ async def search_shopping(
 
     max_results = max(4, min(int(max_results or 10), 16))
     source = (source or "all").lower().strip()
+    budget = _shopping_budget(query)
+    if budget and not max_price:
+        max_price = budget
 
     # انتخاب منابع
     if source in ("all", "همه", "تمام", "everywhere", "web"):
@@ -29,7 +75,7 @@ async def search_shopping(
         selected.append("instagram")
 
     # چند query مستقل می‌سازیم؛ تطابق دقیق دیگر شرط موفقیت نیست.
-    variants = _query_variants(query) or [query]
+    variants = _shopping_query_variants(query, budget) or [query]
     tasks = []
     for key in selected:
         cfg = SOURCES[key]
@@ -37,7 +83,7 @@ async def search_shopping(
         limit = max(5, max_results // max(1, len(selected)) + 3)
 
         # برای هر منبع فقط چند query قوی‌تر را اجرا می‌کنیم تا روی Render فشار ایجاد نشود.
-        local_variants = variants[:3] if key not in ("general", "instagram") else variants[:5]
+        local_variants = variants[:4] if key not in ("general", "instagram") else variants[:6]
         for variant in local_variants:
             if key == "instagram":
                 tasks.append(
@@ -65,8 +111,6 @@ async def search_shopping(
             if any(
                 x in low
                 for x in (
-                    "youtube.com",
-                    "youtu.be",
                     "twitter.com",
                     "x.com",
                     "facebook.com",
@@ -104,6 +148,8 @@ async def search_shopping(
         # fallback به لینک‌های خام
         fallback = list(links.values())[:max_results]
         if not fallback:
+            if budget and _shopping_is_phone(query):
+                return f"برای بودجه حدود {budget:,} تومان جستجوی گوشی انجام شد، اما نتیجه قابل‌تأیید از منابع زنده برنگشت؛ قیمت حدسی ارائه نمی‌کنم."
             return f"برای «{query}» نتیجه‌ای در فروشگاه‌ها، اینستاگرام و وب پیدا نشد."
         lines = [
             f"🔎 نتایج جستجو برای «{query}» (قیمت مستقیم استخراج نشد):",
