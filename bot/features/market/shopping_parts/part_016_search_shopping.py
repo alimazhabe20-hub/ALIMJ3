@@ -89,7 +89,7 @@ async def search_shopping(
 
     # انتخاب منابع
     if source in ("all", "همه", "تمام", "everywhere", "web"):
-        preferred = ["torob", "digikala", "snappshop", "technolife", "emalls", "basalam", "digistyle", "modiseh", "instagram", "general"]
+        preferred = ["torob", "digikala", "snappshop", "technolife", "mobile", "emalls", "basalam", "digistyle", "modiseh", "instagram", "general"]
         selected = [s for s in preferred if s in SOURCES]
     else:
         selected = [s for s in source.replace(",", " ").split() if s in SOURCES]
@@ -109,7 +109,7 @@ async def search_shopping(
         limit = max(5, max_results // max(1, len(selected)) + 3)
 
         # برای هر منبع فقط چند query قوی‌تر را اجرا می‌کنیم تا روی Render فشار ایجاد نشود.
-        local_variants = variants[:4] if key not in ("general", "instagram") else variants[:6]
+        local_variants = variants[:5] if key not in ("general", "instagram") else variants[:8]
         for variant in local_variants:
             if key == "instagram":
                 tasks.append(
@@ -150,7 +150,7 @@ async def search_shopping(
             links[url] = item
 
     # بازرسی صفحات (حداکثر ۲۶ تا برای سرعت)
-    to_inspect = list(links.values())[:26]
+    to_inspect = list(links.values())[:36]
     inspect_tasks = [
         _inspect(x["url"], x["title"], x.get("snippet", "")) for x in to_inspect
     ]
