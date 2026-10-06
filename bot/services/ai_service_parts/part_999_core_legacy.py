@@ -1,1169 +1,926 @@
-"""Built-in AI tool handlers and public tool API.
-
-Generic registry/execution machinery lives in tool_runtime.py. This facade
-re-exports the historical public functions so existing imports are stable.
-"""
+"""AI router, per-user model selection, and multi-key rotation for Rooze Ziba."""
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import Any, List
+import base64
+import os
+import re
+import time
+from pathlib import Path
+from urllib.parse import quote
+from collections import defaultdict, deque
+from typing import Deque, Dict, List, Optional, Tuple
 
-from bot.services.tool_runtime import (
-    register_tool, get_registered_tool_names, get_tool_definitions,
-    _REGISTRY, _TOOL_CACHEABLE,
-    parse_tool_arguments, execute_tool, gather_context_for_prompt,
-    list_registered_tools, clear_tool_cache,
+import httpx
+
+from bot.logger import logger
+from bot.utils.observability import record as record_metric
+from bot.utils.task_manager import spawn
+
+# V26 modular facade: runtime state/config and provider implementations live in
+# dedicated modules while legacy ai_service import paths remain stable.
+from bot.services.ai_runtime import (
+    GEMINI_SAFETY_SETTINGS, MAX_INPUT, MAX_OUTPUT, HISTORY_ITEMS, TIMEOUT,
+    KEY_COOLDOWN_SEC, KEY_SHORT_COOLDOWN_SEC, AI_RETRY_COUNT, AI_RETRY_BASE_SEC,
+    AI_SIMPLE_MAX_CHARS, AI_COMPLEX_MIN_CHARS, AI_PROVIDER_FAILURE_THRESHOLD,
+    AI_PROVIDER_COOLDOWN_SEC, AI_PROVIDER_MAX_COOLDOWN_SEC,
+    AI_ROUTING_COST_WEIGHT, AI_ROUTING_QUALITY_WEIGHT, AI_ROUTING_LATENCY_WEIGHT,
+    AI_ROUTING_MODE, _AI_MODEL_PROFILES, _DEFAULT_ORDER, _HISTORY, _LOCKS,
+    _USER_SELECTION, _SUMMARY_RUNNING, _PROVIDER_HEALTH, _get_http, close_http,
+    _split_keys, _provider_keys, _key_id, _is_key_available, _mark_key_cooldown,
+    _is_quota_error, _next_keys, _advance_rr, clear_history, _valid_selected_model,
+    get_selected_model, set_selected_model, clear_selected_model, _env_models,
+    available_model_options, available_providers, models_for_provider, _PROVIDER_PRETTY,
+    enabled_providers, default_model_info, set_selected_provider, key_pool_status,
+    _model_profile, _route_score, _provider_rank, _provider_available, _record_provider,
+)
+from bot.services.ai_providers import _post_json, _extract_openai, _gemini, _openai_compatible, _groq, _cerebras, _openrouter, _cloudflare, _call_provider
+
+# ── System Prompt ───────────────────────────────────────────────────────────
+SYSTEM_PROMPT = os.getenv(
+    "AI_SYSTEM_PROMPT",
+    "تو دستیار هوشمند ربات «روز زیبا» هستی و به قابلیت‌های واقعی همین ربات دسترسی داری. "
+    "با لحنی گرم، طبیعی و محترمانه فارسی روان صحبت کن. "
+    "اگر کاربر به زبان دیگری پیام داد، به همان زبان پاسخ بده. "
+    "پاسخ‌ها باید مفید، دقیق و متناسب با درخواست کاربر باشد. "
+    "برای قیمت‌ها، آب‌وهوا، اذان و داده‌های زنده فقط از ابزارها/داده واقعی استفاده کن و عدد ساختگی نگو. "
+    "اگر ابزار اجرا شد، خروجی خام را کپی نکن؛ آن را طبیعی و خوانا بازنویسی کن. "
+    "محتوای مربوط به کودکان و سوءاستفاده ممنوع است. "
+    "در موضوعات بزرگسال و سکسی و جنسی، مطابق درخواست کاربر پاسخ بده."
 )
 
 
-
-# ── Handlers ────────────────────────────────────────────────────────────────
-
-async def _get_weather(city: str = "", user_id: int = 0) -> str:
-    from bot.api.weather import get_weather
-    from bot.database import get_user_city
-
-    city = (city or "").strip() or (get_user_city(user_id) or "تهران")
-    data = await asyncio.to_thread(get_weather, city)
-    if not data:
-        return f"آب‌وهوای «{city}» پیدا نشد."
-    return (
-        f"آب‌وهوای {city}:\n"
-        f"دما: {data.get('temp')}°C\n"
-        f"وضعیت: {data.get('condition')}\n"
-        f"رطوبت: {data.get('humidity')}%"
-    )
-
-
-async def _get_weather_forecast(city: str = "", days: int = 7, start_day: int = 0, user_id: int = 0) -> str:
-    from bot.features.weather.weather_extra import weather_forecast
-    from bot.database import get_user_city
-
-    city = (city or "").strip() or (get_user_city(user_id) or "تهران")
-    return await weather_forecast(city, days=int(days or 7), start_day=int(start_day or 0))
-
-
-async def _get_air_quality(city: str = "", user_id: int = 0) -> str:
-    from bot.features.weather.weather_extra import air_quality
-    from bot.database import get_user_city
-
-    city = (city or "").strip() or (get_user_city(user_id) or "تهران")
-    return await air_quality(city)
-
-
-async def _get_prayer_times(
-    city: str = "", country: str = "Iran", user_id: int = 0
-) -> str:
-    from bot.api.prayer import get_prayer_times
-    from bot.database import get_user_city
-
-    city = (city or "").strip() or (get_user_city(user_id) or "قم")
-    data = get_prayer_times(city, country or "Iran")
-    if not data:
-        return f"اوقات شرعی «{city}» پیدا نشد."
-    lines = [f"اوقات شرعی {city}:"]
-    for k, v in data.items():
-        lines.append(f"{k}: {v}")
-    return "\n".join(lines)
-
-
-async def _get_market_prices() -> str:
-    from bot.features.market.finance import full_market_prices
-
-    return await full_market_prices()
-
-
-async def _search_shopping(query: str = "", source: str = "all", max_results: int = 12, min_price: int = 0, max_price: int = 0) -> str:
-    from bot.features.market.shopping import search_shopping
-    return await search_shopping(
-        query=query, source=source, max_results=int(max_results or 12),
-        min_price=int(min_price or 0), max_price=int(max_price or 0),
-    )
-
-
-def _shopping_price_history(query: str = "", days: int = 30) -> str:
-    from bot.features.market.shopping import shopping_price_history
-    return shopping_price_history(query=query, days=int(days or 30))
-
-
-async def _get_crypto_price(symbol: str = "btc", user_id: int = 0) -> str:
-    from bot.features.market.finance import get_crypto_price
-    return await get_crypto_price(symbol)
-
-
-async def _get_top_crypto(limit: int = 10) -> str:
-    from bot.features.market.finance import get_top_crypto
-
-    return await get_top_crypto(int(limit or 10))
-
-
-async def _convert_currency(amount: float, from_cur: str, to_cur: str = "") -> str:
-    from bot.features.market.finance import convert_currency
-
-    return await convert_currency(float(amount), str(from_cur), str(to_cur or ""))
-
-
-async def _convert_crypto(amount: float, symbol: str) -> str:
-    from bot.features.market.finance import convert_crypto
-
-    return await convert_crypto(float(amount), str(symbol))
-
-
-def _calculator(expression: str) -> str:
-    from bot.features.tools.app_tools import calculator
-
-    return calculator(expression)
-
-
-def _generate_password(length: int = 16) -> str:
-    from bot.features.tools.app_tools import generate_password
-
-    return generate_password(int(length or 16))
-
-
-def _count_text(text: str) -> str:
-    from bot.features.tools.app_tools import count_text
-
-    return count_text(text)
-
-
-async def _world_distance(place1: str, place2: str = "") -> str:
-    from bot.features.tools.app_tools import world_distance
-
-    return await world_distance(place1, place2 or None)
-
-
-def _convert_date(date_text: str) -> str:
-    from bot.features.date.date_tools import parse_any_date, convert_with_weekday
-
-    p = parse_any_date(date_text)
-    if not p:
-        return "تاریخ نامعتبر. مثال: 1403/05/18 یا 2024/08/09"
-    return convert_with_weekday(p[0], p[1], p[2], p[3])
-
-
-def _calculate_age(birth_date: str) -> str:
-    from bot.features.date.date_tools import parse_shamsi
-    from bot.features.date.converters import calculate_age
-
-    p = parse_shamsi(birth_date)
-    if not p:
-        return "تاریخ تولد نامعتبر. مثال: 1375/03/15"
-    return calculate_age(p[0], p[1], p[2])
-
-
-def _birthday_countdown(birth_date: str) -> str:
-    from bot.features.date.date_tools import parse_shamsi, birthday_countdown
-
-    p = parse_shamsi(birth_date)
-    if not p:
-        return "تاریخ نامعتبر. مثال: 1375/03/15"
-    return birthday_countdown(p[0], p[1], p[2])
-
-
-def _zodiac_animal(birth_date: str) -> str:
-    from bot.features.date.date_tools import parse_shamsi, zodiac_animal
-
-    p = parse_shamsi(birth_date)
-    if not p:
-        return "تاریخ نامعتبر."
-    return zodiac_animal(p[0], p[1], p[2])
-
-
-def _lunar_age(birth_date: str) -> str:
-    from bot.features.date.date_tools import parse_shamsi, lunar_age
-
-    p = parse_shamsi(birth_date)
-    if not p:
-        return "تاریخ نامعتبر."
-    return lunar_age(p[0], p[1], p[2])
-
-
-def _current_datetime(timezone_name: str = "", relative_day: int = 0) -> str:
-    from bot.services.current_datetime import current_datetime
-
-    return current_datetime(timezone_name, relative_day=relative_day)
-
-
-def _world_clock() -> str:
-    from bot.features.date.date_tools import world_clock
-
-    return world_clock()
-
-
-def _month_calendar() -> str:
-    from bot.features.date.date_tools import month_calendar
-
-    return month_calendar()
-
-
-def _nowruz_countdown() -> str:
-    from bot.features.date.date_tools import nowruz_countdown
-
-    return nowruz_countdown()
-
-
-def _search_events(query: str) -> str:
-    from bot.features.date.date_tools import search_events
-
-    return search_events(query)
-
-
-def _qibla_direction(city: str = "", user_id: int = 0) -> str:
-    from bot.features.religious.qibla import qibla_direction
-    from bot.database import get_user_city
-
-    city = (city or "").strip() or (get_user_city(user_id) or "تهران")
-    return qibla_direction(city)
-
-
-def _daily_adhkar(user_id: int = 0) -> str:
-    from bot.features.religious.adhkar import daily_adhkar
-
-    return daily_adhkar(user_id)
-
-
-async def _daily_verse_hadith(user_id: int = 0) -> str:
-    from bot.features.religious.verse_hadith import daily_verse_hadith
-
-    return await daily_verse_hadith(user_id)
-
-
-def _religious_countdown() -> str:
-    from bot.features.religious.events import religious_countdown
-
-    return religious_countdown()
-
-
-async def _istikhara(user_id: int = 0) -> str:
-    from bot.features.religious.istikhara import istikhara
-
-    return await istikhara(user_id)
-
-
-async def _hafez_fal(user_id: int = 0) -> str:
-    from bot.features.fun.fun_tools import hafez_fal
-
-    return await hafez_fal(user_id)
-
-
-async def _joke(category: str = "", user_id: int = 0) -> str:
-    from bot.features.fun.fun_tools import random_joke
-
-    return random_joke(category or None, user_id)
-
-
-async def _fact_of_day() -> str:
-    from bot.features.fun.fun_tools import fact_of_day
-
-    return await fact_of_day()
-
-
-async def _daily_challenge() -> str:
-    from bot.features.fun.fun_tools import daily_challenge
-
-    return await daily_challenge()
-
-
-def _apply_font(text: str, style_key: str = "") -> str:
-    from bot.features.fonts.converter import apply_font, apply_all_fonts, list_fonts
-
-    if not text:
-        return "متنی برای تبدیل فونت نفرستادی."
-    if not style_key:
-        return apply_all_fonts(text)
+def _memory_block(user_id: int, query: str = "") -> str:
+    """Build a bounded, relevance-ranked memory block for the current request."""
+    parts = []
     try:
-        return apply_font(text, style_key)
-    except Exception:
-        return list_fonts() + "\n\n" + apply_all_fonts(text)
+        from bot.database import get_ai_memory, get_ai_history_summary
+        # Query-aware retrieval prevents unrelated long-term facts from leaking
+        # into every prompt while retaining the legacy fallback when no match exists.
+        mem = get_ai_memory(user_id, limit=12, query=query)
+        if mem:
+            lines = [f"- {k}: {v}" for k, v in mem]
+            parts.append("حافظه مرتبط درباره این کاربر:\n" + "\n".join(lines))
+        summary = get_ai_history_summary(user_id)
+        if summary:
+            # Keep summary bounded so memory cannot crowd out the current request.
+            parts.append("خلاصه گفتگوهای قبلی:\n" + summary[-2200:])
+    except Exception as e:
+        logger.warning("memory_block: %s", e)
+    return "\n\n".join(parts)
 
 
-def _list_fonts() -> str:
-    from bot.features.fonts.converter import list_fonts
-
-    return list_fonts()
-
-
-def _get_user_city(user_id: int = 0) -> str:
-    from bot.database import get_user_city
-
-    city = get_user_city(user_id) if user_id else None
-    return f"شهر ثبت‌شده کاربر: {city or 'نامشخص'}"
-
-
-def _city_distance(city1: str, city2: str) -> str:
-    from bot.features.weather.weather_extra import city_distance
-
-    return city_distance(city1, city2)
-
-
-def _profile_summary(user_id: int = 0) -> str:
-    from bot.features.profile.profile import profile_text
-    from bot.database import get_user
-
-    row = get_user(user_id) if user_id else None
-    first_name = row[1] if row else "کاربر"
-    return profile_text(user_id, first_name)
-
-
-# ── ثبت پیش‌فرض ─────────────────────────────────────────────────────────────
-
-
-
-async def _analyze_crypto(symbol: str = "") -> str:
-    from bot.features.market.finance import analyze_crypto
-    return await analyze_crypto(str(symbol or "btc"))
-
-
-async def _crypto_chart_info(symbol: str = "", days: int = 7) -> str:
-    """برای AI فقط متن توضیح می‌دهد (تصویر جدا از هندلر پیام است)"""
-    from bot.features.market.finance import get_crypto_chart
-    png, caption = await get_crypto_chart(str(symbol or "btc"), int(days or 7))
-    if png:
-        return caption + "\n\n(نمودار تصویری در بخش بازار ربات در دسترس است. بنویس: نمودار " + str(symbol) + ")"
-    return caption or "داده نمودار در دسترس نیست."
-
-
-async def _get_economic_calendar(days: int = 1, currency: str = "", impact: str = "all", timezone: str = "", user_id: int = 0) -> str:
-    """داده زنده تقویم اقتصادی برای استفاده مستقیم AI."""
-    from bot.features.market.economic_calendar import get_calendar_for_user, calendar_text, ai_context
-    mode = "week" if int(days or 1) >= 7 else "today"
-    if int(days or 1) == 2:
-        mode = "tomorrow"
-    events, user_tz = await get_calendar_for_user(user_id, mode, impact or "all", currency or "")
-    tz_name = timezone.strip() if timezone.strip() else user_tz
-    if not events:
-        return "برای این فیلتر رویداد اقتصادی‌ای پیدا نشد."
-    return "منبع: تقویم اقتصادی زنده\nمنطقه زمانی: %s\n\n%s" % (tz_name, ai_context(events, tz_name, 60))
-
-
-async def _tool_web_search(query: str = "") -> str:
-    from bot.services.ai_extras import web_search
-    return await web_search(query)
-
-
-def _tool_reminder(
-    text: str = "",
-    remind_at: str = "",
-    repeat_type: str = "once",
-    repeat_every: int = 0,
-    user_id: int = 0,
-) -> str:
-    from bot.database import add_reminder
-    repeat_type = repeat_type or "once"
-    repeat_every = max(0, int(repeat_every or 0))
-    add_reminder(
-        user_id, text, remind_at,
-        repeat_type=repeat_type,
-        repeat_every=repeat_every,
+def _extract_and_store_memory(user_id: int, prompt: str) -> None:
+    """اگر کاربر گفت چیزی را به خاطر بسپار، ذخیره کن."""
+    import re
+    t = (prompt or "").strip()
+    m = re.search(
+        r"(?:یادت\s*باشه|به\s*خاطر\s*بسپار|یادت\s*باشه\s*که|من\s*(?:اسمم|نامم)\s*)[:：]?\s*(.+)$",
+        t,
+        re.I | re.S,
     )
-    return f"یادآوری ثبت شد: {text} در {remind_at}"
-
-
-async def _tool_ict_analysis(symbol: str = "btc", interval: str = "1h", user_id: int = 0) -> str:
-    from bot.features.market.finance_ict import analyze_ict
-    return await analyze_ict(symbol or "btc", interval=interval or "1h")
-
-
-def _register_builtin_tools() -> None:
-    if "get_weather" in _REGISTRY:
+    if not m:
+        m2 = re.search(r"اسمم\s+([^\n.،,]{2,40})", t)
+        if m2:
+            try:
+                from bot.database import set_ai_memory
+                set_ai_memory(user_id, "name", m2.group(1).strip())
+            except Exception as _exc:
+                logger.debug("%s: %s", __name__, _exc)
         return
+    fact = m.group(1).strip()[:500]
+    if not fact:
+        return
+    key = "note"
+    if re.search(r"اسم|نام", t):
+        key = "name"
+    elif re.search(r"شهر|زندگی", t):
+        key = "city"
+    elif re.search(r"علاقه|دوست\s*دارم", t):
+        key = "interest"
+    try:
+        from bot.database import set_ai_memory
+        set_ai_memory(user_id, key, fact)
+    except Exception as e:
+        logger.warning("store memory: %s", e)
+
+
+def _messages(user_id: int, prompt: str) -> List[dict]:
+    system = SYSTEM_PROMPT
+    try:
+        from bot.database import get_user_preferences
+        style = get_user_preferences(user_id).get("response_style", "balanced")
+        style_prompt = {
+            "short": "پاسخ‌ها را تا حد ممکن کوتاه، مستقیم و کم‌حجم بده.",
+            "long": "برای درخواست‌های پیچیده پاسخ کامل، ساختاریافته و با جزئیات مفید بده.",
+            "balanced": "پاسخ‌ها را متعادل و متناسب با پیچیدگی درخواست نگه دار.",
+        }.get(style)
+        if style_prompt:
+            system += "\n\nترجیح پاسخ کاربر: " + style_prompt
+    except Exception as _exc:
+        logger.debug("%s: %s", __name__, _exc)
+    mem = _memory_block(user_id, prompt)
+    if mem:
+        system = system + "\n\n" + mem
+    # V19: local hybrid retrieval adds only relevant memory/knowledge context.
+    # It never performs a network request on the normal prompt path.
+    try:
+        from bot.services.retrieval import build_local_context
+        retrieved = build_local_context(user_id, prompt)
+        if retrieved:
+            system += "\n\n" + retrieved
+    except Exception as e:
+        logger.debug("local retrieval skipped: %s", e)
+    messages = [{"role": "system", "content": system}]
+    for role, content in _HISTORY[user_id]:
+        messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": prompt})
+    return messages
+
+
+def _save_turn(user_id: int, prompt: str, answer: str) -> None:
+    history = _HISTORY[user_id]
+    history.append(("user", prompt))
+    history.append(("assistant", answer))
+
+
+async def _gemini_with_media(
+    user_id: int,
+    prompt: str,
+    model: str,
+    media: list[tuple[bytes, str]] | None = None,
+) -> str:
+    """Gemini multimodal + function calling برای ابزارهای AI، از جمله خرید تصویری."""
+    keys = _next_keys("gemini")
+    if not keys:
+        raise RuntimeError("هیچ کلید Gemini تنظیم نشده")
+
+    from bot.services.ai_tools import get_tool_definitions, execute_tool, parse_tool_arguments
+    from bot.services.tool_runtime import select_capability_tool
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    contents = []
+    for role, content in _HISTORY[user_id]:
+        contents.append({
+            "role": "model" if role == "assistant" else "user",
+            "parts": [{"text": content}],
+        })
+
+    parts = []
+    if media:
+        for data, mime in media:
+            if len(data) > 4_500_000:
+                raise RuntimeError("حجم فایل برای تحلیل خیلی بزرگ است (حداکثر حدود ۴ مگابایت).")
+            parts.append({"inline_data": {"mime_type": mime or "image/jpeg", "data": base64.b64encode(data).decode("ascii")}})
+    parts.append({"text": prompt})
+    contents.append({"role": "user", "parts": parts})
+
+    declarations = []
+    for tool in get_tool_definitions():
+        fn = tool.get("function") or {}
+        if fn.get("name"):
+            declarations.append({
+                "name": fn["name"],
+                "description": fn.get("description", ""),
+                "parameters": fn.get("parameters", {"type": "object", "properties": {}}),
+            })
+    gemini_tools = [{"functionDeclarations": declarations}] if declarations else []
+
+    errors = []
+    for key in keys:
+        try:
+            working = list(contents)
+            for round_no in range(4):
+                payload = {
+                    "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                    "contents": working,
+                    "generationConfig": {"maxOutputTokens": min(MAX_OUTPUT, 3072 if len(prompt) < 900 else 6144)},
+                    "safetySettings": GEMINI_SAFETY_SETTINGS,
+                }
+                if gemini_tools and round_no < 3:
+                    payload["tools"] = gemini_tools
+                    forced_tool = select_capability_tool(prompt)
+                    if forced_tool:
+                        payload["toolConfig"] = {
+                            "functionCallingConfig": {
+                                "mode": "ANY",
+                                "allowedFunctionNames": [forced_tool],
+                            }
+                        }
+
+                status, data = await _post_json(url, params={"key": key}, json=payload)
+                if status >= 400:
+                    if _is_quota_error(status, data):
+                        daily = status != 429 or "daily" in str(data).lower() or "quota" in str(data).lower()
+                        _mark_key_cooldown("gemini", key, daily=daily)
+                        errors.append(f"{_key_id('gemini', key)} HTTP {status}")
+                        break
+                    raise RuntimeError(f"Gemini HTTP {status}: {str(data)[:900]}")
+
+                candidates = data.get("candidates") or []
+                if not candidates:
+                    raise RuntimeError(f"Gemini پاسخ خالی داد: {str(data)[:900]}")
+                content = candidates[0].get("content") or {}
+                out_parts = content.get("parts") or []
+                function_calls = [
+                    p.get("functionCall") or p.get("function_call")
+                    for p in out_parts
+                    if p.get("functionCall") or p.get("function_call")
+                ]
+                if function_calls and round_no < 3:
+                    working.append({"role": "model", "parts": out_parts})
+                    response_parts = []
+                    for call in function_calls:
+                        name = call.get("name") or ""
+                        args = parse_tool_arguments(call.get("args") or call.get("arguments") or {})
+                        result = await execute_tool(name, args, user_id=user_id)
+                        call_id = call.get("id") or call.get("callId") or call.get("call_id")
+                        fr = {"name": name, "response": {"result": result}}
+                        if call_id:
+                            fr["id"] = call_id
+                        response_parts.append({"functionResponse": fr})
+                    working.append({"role": "user", "parts": response_parts})
+                    continue
+
+                text = "".join(p.get("text", "") for p in out_parts if isinstance(p, dict)).strip()
+                if not text:
+                    raise RuntimeError(f"Gemini پاسخ متنی خالی داد: {str(data)[:700]}")
+                _advance_rr("gemini")
+                return text
+        except RuntimeError as exc:
+            errors.append(str(exc)[:250])
+            continue
+        except Exception as exc:
+            errors.append(str(exc)[:250])
+            continue
+
+    raise RuntimeError("همه کلیدهای Gemini تمام/خطا: " + " | ".join(errors[:5]))
+
+
+def _extract_text_from_bytes(data: bytes, filename: str = "", mime: str = "") -> str:
+    """استخراج متن از فایل‌های متنی/PDF ساده."""
+    name = (filename or "").lower()
+    mime = (mime or "").lower()
+
+    # متن ساده
+    if (
+        mime.startswith("text/")
+        or name.endswith((".txt", ".md", ".csv", ".json", ".py", ".js", ".html", ".xml", ".log"))
+    ):
+        for enc in ("utf-8", "utf-8-sig", "cp1256", "latin-1"):
+            try:
+                return data.decode(enc)
+            except Exception:
+                continue
+        return data.decode("utf-8", errors="replace")
+
+    # PDF
+    if mime == "application/pdf" or name.endswith(".pdf"):
+        try:
+            from pypdf import PdfReader  # optional
+            import io
+
+            reader = PdfReader(io.BytesIO(data))
+            pages = []
+            for i, page in enumerate(reader.pages[:30]):
+                t = page.extract_text() or ""
+                if t.strip():
+                    pages.append(f"--- صفحه {i+1} ---\n{t}")
+            if pages:
+                return "\n\n".join(pages)
+        except Exception as e:
+            logger.warning("pdf extract failed: %s", e)
+            return (
+                "نتوانستم متن PDF را استخراج کنم. "
+                "اگر pypdf نصب باشد یا فایل متنی بفرستی بهتر کار می‌کند."
+            )
+
+    # docx
+    if name.endswith(".docx") or "wordprocessingml" in mime:
+        try:
+            import zipfile
+            import io
+            import re as _re
+
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                xml = z.read("word/document.xml").decode("utf-8", errors="ignore")
+            texts = _re.findall(r"<w:t[^>]*>(.*?)</w:t>", xml)
+            return "\n".join(texts) if texts else "متن قابل استخراج از docx نبود."
+        except Exception as e:
+            logger.warning("docx extract failed: %s", e)
+            return "خطا در خواندن فایل Word."
+
+    return ""
+
+
+async def ask_ai_media(
+    user_id: int,
+    prompt: str,
+    *,
+    images: list[tuple[bytes, str]] | None = None,
+    file_text: str | None = None,
+    filename: str = "",
+) -> tuple[str, str]:
+    """
+    تحلیل عکس و/یا محتوای فایل با AI.
+    images: لیست (bytes, mime_type)
+    file_text: متن استخراج‌شده از فایل
+    """
+    prompt = (prompt or "").strip()
+    images = images or []
+
+    parts_desc = []
+    if images:
+        parts_desc.append(f"{len(images)} تصویر")
+    if file_text:
+        parts_desc.append(f"فایل متنی{(' ' + filename) if filename else ''}")
+
+    if not prompt:
+        if images and not file_text:
+            prompt = "این تصویر را کامل و دقیق تحلیل کن. محتوا، متن داخل عکس، اشیاء و هر نکته مهم را بگو."
+        elif file_text and not images:
+            prompt = "محتوای این فایل را کامل بررسی و خلاصهٔ مفید + نکات مهم بده."
+        else:
+            prompt = "این ورودی را کامل تحلیل کن."
+
+    # متن فایل را به پرامپت بچسبان
+    if file_text:
+        clipped = file_text[:12000]
+        prompt = (
+            f"{prompt}\n\n"
+            f"[محتوای فایل{(' : ' + filename) if filename else ''}]\n{clipped}"
+        )
+
+    if len(prompt) > MAX_INPUT:
+        prompt = prompt[:MAX_INPUT]
+
+    options = available_model_options()
+    if not options:
+        raise RuntimeError("هیچ سرویس AI تنظیم نشده است.")
+
+    original_prompt = prompt if not file_text else (prompt.split("[محتوای فایل")[0].strip() or "تحلیل فایل")
+
+    async with _LOCKS[user_id]:
+        selected = get_selected_model(user_id)
+        errors: list[str] = []
+
+        # برای تصویر: اولویت با Gemini (بینایی)
+        providers = list(dict.fromkeys(p for p, _l, _m in options))
+        if selected and selected[0] in providers:
+            providers.remove(selected[0]); providers.insert(0, selected[0])
+        if images and "gemini" in providers and (not selected or selected[0] != "gemini"):
+            providers.remove("gemini"); providers.insert(0, "gemini")
+        if len(providers) > 1:
+            head = providers[:1]
+            tail = sorted(providers[1:], key=_provider_rank)
+            ordered_providers = head + tail
+        else:
+            ordered_providers = providers
+
+        for provider in ordered_providers:
+            models = models_for_provider(provider)
+            if not models:
+                continue
+            for model in models:
+                started = time.monotonic()
+                try:
+                    if images and provider == "gemini":
+                        answer = await _gemini_with_media(
+                            user_id, prompt, model, media=images
+                        )
+                    elif images and provider != "gemini":
+                        # مدل‌های بدون بینایی: توضیح بده که تصویر را نمی‌بینند
+                        # ولی اگر متن فایل هم هست همان را جواب بدهند
+                        if not file_text:
+                            raise RuntimeError(
+                                f"{provider} از تحلیل تصویر پشتیبانی نمی‌کند؛ Gemini را انتخاب کن."
+                            )
+                        answer = await _call_provider(provider, user_id, prompt, model)
+                    else:
+                        answer = await _call_provider(provider, user_id, prompt, model)
+
+                    _record_provider(provider, ok=True, latency=time.monotonic() - started)
+                    record_metric("ai_provider", provider, ok=True, latency=time.monotonic() - started, model=model)
+                    _save_turn(user_id, original_prompt[:500], answer)
+                    if not selected:
+                        set_selected_model(user_id, provider, "*")
+                    return answer, f"{provider} / {model}"
+                except Exception as exc:
+                    _record_provider(provider, ok=False, latency=time.monotonic() - started)
+                    record_metric("ai_provider", provider, ok=False, latency=time.monotonic() - started, model=model)
+                    msg = str(exc).replace("\n", " ")[:400]
+                    errors.append(f"{provider}/{model}: {msg}")
+                    logger.warning("ask_ai_media failed: %s", msg)
+                    await asyncio.sleep(0.05)
+
+    raise RuntimeError(
+        "نتوانستم عکس/فایل را تحلیل کنم.\n\n" + "\n".join(errors[:8])
+    )
+
+
+
+# ── ساخت / ویرایش تصویر با Gemini (Nano Banana) ─────────────────────────────
+
+IMAGE_GEN_MODEL = os.getenv(
+    "GEMINI_IMAGE_MODEL",
+    "gemini-3.1-flash-image",
+)
+TTS_VOICE = os.getenv("TTS_VOICE", "fa-IR-DilaraNeural")
+
+IMAGE_GEN_MODEL_FALLBACKS = tuple(
+    x.strip() for x in os.getenv(
+        "GEMINI_IMAGE_MODEL_FALLBACKS",
+        "gemini-3.1-flash-lite-image,gemini-2.5-flash-image",
+    ).split(",") if x.strip()
+)
+
+
+
+async def generate_or_edit_image(*args, **kwargs):
+    from bot.services.ai_media import generate_or_edit_image as _fn
+    return await _fn(*args, **kwargs)
+
+def extract_image_prompt(*args, **kwargs):
+    from bot.services.ai_media import extract_image_prompt as _fn
+    return _fn(*args, **kwargs)
+
+def looks_like_image_request(*args, **kwargs):
+    from bot.services.ai_media import looks_like_image_request as _fn
+    return _fn(*args, **kwargs)
+
+def looks_like_image_edit(*args, **kwargs):
+    from bot.services.ai_media import looks_like_image_edit as _fn
+    return _fn(*args, **kwargs)
+
+async def speech_to_text(*args, **kwargs):
+    from bot.services.ai_media import speech_to_text as _fn
+    return await _fn(*args, **kwargs)
+
+async def analyze_voice_emotion(*args, **kwargs):
+    from bot.services.ai_media import analyze_voice_emotion as _fn
+    return await _fn(*args, **kwargs)
+
+async def text_to_speech(*args, **kwargs):
+    from bot.services.ai_media import text_to_speech as _fn
+    return await _fn(*args, **kwargs)
+
+def wants_emotion_analysis(*args, **kwargs):
+    from bot.services.ai_media import wants_emotion_analysis as _fn
+    return _fn(*args, **kwargs)
+
+def wants_voice_chat_mode(*args, **kwargs):
+    from bot.services.ai_media import wants_voice_chat_mode as _fn
+    return _fn(*args, **kwargs)
+
+def wants_end_voice_chat(*args, **kwargs):
+    from bot.services.ai_media import wants_end_voice_chat as _fn
+    return _fn(*args, **kwargs)
+
+def wants_voice_reply(*args, **kwargs):
+    from bot.services.ai_media import wants_voice_reply as _fn
+    return _fn(*args, **kwargs)
+
+def is_voice_only_request(*args, **kwargs):
+    from bot.services.ai_media import is_voice_only_request as _fn
+    return _fn(*args, **kwargs)
+
+def strip_voice_prefix(*args, **kwargs):
+    from bot.services.ai_media import strip_voice_prefix as _fn
+    return _fn(*args, **kwargs)
+
+def should_auto_voice_reply(*args, **kwargs):
+    from bot.services.ai_media import should_auto_voice_reply as _fn
+    return _fn(*args, **kwargs)
+
+async def generate_music(*args, **kwargs):
+    from bot.services.ai_media import generate_music as _fn
+    return await _fn(*args, **kwargs)
+
+async def analyze_video(*args, **kwargs):
+    from bot.services.ai_media import analyze_video as _fn
+    return await _fn(*args, **kwargs)
+
+async def translate_voice(*args, **kwargs):
+    from bot.services.ai_media import translate_voice as _fn
+    return await _fn(*args, **kwargs)
+
+
+def _shopping_prompt_hint(prompt: str) -> str:
+    """راهنمای کوتاه و کم‌هزینه برای routing خرید."""
+    q = (prompt or "").strip()
+    if not q:
+        return ""
+    # درخواست‌های مالی/بازاریابی را هرگز shopping تلقی نکن؛ کلمه «قیمت» در
+    # تحلیل بازار کاملاً طبیعی است و نباید به ابزار خرید route شود.
+    if re.search(
+        r"تحلیل|بازار|کریپتو|رمزارز|بیت.?کوین|اتریوم|طلا|XAU|USD|USDT|"
+        r"حمایت|مقاومت|RSI|ADX|ATR|BOS|CHOCH|Funding|Open.?Interest|"
+        r"لانگ|شورت|معامله|ترید|سیگنال|تایم.?فریم",
+        q, re.I,
+    ):
+        return ""
+    if not re.search(
+        r"خرید|قیمت|فروشگاه|فروشنده|ارزان|بهترین|لینک خرید|اینستا|شاپ|"
+        r"مقایسه.*قیمت|قیمت.*محصول|buy|price|shop",
+        q,
+        re.I,
+    ):
+        return ""
+
+    return (
+        "\n\n[SHOPPING MODE]\n"
+        "این درخواست خرید است. قبل از پاسخ نهایی، ابزار search_shopping را در اولویت قرار بده. "
+        "در صورت درخواست «ارزان‌ترین»، تطابق دقیق مدل/مشخصات را بر پایین‌ترین عدد مقدم بدان. "
+        "در صورت «بهترین»، کیفیت تطابق و اعتبار فروشگاه را هم لحاظ کن. "
+        "اگر عکس محصول داری، از اطلاعات تصویری برند/مدل/رنگ/ظرفیت را استخراج کن و همان مشخصات را برای جستجو استفاده کن. "
+        "اگر مدل دقیق نامشخص است، عدم قطعیت را شفاف بگو. قیمت، موجودی و لینک را حدس نزن."
+    )
+
+
+async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
+    prompt = (prompt or "").strip()
+    if not prompt:
+        raise RuntimeError("پیام خالی است")
+    if len(prompt) > MAX_INPUT:
+        prompt = prompt[:MAX_INPUT]
+
+    options = available_model_options()
+    if not options:
+        raise RuntimeError(
+            "هیچ سرویس AI تنظیم نشده است. حداقل یک API Key در Render قرار بده."
+        )
 
     try:
-        register_tool(
-            name="ict_analysis",
-            description="تحلیل بازار به روش ICT: ساختار BOS/CHoCH، FVG، Order Block، نقدینگی، Premium/Discount و Killzone. برای بیت‌کوین و سایر ارزها.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string", "description": "نماد مثل btc یا eth"},
-                    "interval": {"type": "string", "description": "تایم‌فریم 15m یا 1h یا 4h یا 1d"},
-                },
-                "required": ["symbol"],
-            },
-            handler=_tool_ict_analysis,
-            keywords=[r"ICT|آی\s*سی\s*تی|اوردر\s*بلاک|order\s*block|fair\s*value\s*gap|FVG|نقدینگی\s*بازار|BOS|CHOCH"],
-        )
-    except Exception:
-        pass
+        from bot.services.ai_providers import _looks_simple_prompt
+        from bot.services.ai_runtime import reset_provider_circuits
+        if _looks_simple_prompt(prompt):
+            reset_provider_circuits()
+            # Prefer providers that typically work on free keys (gemini, openrouter)
+            rank = {"gemini": 0, "openrouter": 1, "groq": 2, "cerebras": 3, "cloudflare": 4}
+            options = sorted(
+                options,
+                key=lambda x: (rank.get(x[0], 9), options.index(x)),
+            )
+    except Exception as exc:
+        logger.debug("non-fatal exception: %s", exc)
+
+    original_prompt = prompt
+    shopping_hint = _shopping_prompt_hint(prompt)
+    if shopping_hint:
+        prompt = prompt + shopping_hint
+    try:
+        from bot.services.ai_freshness import build_instruction
+        freshness_hint = build_instruction(original_prompt)
+        if freshness_hint:
+            prompt = prompt + freshness_hint
+    except Exception as exc:
+        logger.debug("freshness instruction skipped: %s", exc)
+    try:
+        _extract_and_store_memory(user_id, original_prompt)
+    except Exception as _exc:
+        logger.debug("%s: %s", __name__, _exc)
+    # ساخت لیست (provider, model) برای امتحان — سریع‌ترین‌ها اول
+    def _models_of(provider: str) -> List[Tuple[str, str]]:
+        return [(provider, m) for m in models_for_provider(provider)]
+
+    async with _LOCKS[user_id]:
+        selected = get_selected_model(user_id)
+        ordered: List[Tuple[str, str]] = []
+        tried: set = set()
+        errors: List[str] = []
+
+        # ۱) اگر کاربر ارائه‌دهنده انتخاب کرده → همه مدل‌های همان ارائه‌دهنده
+        if selected:
+            provider, model = selected
+            available_for_selected = _models_of(provider)
+            if model == "*" or model is None:
+                ordered.extend(available_for_selected)
+            else:
+                # اگر مدل قدیمی حذف شده باشد، آن را کورکورانه صدا نزن؛
+                # اول نزدیک‌ترین مدل فعال همان provider را امتحان کن.
+                if (provider, model) in available_for_selected:
+                    ordered.append((provider, model))
+                ordered.extend(
+                    item for item in available_for_selected if item not in ordered
+                )
+
+        # ۲) Routing تطبیقی: کار ساده ابتدا به سریع‌ترین مسیر، کار پیچیده ابتدا به مدل‌های قوی‌تر.
+        # انتخاب صریح کاربر همیشه اولویت اول را حفظ می‌کند.
+        if not selected:
+            text_len = len(original_prompt)
+            tool_heavy = any(x in original_prompt.lower() for x in (
+                "قیمت", "بازار", "کریپتو", "آب و هوا", "هوا", "خرید", "لینک",
+                "تحلیل", "کد", "برنامه", "فایل", "عکس", "ویس", "یادآوری",
+            ))
+            complex_request = text_len >= AI_COMPLEX_MIN_CHARS or tool_heavy
+            rank = {"gemini": 0, "cerebras": 1, "groq": 2, "openrouter": 3, "cloudflare": 4}
+            if not complex_request:
+                rank = {"groq": 0, "gemini": 1, "cerebras": 2, "cloudflare": 3, "openrouter": 4}
+            # V5: choose by task fit (quality/cost/latency) while retaining the
+            # existing provider preference as a deterministic tie-breaker.
+            options = sorted(
+                options,
+                key=lambda x: (
+                    _route_score(x[0], x[2], complex_request=complex_request),
+                    rank.get(x[0], 9),
+                    options.index(x),
+                ),
+            )
+
+        # ۳) بقیه ارائه‌دهنده‌ها (fallback)
+        for provider, _label, model in options:
+            item = (provider, model)
+            if item not in ordered:
+                ordered.append(item)
+
+        for provider, model in ordered:
+            key = (provider, model)
+            if key in tried:
+                continue
+            # Soft: log cooldown but still try (invalid-key storms used to mute the bot).
+            if not selected and not _provider_available(provider):
+                logger.info("AI provider %s cooling down — skipping to next provider", provider)
+                continue
+            tried.add(key)
+            started = time.monotonic()
+            try:
+                answer = await _call_provider(provider, user_id, prompt, model)
+                _record_provider(provider, ok=True, latency=time.monotonic() - started)
+                record_metric("ai_provider", provider, ok=True, latency=time.monotonic() - started, model=model)
+                _save_turn(user_id, original_prompt, answer)
+                # انتخاب خودکار را در DB ذخیره نکن؛ وگرنه اولین Provider موفق
+                # عملاً Routing تطبیقی درخواست‌های بعدی را قفل می‌کرد.
+                # انتخاب دستی کاربر همچنان در _USER_SELECTION/DB حفظ می‌شود.
+                return answer, f"{provider} / {model}"
+            except Exception as exc:
+                _record_provider(provider, ok=False, latency=time.monotonic() - started)
+                record_metric("ai_provider", provider, ok=False, latency=time.monotonic() - started, model=model)
+                msg = str(exc).replace("\n", " ")[:500]
+                errors.append(f"{provider}/{model}: {msg}")
+                logger.warning("AI provider/model failed: %s", msg)
+                # تأخیر خیلی کم بین تلاش‌ها برای سرعت بیشتر
+                await asyncio.sleep(0.05)
+
+    logger.error("AI request failed across all providers: %s", " | ".join(errors[:8]))
+    if any("INVALID_API_KEY" in e for e in errors):
+        raise RuntimeError("INVALID_API_KEY: " + next(e for e in errors if "INVALID_API_KEY" in e)[:240])
+    detail = errors[0] if errors else "unknown"
+    raise RuntimeError(f"AI_UNAVAILABLE: {detail[:240]}")
 
 
-    register_tool(
-        name="get_weather",
-        description="آب‌وهوای فعلی یک شهر. اگر شهر نگفت از شهر کاربر استفاده کن.",
-        parameters={
-            "type": "object",
-            "properties": {"city": {"type": "string", "description": "نام شهر"}},
-        },
-        handler=_get_weather,
-        keywords=[r"هوا|آب\s*و\s*هوا|دما|بارون|باران|آفتابی|رطوبت"],
-    )
-    register_tool(
-        name="get_weather_forecast",
-        description="پیش‌بینی آب‌وهوا برای بازه درخواستی. برای «فردا» فقط همان روز را بگیر (days=1 و start_day=1)؛ برای «پس‌فردا» days=1 و start_day=2؛ اگر کاربر صریحاً پیش‌بینی چندروزه/هفتگی خواست، از بازه بزرگ‌تر استفاده کن.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "city": {"type": "string"},
-                "days": {"type": "integer", "minimum": 1, "maximum": 7, "description": "تعداد روزهای خروجی"},
-                "start_day": {"type": "integer", "minimum": 0, "maximum": 6, "description": "۰ امروز، ۱ فردا، ۲ پس‌فردا"},
-            },
-        },
-        handler=_get_weather_forecast,
-        keywords=[r"پیش\s*بینی\s*هوا|هوا(?:ی)?\s*(?:فردا|پس\s*فردا|هفته)|(?:فردا|پس\s*فردا).*هوا"],
-    )
-    register_tool(
-        name="get_air_quality",
-        description="کیفیت هوا (AQI).",
-        parameters={"type": "object", "properties": {"city": {"type": "string"}}},
-        handler=_get_air_quality,
-        keywords=[r"کیفیت\s*هوا|آلودگی\s*هوا|AQI"],
-    )
-    register_tool(
-        name="get_prayer_times",
-        description="اوقات شرعی شهر.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "city": {"type": "string"},
-                "country": {"type": "string"},
-            },
-        },
-        handler=_get_prayer_times,
-        keywords=[r"اذان|اوقات\s*شرعی|نماز\s*(صبح|ظهر|عصر|مغرب|عشاء)"],
-    )
-    register_tool(
-        name="get_market_prices",
-        description="قیمت دلار، یورو، طلا، سکه و ارز.",
-        parameters={"type": "object", "properties": {}},
-        handler=_get_market_prices,
-        keywords=[r"قیمت|دلار|یورو|طلا|سکه|ارز|نرخ"],
-    )
-    register_tool(
-        name="search_shopping",
-        description="دستیار خرید و جستجوی زنده محصول در فروشگاه‌ها و وب؛ برای خرید مستقیم، مقایسه قیمت، پیشنهاد محصول بر اساس بودجه، پیدا کردن مدل‌های مناسب، لینک خرید و عکس محصول از همین ابزار استفاده می‌شود. برای درخواست‌هایی مثل «با بودجه ۵۰ میلیون چه گوشی بخرم؟» بودجه را تشخیص بده و چند جستجوی کاندیدمحور برای مدل‌های مناسب انجام بده؛ مدل دقیق لازم نیست. منابع شامل ترب، دیجی‌کالا، اسنپ‌شاپ، تکنولایف، ایمالز، باسلام و سایر فروشگاه‌های موجود + صفحات فروش اینستاگرام + کل وب است. قیمت فقط اگر از نتیجه/صفحه قابل استخراج باشد نمایش داده شود و هرگز قیمت حدسی تولید نشود.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "نام، مدل، برند یا توصیف دقیق محصول برای جستجو"},
-                "source": {"type": "string", "enum": ["all", "torob", "digikala", "snappshop", "technolife", "emalls", "basalam", "momtaz", "kalaoma", "19kala", "mobile", "digistyle", "modiseh", "zanbil", "goldiran", "alibaba", "sheypoor", "divar", "okala", "takhfifan", "instagram", "general"], "description": "منبع جستجو؛ all برای همه فروشگاه‌ها + اینستا + وب"},
-                "max_results": {"type": "integer", "description": "حداکثر نتایج، بین 4 تا 22"},
-                "min_price": {"type": "integer", "description": "حداقل قیمت تومان؛ صفر یعنی بدون فیلتر"},
-                "max_price": {"type": "integer", "description": "حداکثر قیمت تومان؛ صفر یعنی بدون فیلتر"},
-            },
-            "required": ["query"],
-        },
-        handler=_search_shopping,
-        keywords=[r"خرید|قیمت.*محصول|قیمت.*کفش|قیمت.*گوشی|بهترین.*گوشی|چه.*گوشی|گوشی.*بخر|بودجه.*گوشی|بودجه.*خرید|بودجه|تا.*میلیون|زیر.*میلیون|حداکثر.*میلیون|وسیله.*کاربردی|محصول.*کاربردی|چی.*بخر|چه.*بخر|چه.*محصول|چه.*وسیله|پیشنهاد.*خرید|دیجی.?کالا|ترب|فروشگاه|لینک خرید|ارزان.?ترین|قیمت روز محصول|اینستا|شاپ اینستا|فروشگاه اینستاگرام"],
-    )
+# ── استریم واقعی از API (SSE) ───────────────────────────────────────────────
 
-    register_tool(
-        name="shopping_price_history",
-        description="تاریخچه قیمت مشاهده‌شده محصولات از جستجوهای قبلی ربات. اگر داده کافی وجود ندارد صریحاً اعلام کن.",
-        parameters={"type":"object","properties":{"query":{"type":"string","description":"نام یا مدل محصول"},"days":{"type":"integer","description":"بازه تقریبی روز"}},"required":["query"]},
-        handler=_shopping_price_history,
-        keywords=[r"تاریخچه قیمت|قیمت هفته قبل|قیمت ماه قبل|روند قیمت محصول|افت قیمت محصول"],
-    )
+async def _stream_openai_compatible(
+    provider: str,
+    user_id: int,
+    prompt: str,
+    *,
+    url: str,
+    model: str,
+    extra_headers=None,
+):
+    """ییلد تکه‌های متن از chat/completions با stream=true."""
+    import json as _json
 
-    register_tool(
-        name="get_crypto_price",
-        description="قیمت لحظه‌ای یک رمزارز مشخص مثل بیت‌کوین، اتریوم یا تتر را از منابع زنده ربات می‌گیرد و هرگز قیمت حدسی نمی‌دهد.",
-        parameters={
-            "type": "object",
-            "properties": {"symbol": {"type": "string", "description": "نماد رمزارز مثل btc یا eth"}},
-            "required": ["symbol"],
-        },
-        handler=_get_crypto_price,
-        keywords=[r"قیمت\s*(بیت\s*کوین|اتریوم|تتر|سولانا|ارز|کریپتو|رمزارز)|بیت\s*کوین.*قیمت|bitcoin.*price|crypto.*price"],
-    )
-    register_tool(
-        name="get_top_crypto",
-        description="برترین رمزارزها.",
-        parameters={
-            "type": "object",
-            "properties": {"limit": {"type": "integer"}},
-        },
-        handler=_get_top_crypto,
-        keywords=[r"کریپتو|بیت\s*کوین|تتر|رمزارز|crypto|bitcoin"],
-    )
-    register_tool(
-        name="convert_currency",
-        description="تبدیل ارز.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "amount": {"type": "number"},
-                "from_cur": {"type": "string"},
-                "to_cur": {"type": "string"},
-            },
-            "required": ["amount", "from_cur"],
-        },
-        handler=_convert_currency,
-    )
-    register_tool(
-        name="convert_crypto",
-        description="تبدیل رمزارز به تومان/دلار. تقریباً همه ارزها پشتیبانی می‌شود.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "amount": {"type": "number"},
-                "symbol": {"type": "string"},
-            },
-            "required": ["amount", "symbol"],
-        },
-        handler=_convert_crypto,
-    )
-    register_tool(
-        name="analyze_crypto",
-        description="تحلیل جامع ارز دیجیتال از چند منبع (CoinGecko، Binance Futures شبیه Coinglass، Fear&Greed، CoinPaprika).",
-        parameters={
-            "type": "object",
-            "properties": {
-                "symbol": {"type": "string", "description": "نماد مثل btc یا eth"},
-            },
-            "required": ["symbol"],
-        },
-        handler=_analyze_crypto,
-        keywords=[r"تحلیل\s*(ارز|کریپتو|رمزارز)|analyze\s*crypto|تحلیل\s*بیت\s*کوین"],
-    )
-    register_tool(
-        name="get_economic_calendar",
-        description=(
-            "تقویم اقتصادی زنده با زمان، ارز، اهمیت، واقعی، پیش‌بینی و مقدار قبلی. "
-            "برای پرسش‌هایی مثل خبرهای اقتصادی امروز، فردا، هفته، CPI، PPI، NFP، FOMC، ECB و نرخ بهره استفاده کن. "
-            "داده را اختراع نکن و اگر مقدار واقعی خالی است بگو هنوز منتشر نشده یا منبع فید آن را ارائه نکرده است."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "days": {"type": "integer", "minimum": 1, "maximum": 7},
-                "currency": {"type": "string", "description": "مثل USD یا EUR؛ خالی یعنی همه"},
-                "impact": {"type": "string", "enum": ["all", "high", "medium", "low"]},
-                "timezone": {"type": "string", "description": "مثل Asia/Tehran یا Asia/Baku"},
-            },
-        },
-        handler=_get_economic_calendar,
-        keywords=[r"تقویم\s*اقتصادی|اخبار\s*اقتصادی|خبر\s*(اقتصادی|فاندامنتال)|CPI|PPI|NFP|FOMC|ECB|نرخ\s*بهره"],
-    )
-    register_tool(
-        name="crypto_chart_info",
-        description="اطلاعات نمودار قیمت ارز دیجیتال (روزهای اخیر).",
-        parameters={
-            "type": "object",
-            "properties": {
-                "symbol": {"type": "string"},
-                "days": {"type": "integer"},
-            },
-            "required": ["symbol"],
-        },
-        handler=_crypto_chart_info,
-        keywords=[r"نمودار\s*(قیمت|کریپتو|ارز)|chart\s*crypto"],
-    )
-    register_tool(
-        name="calculator",
-        description="محاسبه ریاضی.",
-        parameters={
-            "type": "object",
-            "properties": {"expression": {"type": "string"}},
-            "required": ["expression"],
-        },
-        handler=_calculator,
-    )
-    register_tool(
-        name="generate_password",
-        description="ساخت رمز عبور.",
-        parameters={
-            "type": "object",
-            "properties": {"length": {"type": "integer"}},
-        },
-        handler=_generate_password,
-        keywords=[r"رمز\s*عبور|پسورد|password"],
-    )
-    register_tool(
-        name="count_text",
-        description="شمارش کاراکتر و کلمه.",
-        parameters={
-            "type": "object",
-            "properties": {"text": {"type": "string"}},
-            "required": ["text"],
-        },
-        handler=_count_text,
-    )
-    register_tool(
-        name="world_distance",
-        description="فاصله بین دو مکان دنیا.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "place1": {"type": "string"},
-                "place2": {"type": "string"},
-            },
-            "required": ["place1"],
-        },
-        handler=_world_distance,
-        keywords=[r"فاصله|مسافت"],
-    )
-    register_tool(
-        name="city_distance",
-        description="فاصله دو شهر.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "city1": {"type": "string"},
-                "city2": {"type": "string"},
-            },
-            "required": ["city1", "city2"],
-        },
-        handler=_city_distance,
-    )
-    register_tool(
-        name="convert_date",
-        description="تبدیل تاریخ شمسی/میلادی/قمری.",
-        parameters={
-            "type": "object",
-            "properties": {"date_text": {"type": "string"}},
-            "required": ["date_text"],
-        },
-        handler=_convert_date,
-    )
-    register_tool(
-        name="calculate_age",
-        description="محاسبه سن از تاریخ تولد شمسی.",
-        parameters={
-            "type": "object",
-            "properties": {"birth_date": {"type": "string"}},
-            "required": ["birth_date"],
-        },
-        handler=_calculate_age,
-        keywords=[r"سن\s*من|چند\s*سالمه|محاسبه\s*سن"],
-    )
-    register_tool(
-        name="birthday_countdown",
-        description="شمارش معکوس تولد.",
-        parameters={
-            "type": "object",
-            "properties": {"birth_date": {"type": "string"}},
-            "required": ["birth_date"],
-        },
-        handler=_birthday_countdown,
-    )
-    register_tool(
-        name="zodiac_animal",
-        description="حیوان سال تولد.",
-        parameters={
-            "type": "object",
-            "properties": {"birth_date": {"type": "string"}},
-            "required": ["birth_date"],
-        },
-        handler=_zodiac_animal,
-    )
-    register_tool(
-        name="lunar_age",
-        description="سن قمری.",
-        parameters={
-            "type": "object",
-            "properties": {"birth_date": {"type": "string"}},
-            "required": ["birth_date"],
-        },
-        handler=_lunar_age,
-    )
-    register_tool(
-        name="get_current_datetime",
-        description=(
-            "تاریخ و زمان دقیق فعلی را با ساعت واقعی سیستم و منطقه زمانی ربات برمی‌گرداند؛ "
-            "شامل میلادی، شمسی و قمری. برای سؤال‌هایی مثل «الان چه تاریخیه؟»، "
-            "«امروز چندمه؟»، «تاریخ دقیق الان» و «الان ساعت چنده؟» از این ابزار استفاده کن."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "timezone_name": {
-                    "type": "string",
-                    "description": "منطقه زمانی IANA اختیاری؛ اگر خالی باشد TIMEZONE تنظیم‌شده ربات استفاده می‌شود."
-                },
-                "relative_day": {
-                    "type": "integer",
-                    "minimum": -30,
-                    "maximum": 30,
-                    "description": "۰=امروز، ۱=فردا، ۲=پس‌فردا، -۱=دیروز"
-                }
-            },
-        },
-        handler=_current_datetime,
-        keywords=[
-            r"تاریخ\s*(?:دقیق|فعلی|امروز)?",
-            r"امروز\s*چندمه",
-            r"الان\s*(?:چه\s*)?تاریخ",
-            r"تاریخ\s*الان",
-            r"الان\s*(?:ساعت|چه\s*ساعتی)",
-            r"current\s*(?:date|time|datetime)",
-            r"today'?s\s*date|tomorrow|yesterday",
-            r"what\s*time\s*is\s*it",
-        ],
-        risk="read",
-    )
-    register_tool(
-        name="world_clock",
-        description="ساعت جهانی.",
-        parameters={"type": "object", "properties": {}},
-        handler=_world_clock,
-        keywords=[r"ساعت\s*(الان|جهان|دنیا)|world\s*clock"],
-    )
-    register_tool(
-        name="month_calendar",
-        description="تقویم ماه جاری.",
-        parameters={"type": "object", "properties": {}},
-        handler=_month_calendar,
-        keywords=[r"تقویم\s*ماه"],
-    )
-    register_tool(
-        name="nowruz_countdown",
-        description="شمارش معکوس نوروز.",
-        parameters={"type": "object", "properties": {}},
-        handler=_nowruz_countdown,
-        keywords=[r"نوروز"],
-    )
-    register_tool(
-        name="search_events",
-        description="جستجوی مناسبت.",
-        parameters={
-            "type": "object",
-            "properties": {"query": {"type": "string"}},
-            "required": ["query"],
-        },
-        handler=_search_events,
-        keywords=[r"مناسبت"],
-    )
-    register_tool(
-        name="qibla_direction",
-        description="جهت قبله.",
-        parameters={"type": "object", "properties": {"city": {"type": "string"}}},
-        handler=_qibla_direction,
-        keywords=[r"قبله"],
-    )
-    register_tool(
-        name="daily_adhkar",
-        description="اذکار روزانه.",
-        parameters={"type": "object", "properties": {}},
-        handler=_daily_adhkar,
-        keywords=[r"ذکر|اذکار"],
-    )
-    register_tool(
-        name="daily_verse_hadith",
-        description="آیه و حدیث روز.",
-        parameters={"type": "object", "properties": {}},
-        handler=_daily_verse_hadith,
-        keywords=[r"آیه|حدیث"],
-    )
-    register_tool(
-        name="religious_countdown",
-        description="مناسبت مذهبی نزدیک.",
-        parameters={"type": "object", "properties": {}},
-        handler=_religious_countdown,
-    )
-    register_tool(
-        name="istikhara",
-        description="استخاره با قرآن.",
-        parameters={"type": "object", "properties": {}},
-        handler=_istikhara,
-        keywords=[r"استخاره"],
-    )
-    register_tool(
-        name="hafez_fal",
-        description="فال حافظ.",
-        parameters={"type": "object", "properties": {}},
-        handler=_hafez_fal,
-        keywords=[r"فال\s*حافظ|حافظ"],
-    )
-    register_tool(
-        name="joke",
-        description="جوک تصادفی.",
-        parameters={
-            "type": "object",
-            "properties": {"category": {"type": "string"}},
-        },
-        handler=_joke,
-        keywords=[r"جوک|جک"],
-    )
-    register_tool(
-        name="fact_of_day",
-        description="دانستنی روز.",
-        parameters={"type": "object", "properties": {}},
-        handler=_fact_of_day,
-        keywords=[r"فکت|دانستنی"],
-    )
-    register_tool(
-        name="daily_challenge",
-        description="چالش روزانه.",
-        parameters={"type": "object", "properties": {}},
-        handler=_daily_challenge,
-        keywords=[r"چالش"],
-    )
-    register_tool(
-        name="apply_font",
-        description="تبدیل متن به فونت‌های خاص. اگر style خالی همه را نشان بده.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "text": {"type": "string"},
-                "style_key": {"type": "string"},
-            },
-            "required": ["text"],
-        },
-        handler=_apply_font,
-        keywords=[r"فونت"],
-    )
-    register_tool(
-        name="list_fonts",
-        description="لیست فونت‌ها.",
-        parameters={"type": "object", "properties": {}},
-        handler=_list_fonts,
-    )
-    register_tool(
-        name="get_user_city",
-        description="شهر ثبت‌شده کاربر.",
-        parameters={"type": "object", "properties": {}},
-        handler=_get_user_city,
-    )
-    
-    register_tool(
-        name="web_search",
-        description="جستجو در اینترنت برای اطلاعات به‌روز.",
-        parameters={
-            "type": "object",
-            "properties": {"query": {"type": "string"}},
-            "required": ["query"],
-        },
-        handler=_tool_web_search,
-        keywords=[r"جستجو\s*کن|در\s*اینترنت"],
-    )
-    register_tool(
-        name="create_reminder",
-        description="فقط با درخواست صریح کاربر برای یادآوری/آلارم/یادم بنداز/خبرم کن استفاده شود؛ صرفاً وجود زمان، فردا، امروز یا ساعت هرگز مجوز ساخت یادآوری نیست. remind_at باید ISO زمان تهران باشد.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "text": {"type": "string"},
-                "remind_at": {"type": "string", "description": "ISO datetime"},
-                "repeat_type": {
-                    "type": "string",
-                    "enum": ["once", "daily", "weekly", "monthly", "every_minutes", "every_hours"],
-                },
-                "repeat_every": {"type": "integer", "minimum": 0},
-            },
-            "required": ["text", "remind_at"],
-        },
-        handler=_tool_reminder,
-    )
-    register_tool(
-        name="profile_summary",
-        description="پروفایل کاربر در ربات.",
-        parameters={"type": "object", "properties": {}},
-        handler=_profile_summary,
-        keywords=[r"پروفایل"],
-    )
+    keys = _next_keys(provider)
+    if not keys:
+        raise RuntimeError(f"no keys for {provider}")
+
+    last_err = None
+    for key in keys:
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+        if extra_headers:
+            headers.update(extra_headers)
+        payload = {
+            "model": model,
+            "messages": _messages(user_id, prompt),
+            "max_tokens": MAX_OUTPUT,
+            "temperature": 0.6,
+            "stream": True,
+        }
+        client = _get_http()
+        try:
+            async with client.stream("POST", url, headers=headers, json=payload) as resp:
+                if resp.status_code >= 400:
+                    body = (await resp.aread())[:500]
+                    if _is_quota_error(resp.status_code, body):
+                        _mark_key_cooldown(provider, key, daily=True)
+                        last_err = f"HTTP {resp.status_code}"
+                        continue
+                    raise RuntimeError(f"stream HTTP {resp.status_code}: {body!r}")
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data:"):
+                        data = line[5:].strip()
+                    else:
+                        continue
+                    if data == "[DONE]":
+                        break
+                    try:
+                        obj = _json.loads(data)
+                    except Exception:
+                        continue
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    piece = delta.get("content") or ""
+                    if piece:
+                        yield piece
+            _advance_rr(provider)
+            return
+        except Exception as e:
+            last_err = str(e)
+            continue
+    raise RuntimeError(last_err or "stream failed")
 
 
-def _run_workflow_tool(steps, user_id=0):
-    # Kept as a sync-compatible wrapper; the actual engine is async.
-    raise RuntimeError("workflow tool must be invoked through its async handler")
+async def _stream_gemini(user_id: int, prompt: str, model: str):
+    """استریم Gemini با streamGenerateContent?alt=sse."""
+    import json as _json
 
+    keys = _next_keys("gemini")
+    if not keys:
+        raise RuntimeError("no gemini keys")
 
-async def _run_workflow_async(steps, user_id=0):
-    from bot.services.workflow_engine import run_workflow
-    return await run_workflow(steps, user_id=user_id)
-
-
-register_tool(
-    name="run_workflow",
-    description="اجرای یک برنامه چندمرحله‌ای کوتاه با ابزارهای موجود. فقط وقتی چند ابزار باید به‌ترتیب اجرا شوند استفاده کن؛ حداکثر 4 مرحله. برای ارجاع به خروجی مرحله قبل از $step1، $step2 و ... استفاده کن.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "steps": {
-                "type": "array",
-                "maxItems": 4,
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "tool": {"type": "string"},
-                        "arguments": {"type": "object"},
-                    },
-                    "required": ["tool"],
-                },
+    contents = []
+    mem = _memory_block(user_id)
+    system = SYSTEM_PROMPT + ("\n\n" + mem if mem else "")
+    for role, content in _HISTORY[user_id]:
+        contents.append(
+            {
+                "role": "model" if role == "assistant" else "user",
+                "parts": [{"text": content}],
             }
-        },
-        "required": ["steps"],
-    },
-    handler=_run_workflow_async,
-)
-
-
-
-async def _run_agent(goal: str = "", user_id: int = 0) -> str:
-    from bot.services.agent_engine import run_agent
-    return await run_agent(goal, user_id=user_id)
-
-
-register_tool(
-    name="run_agent",
-    description=(
-        "دستیار برنامه‌ریز محدود: برای هدف‌های چندبخشی، ابزارهای موجود را خودش انتخاب و به‌ترتیب اجرا می‌کند "
-        "و حداکثر یک بار مسیر امن را ترمیم می‌کند. برای اطلاعات فعلی می‌تواند retrieval وب را فعال کند. "
-        "حلقه بی‌نهایت ندارد و حداکثر 4 مرحله اجرا می‌شود."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {"goal": {"type": "string", "description": "هدف کامل کاربر"}},
-        "required": ["goal"],
-    },
-    handler=_run_agent,
-    keywords=[r"خودت.*برنامه|چندمرحله|دستیار.*هوشمند|agent|برنامه.?ریزی.*هوشمند"],
-)
-
-_register_builtin_tools()
-
-def _provider_health() -> str:
-    from bot.services.ai_runtime import provider_health_snapshot
-
-    snapshot = provider_health_snapshot()
-    if not snapshot:
-        return "هنوز داده‌ای از سلامت Providerها ثبت نشده است."
-    lines = ["وضعیت سلامت Providerهای AI (بر اساس اجرای واقعی اخیر):"]
-    for name, item in snapshot.items():
-        status = item["status"]
-        if status == "healthy":
-            label = "سالم"
-        elif status == "cooldown":
-            label = f"در cooldown ({item['cooldown_remaining_sec']}s)"
-        else:
-            label = "بدون داده کافی"
-        rate = item["success_rate"]
-        rate_text = f"{round(rate * 100)}%" if isinstance(rate, (int, float)) else "—"
-        latency = f"{item['avg_latency_ms']}ms" if item["avg_latency_ms"] is not None else "—"
-        lines.append(
-            f"- {name}: {label} | موفقیت {rate_text} | latency میانگین {latency} | "
-            f"ok={item['ok']} fail={item['fail']}"
         )
-    return "\n".join(lines)[:4500]
+    contents.append({"role": "user", "parts": [{"text": prompt}]})
+    payload = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": contents,
+        "generationConfig": {"maxOutputTokens": MAX_OUTPUT},
+        "safetySettings": GEMINI_SAFETY_SETTINGS,
+    }
+    last_err = None
+    for key in keys:
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+            f":streamGenerateContent"
+        )
+        client = _get_http()
+        try:
+            async with client.stream(
+                "POST", url, params={"key": key, "alt": "sse"}, json=payload
+            ) as resp:
+                if resp.status_code >= 400:
+                    body = (await resp.aread())[:400]
+                    if _is_quota_error(resp.status_code, body):
+                        _mark_key_cooldown("gemini", key, daily=True)
+                        last_err = f"HTTP {resp.status_code}"
+                        continue
+                    raise RuntimeError(f"gemini stream HTTP {resp.status_code}")
+                async for line in resp.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        obj = _json.loads(data)
+                        parts = obj["candidates"][0]["content"]["parts"]
+                        for p in parts:
+                            t = p.get("text") or ""
+                            if t:
+                                yield t
+                    except Exception:
+                        continue
+            _advance_rr("gemini")
+            return
+        except Exception as e:
+            last_err = str(e)
+            continue
+    raise RuntimeError(last_err or "gemini stream failed")
 
 
-register_tool(
-    name="get_provider_health",
-    description=(
-        "گزارش داخلی و بدون کلید از سلامت Providerهای AI بر اساس موفقیت، خطا، latency و cooldown اخیر. "
-        "برای عیب‌یابی و تشخیص اینکه کدام Provider مشکل دارد استفاده کن؛ هیچ درخواست آزمایشی شبکه‌ای ارسال نمی‌کند."
-    ),
-    parameters={"type": "object", "properties": {}},
-    handler=_provider_health,
-    keywords=[r"سلامت.*(?:provider|پرووایدر|مدل)", r"وضعیت.*(?:ai|هوش مصنوعی|مدل)", r"عیب.?یابی.*(?:ai|هوش مصنوعی)", r"provider health", r"diagnostic"],
+async def ask_ai_stream(user_id: int, prompt: str):
+    """
+    Stable streaming facade.
+
+    Tool-calling providers are intentionally called through the same canonical
+    non-stream path as ask_ai(), then the final answer is emitted in chunks.
+    This prevents partial Telegram messages when a tool call arrives mid-stream
+    and keeps Gemini/OpenAI-compatible tool semantics identical.
+    """
+    prompt = (prompt or "").strip()
+    if not prompt:
+        raise RuntimeError("پیام خالی است")
+    if len(prompt) > MAX_INPUT:
+        prompt = prompt[:MAX_INPUT]
+
+    original = prompt
+    try:
+        _extract_and_store_memory(user_id, original)
+    except Exception as _exc:
+        logger.debug("%s: %s", __name__, _exc)
+
+    options = available_model_options()
+    if not options:
+        raise RuntimeError("هیچ سرویس AI تنظیم نشده")
+
+    try:
+        from bot.services.ai_providers import _looks_simple_prompt
+        from bot.services.ai_runtime import reset_provider_circuits
+        if _looks_simple_prompt(prompt):
+            reset_provider_circuits()
+            rank = {"gemini": 0, "openrouter": 1, "groq": 2, "cerebras": 3, "cloudflare": 4}
+            options = sorted(options, key=lambda x: (rank.get(x[0], 9), options.index(x)))
+    except Exception as exc:
+        logger.debug("non-fatal exception: %s", exc)
+
+    async with _LOCKS[user_id]:
+        selected = get_selected_model(user_id)
+        ordered: List[Tuple[str, str]] = []
+        if selected:
+            provider, model = selected
+            for m in models_for_provider(provider):
+                if model == "*" or m == model:
+                    ordered.append((provider, m))
+            for m in models_for_provider(provider):
+                if (provider, m) not in ordered:
+                    ordered.append((provider, m))
+        for provider, _label, model in options:
+            if (provider, model) not in ordered:
+                ordered.append((provider, model))
+
+        errors = []
+        for provider, model in ordered:
+            if not selected and not _provider_available(provider):
+                logger.info("AI stream provider %s cooling down — skipping", provider)
+                continue
+            try:
+                answer = await _call_provider(provider, user_id, original, model)
+                if not answer:
+                    raise RuntimeError("empty answer")
+                _save_turn(user_id, original, answer)
+                # Automatic routing must remain automatic. Persisting the first
+                # successful provider here could lock the user to a provider
+                # that later becomes unavailable. Manual selections are already
+                # persisted by set_selected_model().
+
+                # Emit bounded chunks so Telegram still appears to stream.
+                chunk_size = max(80, int(os.getenv("AI_STREAM_CHUNK", "180")))
+                for i in range(0, len(answer), chunk_size):
+                    yield answer[i:i + chunk_size], None
+                    await asyncio.sleep(0)
+                yield None, f"{provider} / {model}"
+                return
+            except Exception as exc:
+                msg = str(exc).replace("\n", " ")[:300]
+                errors.append(f"{provider}/{model}: {msg}")
+                logger.warning("stream facade provider failed: %s", msg)
+                await asyncio.sleep(0.05)
+
+    logger.error("AI streaming facade failed across all providers: %s", " | ".join(errors[:8]))
+    if any("INVALID_API_KEY" in e for e in errors):
+        raise RuntimeError("INVALID_API_KEY: " + next(e for e in errors if "INVALID_API_KEY" in e)[:240])
+    detail = errors[0] if errors else "unknown"
+    raise RuntimeError(f"AI_UNAVAILABLE: {detail[:240]}")
+
+
+
+async def diagnose_ai_keys() -> str:
+    """Admin diagnostic: probe each configured provider with a tiny plain request."""
+    from bot.services.ai_runtime import available_model_options, _provider_keys
+    from bot.services.ai_providers import _emergency_plain_completion
+    lines = []
+    seen = set()
+    for provider, _label, model in available_model_options():
+        if provider in seen:
+            continue
+        seen.add(provider)
+        nkeys = len(_provider_keys(provider))
+        if nkeys == 0:
+            lines.append(f"• {provider}: no keys")
+            continue
+        try:
+            text = await _emergency_plain_completion(provider, "بگو فقط: سلام", model)
+            lines.append(f"• {provider}/{model}: OK — {text[:60]!r} ({nkeys} key)")
+        except Exception as exc:
+            lines.append(f"• {provider}/{model}: FAIL — {str(exc)[:120]} ({nkeys} key)")
+    return "🔍 AI diagnose\n" + ("\n".join(lines) if lines else "هیچ providerی نیست")
+
+
+# Compatibility exports for the stable ai_service facade.
+
+# These names are part of the public ai_service contract and are sourced from
+# ai_runtime so callbacks/messages keep working even when the legacy fragment
+# itself does not define them.
+from bot.services.ai_runtime import (
+    clear_history,
+    available_providers,
+    set_selected_provider,
+    get_selected_model,
 )
-
-
-
-def _knowledge_search(query: str = "", limit: int = 5) -> str:
-    from bot.services.knowledge_base import format_knowledge_results
-    return format_knowledge_results(query, limit)
-
-
-register_tool(
-    name="search_knowledge_base",
-    description="جستجوی هوشمند در مستندات داخلی و عمومی پروژه ربات. برای پرسش درباره قابلیت‌ها، تنظیمات و نحوه کار خود ربات استفاده کن؛ اطلاعات نامرتبط یا jokes_data.json در این شاخص وجود ندارد.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "عبارت جستجو"},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 6},
-        },
-        "required": ["query"],
-    },
-    handler=_knowledge_search,
-    keywords=[r"پایگاه دانش|مستندات ربات|راهنمای ربات|تنظیمات ربات|قابلیت.*ربات|knowledge base|documentation"],
-)
-
-
-async def _hybrid_retrieve(query: str = "", include_web: bool = False, user_id: int = 0) -> str:
-    from bot.services.retrieval import hybrid_search
-    return await hybrid_search(user_id, query, include_web=bool(include_web))
-
-
-register_tool(
-    name="hybrid_retrieve",
-    description=(
-        "ترکیب حافظه مرتبط کاربر و پایگاه دانش داخلی؛ در صورت نیاز و با include_web=true "
-        "از جستجوی وب هم استفاده می‌کند. برای اطلاعات فعلی/قیمت/اخبار می‌تواند وب را فعال کند. "
-        "در حالت عادی درخواست شبکه‌ای انجام نمی‌دهد."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {"type": "string"},
-            "include_web": {"type": "boolean", "description": "آیا جستجوی وب هم انجام شود؟"},
-        },
-        "required": ["query"],
-    },
-    handler=_hybrid_retrieve,
-    keywords=[r"ترکیب.*منبع|حافظه.*مستندات|منابع.*مرتبط|اطلاعات.*فعلی|hybrid retrieval|rag"],
-)
-
-
-
-
-
-class _ToolDefsProxy(list):
-    def __iter__(self):
-        return iter(get_tool_definitions())
-    def __len__(self):
-        return len(get_tool_definitions())
-    def __getitem__(self, i):
-        return get_tool_definitions()[i]
-
-
-TOOL_DEFINITIONS = _ToolDefsProxy()
-
-# V73: production agent / security / diagnostics tools. These are read-only unless explicitly approved.
-async def _run_agent_v73(goal: str = "", user_id: int = 0) -> str:
-    from bot.services.v73_platform import run_production_agent
-    return await run_production_agent(goal, user_id=user_id)
-
-register_tool(
-    name="run_agent_v73",
-    description="Agent حرفه‌ای محدود با برنامه‌ریزی چندابزاری، بودجه اجرا، جلوگیری از تکرار، تعمیر امن و ثبت trace. عملیات نوشتنی بدون تأیید اجرا نمی‌شوند.",
-    parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
-    handler=_run_agent_v73,
-    keywords=[r"agent حرفه.?ای", r"عامل هوشمند", r"چند.?ابزاری", r"autonomous agent", r"tool architecture"],
-)
-
-def _v73_health() -> str:
-    from bot.services.v73_platform import health_snapshot, performance_snapshot
-    return json.dumps({"health": health_snapshot(), "performance": performance_snapshot()}, ensure_ascii=False)[:4500]
-
-register_tool(name="v73_health", description="گزارش سلامت، circuit protection و performance داخلی بدون اطلاعات محرمانه.", parameters={"type":"object","properties":{}}, handler=_v73_health, keywords=[r"سلامت سیستم", r"performance", r"self healing", r"خود.?ترمیم"])
-
-
-async def _run_agent_v74(goal: str = "", user_id: int = 0) -> str:
-    from bot.services.v74_platform import run_agent_2
-    return await run_agent_2(goal, user_id=user_id)
-
-register_tool(
-    name="run_agent_v74",
-    description="Agent 2.0 محدود و امن برای برنامه‌ریزی پویا، انتخاب ابزار، توقف هوشمند و repair کنترل‌شده.",
-    parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
-    handler=_run_agent_v74, keywords=[r"agent 2", r"عامل هوشمند", r"اجرای چندمرحله", r"برنامه.?ریزی هوشمند"]
-)
-
-def _v74_system_status() -> str:
-    from bot.services.v74_platform import observability_snapshot
-    import json
-    return json.dumps(observability_snapshot(), ensure_ascii=False)[:12000]
-
-register_tool(
-    name="v74_system_status",
-    description="گزارش امن سلامت، ابزارها، عملکرد، providerها، persistence و runtime نسخه V74.",
-    parameters={"type":"object","properties":{}}, handler=_v74_system_status,
-    keywords=[r"سلامت v74", r"وضعیت v74", r"observability", r"reliability"]
-)
-
-# V75 Intelligence & Automation tools — bounded/read-only by default.
-async def _run_agent_v75(goal: str = "", user_id: int = 0) -> str:
-    from bot.services.v75_platform import run_agent_3
-    return json.dumps(await run_agent_3(goal, user_id=user_id), ensure_ascii=False)[:12000]
-
-register_tool(
-    name="run_agent_v75",
-    description="Agent 3.0 محدود با بودجه اجرا، جلوگیری از تکرار، امنیت و اجرای ابزارهای تخصصی موجود.",
-    parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
-    handler=_run_agent_v75, keywords=[r"agent 3",r"agent 3.0",r"عامل.*پیشرفته",r"برنامه.?ریزی چندمرحله"]
-)
-
-async def _multi_agent_v75(goal: str = "", user_id: int = 0) -> str:
-    from bot.services.v75_platform import run_multi_agent
-    return json.dumps(await run_multi_agent(goal, user_id=user_id), ensure_ascii=False)[:12000]
-
-register_tool(
-    name="multi_agent_v75",
-    description="هماهنگی محدود چند متخصص برای پژوهش، بازار، اقتصاد و ابزارهای عمومی؛ بدون حلقه مستقل و بی‌نهایت.",
-    parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
-    handler=_multi_agent_v75, keywords=[r"multi.?agent",r"چند عامل",r"چند متخصص"]
-)
-
-def _v75_status() -> str:
-    from bot.services.v75_platform import dashboard
-    return json.dumps(dashboard(), ensure_ascii=False)[:12000]
-
-register_tool(name="v75_system_status", description="گزارش امن وضعیت V75 شامل امنیت، workflow، alert، memory و performance.", parameters={"type":"object","properties":{}}, handler=_v75_status, keywords=[r"سلامت v75",r"وضعیت v75",r"داشبورد v75"])
-
-def _v75_security(text: str = "") -> str:
-    from bot.services.v75_platform import security_scan
-    return json.dumps(security_scan(text), ensure_ascii=False)
-
-register_tool(name="v75_security_scan", description="اسکن امن متن برای prompt injection، افشای secret و الگوهای command خطرناک.", parameters={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=_v75_security, keywords=[r"security scan",r"اسکن امنیتی",r"prompt injection"])
-
-def _v75_news_score(title: str = "", content: str = "") -> str:
-    from bot.services.v75_platform import score_news
-    return json.dumps(score_news(title, content), ensure_ascii=False)
-
-register_tool(name="v75_news_score", description="امتیازدهی اولیه sentiment و impact خبر بدون ادعای صحت منبع.", parameters={"type":"object","properties":{"title":{"type":"string"},"content":{"type":"string"}},"required":["title"]}, handler=_v75_news_score, keywords=[r"تحلیل خبر",r"sentiment خبر",r"impact خبر"])
-
-# V76 Adaptive Core tools
-async def _run_agent_v76(goal: str = "", user_id: int = 0) -> str:
-    from bot.services.v76_platform import run_agent_4
-    return json.dumps(await run_agent_4(goal,user_id=user_id),ensure_ascii=False)[:12000]
-
-register_tool(name="run_agent_v76", description="Agent 4.0 محدود با Intent، برنامه‌ریزی، Verify و بودجه اجرای امن.", parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]}, handler=_run_agent_v76, keywords=[r"agent 4",r"عامل 4",r"برنامه.?ریزی پیشرفته",r"adaptive agent"])
-
-def _v76_status() -> str:
-    from bot.services.v76_platform import system_snapshot
-    return json.dumps(system_snapshot(),ensure_ascii=False)[:12000]
-
-register_tool(name="v76_system_status", description="وضعیت امن هسته Adaptive V76، امنیت، Agent، Job، Cache و Provider Mesh.", parameters={"type":"object","properties":{}}, handler=_v76_status, keywords=[r"سلامت v76",r"وضعیت v76",r"adaptive core"])
-
-
-# V77 Ultimate platform tools ------------------------------------------------
-async def _run_agent_v77(goal: str = "", user_id: int = 0) -> str:
-    from bot.services.v77_platform import run_agent_5
-    result = await run_agent_5(str(goal or ""), user_id=int(user_id or 0))
-    return json.dumps(result, ensure_ascii=False)[:12000]
-
-
-def _v77_status() -> str:
-    from bot.services.v77_platform import system_snapshot
-    return json.dumps(system_snapshot("."), ensure_ascii=False)[:12000]
-
-
-def _v77_market(closes: list[float] | None = None) -> str:
-    from bot.services.v77_platform import market_intelligence_3
-    return json.dumps(market_intelligence_3(closes or []), ensure_ascii=False)
-
-
-def _v77_security(text: str = "") -> str:
-    from bot.services.v77_platform import security_scan
-    return json.dumps(security_scan(text), ensure_ascii=False)
-
-try:
-    register_tool(
-        name="run_agent_v77",
-        description="Agent 5.0 با برنامه‌ریزی وابسته، اجرای محدود، Verify و Retry امن.",
-        parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
-        handler=_run_agent_v77,
-        keywords=[r"agent 5",r"عامل 5",r"برنامه.?ریزی چندمرحله.?ای"]
-    )
-    register_tool(
-        name="v77_system_status",
-        description="وضعیت امن هسته V77 Ultimate.",
-        parameters={"type":"object","properties":{}}, handler=_v77_status,
-        keywords=[r"سلامت v77",r"وضعیت v77",r"ultimate status"]
-    )
-    register_tool(
-        name="v77_market_intelligence",
-        description="تحلیل پیشرفته روند، EMA، RSI، مومنتوم و نوسان.",
-        parameters={"type":"object","properties":{"closes":{"type":"array","items":{"type":"number"}}}}, handler=_v77_market
-    )
-    register_tool(
-        name="v77_security_scan",
-        description="اسکن امنیتی ورودی بدون افشای جزئیات داخلی.",
-        parameters={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=_v77_security
-    )
-except Exception:
-    pass
