@@ -3,11 +3,26 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 from bot.database import get_user, get_user_city, set_last_main_msg_id
 from bot.services.ai_service import (
-    clear_history,
     available_providers,
     set_selected_provider,
     get_selected_model,
 )
+
+# Compatibility guard: some older Render deployments may contain an ai_service.py
+# that predates clear_history(). Do not let that stale module crash the whole bot
+# during startup; preserve the same database cleanup behavior as the canonical
+# implementation when the export is missing.
+try:
+    from bot.services.ai_service import clear_history
+except ImportError:
+    def clear_history(user_id: int, *, clear_long_term: bool = False) -> None:
+        try:
+            from bot.database import clear_ai_history_summary, delete_ai_memory
+            clear_ai_history_summary(user_id)
+            if clear_long_term:
+                delete_ai_memory(user_id)
+        except Exception:
+            pass
 from bot.utils.helpers import (
     build_message,
     get_refresh_button,
@@ -93,62 +108,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
     user_id = update.effective_user.id
-
-    # ───────────────── مدیریت حرفه‌ای یادآوری‌ها ─────────────────
-    if data and data.startswith("rem:"):
-        from bot.handlers.reminder_handlers import reminder_manager_text, reminder_manager_keyboard, _find, detail_text, detail_keyboard
-        from bot.database import set_reminder_active, delete_reminder
-        await _safe_answer(query)
-        try:
-            action,*parts=data.split(":")
-            rid=int(parts[1]) if len(parts)>1 and parts[1].isdigit() else None
-            if action=="rem" and parts and parts[0]=="list":
-                txt,rows=reminder_manager_text(user_id); await query.edit_message_text(txt,reply_markup=reminder_manager_keyboard(rows)); return
-            if action=="rem" and parts and parts[0]=="profile":
-                await query.message.reply_text("👤 پروفایل:",reply_markup=get_profile_keyboard()); return
-            if action=="rem" and parts and parts[0]=="add":
-                context.user_data["waiting_for"]="reminder_new"
-                await query.message.reply_text("➕ یادآوری جدید را طبیعی بنویس؛ مثلاً:\n«یادآوری کن فردا ساعت ۹ جلسه دارم»\n\nبرای لغو: لغو")
-                return
-            if rid is None: return
-            row=_find(user_id,rid)
-            if not row:
-                await query.message.reply_text("❌ یادآوری پیدا نشد."); return
-            if parts[0]=="view":
-                await query.edit_message_text(detail_text(row),reply_markup=detail_keyboard(row)); return
-            if parts[0]=="toggle":
-                set_reminder_active(user_id,rid,not bool(int(row[6] or 0)))
-                row=_find(user_id,rid); await query.edit_message_text(detail_text(row),reply_markup=detail_keyboard(row)); return
-            if parts[0]=="delete":
-                delete_reminder(user_id,rid); txt,rows=reminder_manager_text(user_id); await query.edit_message_text("✅ یادآوری حذف شد.\n\n"+txt,reply_markup=reminder_manager_keyboard(rows)); return
-            if parts[0] in ("time","text","edit"):
-                context.user_data["reminder_edit"]={"rid":rid,"mode":"time" if parts[0] in ("time","edit") else "text"}
-                prompt="🕐 زمان جدید را بنویس؛ مثلاً «فردا ساعت ۹» یا «هر روز ساعت ۸»." if parts[0] != "text" else "📝 متن جدید یادآوری را بفرست."
-                await query.message.reply_text(prompt+"\n\nبرای لغو: لغو")
-                return
-        except Exception as exc:
-            logger.exception("reminder callback failed: %s",exc)
-            await query.message.reply_text("⚠️ خطا در مدیریت یادآوری.")
-        return
-
-    # ───────────────── دانلودر فایل (dl:q / dl:cancel) ─────────────────
-    if data and data.startswith("dl:"):
-        try:
-            from bot.handlers.v71_handlers import download_callback
-            handled = await download_callback(update, context, data)
-            if handled:
-                return
-        except Exception as exc:
-            logger.exception("download callback failed: %s", exc)
-            try:
-                await query.answer("⚠️ خطا در دانلود", show_alert=True)
-            except Exception:
-                pass
-            try:
-                await query.message.reply_text("⚠️ دانلود ناموفق بود؛ دوباره لینک را بفرستید.")
-            except Exception:
-                pass
-            return
 
     # ───────────────── تقویم اقتصادی بازار ─────────────────
     if data and data.startswith("ec:"):
@@ -1078,8 +1037,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ───────────────── بروزرسانی منوی اصلی ─────────────────
     if data == "refresh_main":
-        # logger already imported at module level — do NOT re-import here
-        # (a local import makes `logger` unbound in other branches of this function).
+        from bot.logger import logger
+
         lock = _get_refresh_lock(user_id)
 
         if lock.locked():
@@ -1397,31 +1356,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── منوی تحلیل کریپتو (cx:action:symbol) — ویرایش همان پیام ──
     if data.startswith("cx:"):
+        await _safe_answer(query)
         parts = data.split(":")
         if len(parts) < 3:
-            await _safe_answer(query)
             return
         action, symbol = parts[1], parts[2]
         context.user_data["crypto_symbol"] = symbol
-        # نوتیفیکیشن بالای تلگرام: کار در حال انجام است
-        _loading_labels = {
-            "ai": "🧠 در حال تحلیل هوشمند…",
-            "ict": "📐 در حال تحلیل ICT…",
-            "pa": "🧠 در حال تحلیل پرایس‌اکشن…",
-            "day": "📅 در حال آماده‌سازی تحلیل روزانه…",
-            "hr": "⏰ در حال آماده‌سازی تحلیل ساعتی…",
-            "4h": "🕓 در حال آماده‌سازی تحلیل 4 ساعته…",
-            "15m": "🕒 در حال آماده‌سازی تحلیل 15 دقیقه‌ای…",
-            "rec": "🎯 در حال تهیه توصیه معاملاتی…",
-            "der": "📡 در حال اسکن مشتقات…",
-            "risk": "🎲 در حال محاسبه ریسک…",
-            "scan": "🔍 در حال اسکن بازار…",
-            "ref": "🔄 در حال بروزرسانی…",
-            "gold": "🥇 در حال تحلیل طلا…",
-            "pos": "📐 آماده‌سازی سایز پوزیشن…",
-            "al": "🔔 آماده‌سازی هشدار…",
-        }
-        await _safe_answer(query, _loading_labels.get(action, "⏳ در حال پردازش…"))
         try:
             from bot.features.market.finance import (
                 analyze_crypto, analyze_gold, get_crypto_chart, get_gold_chart, get_crypto_analysis_keyboard,
@@ -1470,37 +1410,44 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return "", ""
 
             def _split_telegram_text(txt: str, limit: int = 3900):
-                """Split long Telegram messages without losing whole analysis sections.
+                """Split Telegram text safely without dropping or duplicating content.
 
-                Telegram text messages are limited to 4096 chars and captions to 1024.
-                We keep a safety margin and prefer line/section boundaries.
+                Prefer paragraph/line/word boundaries.  A hard split is only used as
+                the final fallback; the original text is preserved byte-for-byte
+                apart from trimming the outer whitespace once.  HTML tags are not
+                stripped here because doing so can silently remove visible content
+                from AI reports.
                 """
                 raw = (txt or "").strip()
                 if not raw:
                     return []
+
                 chunks = []
                 current = ""
+
+                def _flush():
+                    nonlocal current
+                    if current:
+                        chunks.append(current)
+                        current = ""
+
                 for line in raw.splitlines():
                     candidate = line if not current else current + "\n" + line
                     if len(candidate) <= limit:
                         current = candidate
                         continue
-                    if current:
-                        chunks.append(current)
-                        current = ""
-                    if len(line) <= limit:
-                        current = line
-                        continue
-                    # Extremely long AI line: strip HTML tags before hard-splitting so
-                    # a partial <b>...</b> tag can never corrupt Telegram parsing.
-                    plain = re.sub(r"<[^>]*>", "", line)
-                    plain = html.unescape(plain)
-                    while len(plain) > limit:
-                        chunks.append(plain[:limit].rstrip())
-                        plain = plain[limit:]
-                    current = plain
-                if current:
-                    chunks.append(current)
+
+                    _flush()
+                    remaining = line
+                    while len(remaining) > limit:
+                        cut = remaining.rfind(" ", 0, limit + 1)
+                        if cut < max(1, limit // 2):
+                            cut = limit
+                        chunks.append(remaining[:cut].rstrip())
+                        remaining = remaining[cut:].lstrip()
+                    current = remaining
+
+                _flush()
                 return chunks
 
             async def _send_full_text(txt: str, *, reply_to=None, reply_markup=None):
@@ -1516,57 +1463,79 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await target.reply_text(**kwargs)
 
             async def _update_market_analysis_text(full_text: str):
-                """متن تحلیل جدا از عکس؛ کیبورد همیشه زیر آخرین پیام تحلیل قرار می‌گیرد."""
-                ids = list(context.user_data.get("market_analysis_text_ids") or [])
-                chat_id = context.user_data.get("market_analysis_chat_id") or query.message.chat_id
-                chunks = _split_telegram_text(full_text, limit=3900) or ["داده کافی نیست."]
-                bot = context.bot
-                if ids:
-                    try:
-                        await bot.edit_message_text(
-                            chat_id=chat_id, message_id=ids[0], text=chunks[0],
-                            parse_mode="HTML", reply_markup=None
-                        )
-                    except Exception:
-                        pass
-                    for old_id in ids[1:]:
+                """Update a long analysis in-place, reusing message IDs whenever possible."""
+                import asyncio
+
+                lock = context.user_data.get("_market_analysis_update_lock")
+                if lock is None:
+                    lock = asyncio.Lock()
+                    context.user_data["_market_analysis_update_lock"] = lock
+
+                async with lock:
+                    old_ids = list(context.user_data.get("market_analysis_text_ids") or [])
+                    chat_id = context.user_data.get("market_analysis_chat_id") or query.message.chat_id
+                    chunks = _split_telegram_text(full_text, limit=3900) or ["داده کافی نیست."]
+                    bot = context.bot
+                    ids = []
+
+                    # Reuse existing messages first. This prevents long ICT/Smart
+                    # analyses from deleting and recreating chunks on every update.
+                    for index, chunk in enumerate(chunks):
+                        old_id = old_ids[index] if index < len(old_ids) else None
+                        if old_id is not None:
+                            try:
+                                await bot.edit_message_text(
+                                    chat_id=chat_id, message_id=old_id, text=chunk,
+                                    parse_mode="HTML", reply_markup=None
+                                )
+                                ids.append(old_id)
+                                continue
+                            except Exception:
+                                pass
+                        try:
+                            m = await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="HTML")
+                            ids.append(m.message_id)
+                        except Exception:
+                            # Retry as plain text only for malformed AI HTML; never
+                            # truncate a chunk, otherwise the analysis can lose data.
+                            plain = re.sub(r"<[^>]*>", "", chunk)
+                            m = await bot.send_message(chat_id=chat_id, text=plain)
+                            ids.append(m.message_id)
+
+                    # Delete only surplus old chunks.
+                    for old_id in old_ids[len(chunks):]:
                         try:
                             await bot.delete_message(chat_id=chat_id, message_id=old_id)
                         except Exception:
                             pass
-                else:
-                    m = await bot.send_message(chat_id=chat_id, text=chunks[0], parse_mode="HTML")
-                    ids = [m.message_id]
-                for chunk in chunks[1:]:
-                    m = await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="HTML")
-                    ids.append(m.message_id)
-                # فقط آخرین/آخرین تکه دکمه‌ها را داشته باشد؛ نه عکس و نه متن اول.
-                for old_id in ids[:-1]:
+
+                    # Keyboard belongs only to the final text chunk.
+                    for msg_id in ids[:-1]:
+                        try:
+                            await bot.edit_message_reply_markup(
+                                chat_id=chat_id, message_id=msg_id, reply_markup=None
+                            )
+                        except Exception:
+                            pass
                     try:
-                        await bot.edit_message_reply_markup(chat_id=chat_id, message_id=old_id, reply_markup=None)
+                        await bot.edit_message_reply_markup(
+                            chat_id=chat_id, message_id=ids[-1], reply_markup=menu
+                        )
                     except Exception:
                         pass
-                try:
-                    await bot.edit_message_reply_markup(chat_id=chat_id, message_id=ids[-1], reply_markup=menu)
-                except Exception:
-                    pass
-                context.user_data["market_analysis_text_ids"] = ids
-                context.user_data["market_analysis_chat_id"] = chat_id
+
+                    context.user_data["market_analysis_text_ids"] = ids
+                    context.user_data["market_analysis_chat_id"] = chat_id
 
             async def _edit_photo_caption(png: bytes | None, caption: str):
-                """نمودار را روی همان پیام به‌روزرسانی کن؛ اگر عکسی نبود، نمودار جدید بفرست."""
+                """نمودار را روی همان پیام به‌روزرسانی کن؛ کیبورد فقط زیر متن تحلیل باشد."""
                 msg = query.message
                 full_input = (caption or "📈 نمودار تحلیل").strip()
                 if len(full_input) > 1000 or "━━━━━━━━━━━━━━━━━━━━" in full_input or "تحلیل هوشمند" in full_input:
                     try:
                         await _update_market_analysis_text(full_input)
                     except Exception as _txt_exc:
-                        logger.warning("market analysis text update failed: %s", _txt_exc)
-                        # Fallback: send full text as new messages so analysis is never lost.
-                        try:
-                            await _send_full_text(full_input, reply_to=query.message, reply_markup=menu)
-                        except Exception as _fb:
-                            logger.warning("market analysis fallback send failed: %s", _fb)
+                        logger.debug("market analysis text update: %s", _txt_exc)
                 cap = full_input.split("\n━━━━━━━━━━━━━━━━━━━━", 1)[0].strip()[:1000]
                 try:
                     # دکمه‌ها زیر متن هستند؛ بنابراین callback معمولاً از پیام متن می‌آید.
@@ -1576,56 +1545,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if msg.photo:
                         photo_msg_id = msg.message_id
                         chat_id = msg.chat_id
-                    if photo_msg_id and png:
-                        try:
+                    if photo_msg_id:
+                        if png:
                             bio = BytesIO(png)
                             bio.name = f"{symbol}_chart.png"
                             media = InputMediaPhoto(media=bio, caption=cap, parse_mode="HTML")
                             await context.bot.edit_message_media(
                                 chat_id=chat_id, message_id=photo_msg_id, media=media, reply_markup=None
                             )
-                            return
-                        except Exception as edit_exc:
-                            logger.warning("market chart edit failed, will send new photo: %s", edit_exc)
-                            photo_msg_id = None
-                    if photo_msg_id and not png:
-                        try:
+                        else:
                             await context.bot.edit_message_caption(
                                 chat_id=chat_id, message_id=photo_msg_id,
                                 caption=cap, parse_mode="HTML", reply_markup=None
                             )
-                        except Exception as cap_exc:
-                            logger.warning("market chart caption edit failed: %s", cap_exc)
                         return
-                    # هیچ عکس قبلی نبود (یا ویرایش شکست خورد) → نمودار جدید بفرست
-                    if png:
-                        bio = BytesIO(png)
-                        bio.name = f"{symbol}_chart.png"
-                        sent = await context.bot.send_photo(
-                            chat_id=chat_id,
-                            photo=bio,
-                            caption=cap,
-                            parse_mode="HTML",
-                        )
-                        context.user_data["market_chart_message_id"] = sent.message_id
-                        context.user_data["market_chart_chat_id"] = chat_id
+                    # اگر عکس شناسه نداشت، متن callback را دست‌کاری نکن؛ تحلیل متن قبلاً آپدیت شده است.
                 except Exception as exc:
                     logger.warning("market chart same-message edit failed: %s", exc)
-                    # آخرین تلاش: اگر png داریم حتماً بفرست
-                    if png:
-                        try:
-                            bio = BytesIO(png)
-                            bio.name = f"{symbol}_chart.png"
-                            chat_id = (context.user_data.get("market_chart_chat_id")
-                                       or (msg.chat_id if msg else None)
-                                       or query.message.chat_id)
-                            sent = await context.bot.send_photo(
-                                chat_id=chat_id, photo=bio, caption=cap[:1000], parse_mode="HTML",
-                            )
-                            context.user_data["market_chart_message_id"] = sent.message_id
-                            context.user_data["market_chart_chat_id"] = chat_id
-                        except Exception as send_exc:
-                            logger.warning("market chart send fallback failed: %s", send_exc)
 
             async def _edit_text(txt: str):
                 """Edit first message and send remaining chunks; never truncate at 4000."""
@@ -1647,8 +1583,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as _exc:
                         logger.debug("%s: %s", __name__, _exc)
 
+            if action == "gold":
+                txt = await analyze_gold("1h")
+                try:
+                    png, _cap = await get_gold_chart("1h")
+                except Exception:
+                    png = None
+                await _edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
+                return
+
             if action == "ict":
-                # تحلیل ICT از همان منوی تحلیل کریپتو
+                # تحلیل ICT به‌صورت مستقیم از همان منوی تحلیل کریپتو اجرا می‌شود؛
+                # دکمه دقیقاً زیر «تحلیل هوشمند حرفه‌ای» قرار دارد.
                 ict_timeframe = context.user_data.get("crypto_ai_timeframe", "1h")
                 if ict_timeframe not in ("15m", "1h", "4h", "1d"):
                     ict_timeframe = "1h"
@@ -1664,15 +1610,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     + safe_ict
                 )
                 await _edit_text(out)
-                return
-
-            if action == "gold":
-                txt = await analyze_gold("1h")
-                try:
-                    png, _cap = await get_gold_chart("1h")
-                except Exception:
-                    png = None
-                await _edit_photo_caption(png, "🥇 <b>تحلیل طلا / XAUUSD — 1H</b>\n━━━━━━━━━━━━━━━━━━━━\n" + (txt or "داده کافی نیست."))
                 return
 
             if action == "ai" and symbol.lower() in ("gold", "xau", "xauusd", "xau/usd"):
@@ -1693,29 +1630,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if action == "ai":
-                # گزارش کامل ۱۶ بخشی با تشخیص ناقص بودن و ادامه خودکار (crypto_ai_report)
+                # گزارش هوشمند باید کل داده قابل‌استفاده را تحلیل کند، نه اینکه آن را به جدول تبدیل کند.
                 ai_timeframe = context.user_data.get("crypto_ai_timeframe", "4h")
                 if ai_timeframe not in ("15m", "1h", "4h", "1d"):
                     ai_timeframe = "4h"
-                try:
-                    base = await analyze_crypto(symbol, timeframe=ai_timeframe)
-                    from bot.services.crypto_ai_report import build_crypto_ai_report
-                    answer = await build_crypto_ai_report(
-                        user_id=query.from_user.id,
-                        symbol=symbol,
-                        base_report=base or "",
-                        timeframe=ai_timeframe.upper(),
-                    )
-                except Exception as exc:
-                    logger.exception("smart AI analysis failed for %s/%s: %s", symbol, ai_timeframe, exc)
-                    answer = f"❌ تحلیل هوشمند فعلاً در دسترس نیست.\n{html.escape(str(exc)[:200])}"
+                base = await analyze_crypto(symbol, timeframe=ai_timeframe)
+                from bot.services.ai_service import ask_ai
+                prompt = (
+                    "تو تحلیل‌گر ارشد Price Action و بازارهای مالی هستی. داده‌های زیر از منابع زنده سیستم آمده‌اند. "
+                    "همه داده‌های موجود را بررسی کن و هیچ قیمت، سطح یا درصدی را حدس نزن. "
+                    "خروجی را برای Telegram و به‌صورت گزارش خوانا بنویس؛ جدول Markdown نساز. "
+                    "بخش‌ها: وضعیت بازار، ساختار HH/HL/LH/LL، BOS/CHOCH، کندل‌ها و rejection، حمایت/مقاومت همان تایم‌فریم، "
+                    "عرضه/تقاضا، نقدینگی و Equal High/Low، شکست و retest، RSI/ADX/ATR، حجم، واگرایی، Funding/OI/Long-Short، "
+                    "MTF، سناریوی Long، سناریوی Short، invalidation، و نتیجه نهایی. اگر داده‌ای نیست صریح بگو. "
+                    "از عبارت‌های کوتاه و تیترهای واضح استفاده کن. در بازار ضعیف یا متناقض، ورود را تأیید نکن.\n\n" + base[:12000]
+                )
+                answer, _ = await ask_ai(query.from_user.id, prompt)
                 safe_answer = html.escape((answer or "داده کافی برای تحلیل هوشمند وجود ندارد.").strip())
                 out = "🧠 <b>تحلیل هوشمند حرفه‌ای</b>\n━━━━━━━━━━━━━━━━━━━━\n" + safe_answer
                 chart_days = {"15m": 3, "1h": 7, "4h": 30, "1d": 90}.get(ai_timeframe, 30)
-                try:
-                    png, _cap = await get_crypto_chart(symbol, chart_days)
-                except Exception:
-                    png = None
+                png, _cap = await get_crypto_chart(symbol, chart_days)
                 await _edit_photo_caption(png, out)
                 return
 
