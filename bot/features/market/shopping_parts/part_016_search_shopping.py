@@ -68,6 +68,53 @@ def _shopping_query_variants(query: str, budget: int = 0) -> list[str]:
     return result
 
 
+# سایت‌های شناخته‌شده برای جستجوی مستقیم؛ در صورت گفتن «برو سایت X»
+# فقط همان دامنه هدف می‌شود. برای سایت‌های ناشناخته نیز از دامنه استخراج‌شده از متن استفاده می‌کنیم.
+_SITE_ALIASES = {
+    "دیجی کالا": "digikala.com", "دیجی‌کالا": "digikala.com", "digikala": "digikala.com",
+    "ترب": "torob.com", "torob": "torob.com",
+    "ایمالز": "emalls.ir", "emalls": "emalls.ir",
+    "تکنولایف": "technolife.ir", "technolایف": "technolife.ir", "technolife": "technolife.ir",
+    "اسنپ شاپ": "snapp.shop", "اسنپ‌شاپ": "snapp.shop", "snappshop": "snapp.shop",
+    "باسلام": "basalam.com", "basalam": "basalam.com",
+    "دیجی استایل": "digistyle.com", "دیجی‌استایل": "digistyle.com", "digistyle": "digistyle.com",
+    "موبایل دات آی آر": "mobile.ir", "mobile.ir": "mobile.ir",
+    "آمازون": "amazon.com", "amazon": "amazon.com",
+    "ebay": "ebay.com", "ایبی": "ebay.com",
+    "علی اکسپرس": "aliexpress.com", "علی‌اکسپرس": "aliexpress.com", "aliexpress": "aliexpress.com",
+    "walmart": "walmart.com", "وال مارت": "walmart.com",
+    "bestbuy": "bestbuy.com", "best buy": "bestbuy.com",
+    "etsy": "etsy.com", "اتسی": "etsy.com",
+    "newegg": "newegg.com",
+    "noon": "noon.com", "نون": "noon.com",
+    "temu": "temu.com", "تیمو": "temu.com",
+    "shein": "shein.com", "شین": "shein.com",
+    "nike": "nike.com", "نایکی": "nike.com",
+    "adidas": "adidas.com", "آدیداس": "adidas.com",
+}
+
+def _explicit_shopping_site(text: str) -> str:
+    import re
+    q = str(text or "").strip().lower()
+    # نام‌های متداول را اول بررسی کن.
+    for alias, domain in sorted(_SITE_ALIASES.items(), key=lambda kv: -len(kv[0])):
+        if alias in q:
+            return domain
+    # مثال: «برو سایت example.com و ...» یا URL مستقیم
+    m = re.search(r"(?:https?://)?(?:www\.)?([a-z0-9][a-z0-9.-]+\.[a-z]{2,})(?:/[^\s]*)?", q)
+    if m:
+        return m.group(1).lower().rstrip('.')
+    return ""
+
+def _strip_site_command(text: str) -> str:
+    import re
+    q = str(text or "").strip()
+    q = re.sub(r"(?:برو|برو تو|برو داخل|وارد شو به|داخل|در|توی|تو)\s+(?:سایت\s+)?(?:دیجی کالا|دیجی‌کالا|ترب|ایمالز|تکنولایف|اسنپ شاپ|اسنپ‌شاپ|باسلام|آمازون|amazon|ebay|ایبی|علی اکسپرس|علی‌اکسپرس|walmart|best ?buy|etsy|newegg|noon|temu|shein)\s*", "", q, flags=re.I)
+    q = re.sub(r"(?:https?://)?(?:www\.)?[a-z0-9][a-z0-9.-]+\.[a-z]{2,}(?:/[^\s]*)?", "", q, flags=re.I)
+    q = re.sub(r"(?:ببین|بررسی کن|پیدا کن|جستجو کن|داره|موجوده|موجود هست|هست؟)", "", q, flags=re.I)
+    return " ".join(q.split()).strip(" ؟?!،,") or str(text or "").strip()
+
+
 async def search_shopping(
     query: str = "",
     source: str = "all",
@@ -83,45 +130,55 @@ async def search_shopping(
 
     max_results = max(4, min(int(max_results or 10), 22))
     source = (source or "all").lower().strip()
+    target_domain = _explicit_shopping_site(query)
+    target_query = _strip_site_command(query) if target_domain else query
     budget = _shopping_budget(query)
     if budget and not max_price:
         max_price = budget
 
+    # اگر کاربر سایت مشخصی گفته باشد، جستجو فقط روی همان سایت انجام می‌شود.
+    if target_domain:
+        selected = []
+        variants = _shopping_query_variants(target_query, budget) or [target_query]
+        tasks = [_search(v, domain=target_domain, limit=max(8, max_results + 2)) for v in variants[:8]]
+        batches = await asyncio.gather(*tasks, return_exceptions=True)
     # انتخاب منابع
-    if source in ("all", "همه", "تمام", "everywhere", "web"):
+    elif source in ("all", "همه", "تمام", "everywhere", "web"):
         preferred = ["torob", "digikala", "snappshop", "technolife", "mobile", "emalls", "basalam", "digistyle", "modiseh", "instagram", "general"]
         selected = [s for s in preferred if s in SOURCES]
     else:
         selected = [s for s in source.replace(",", " ").split() if s in SOURCES]
         if not selected:
             selected = list(SOURCES.keys())
-    if "general" not in selected:
-        selected.append("general")
-    if "instagram" not in selected:
-        selected.append("instagram")
+    if not target_domain:
+        if "general" not in selected:
+            selected.append("general")
+        if "instagram" not in selected:
+            selected.append("instagram")
 
     # چند query مستقل می‌سازیم؛ تطابق دقیق دیگر شرط موفقیت نیست.
-    variants = _shopping_query_variants(query, budget) or [query]
-    tasks = []
-    for key in selected:
-        cfg = SOURCES[key]
-        domain = cfg["domains"][0] if cfg["domains"] else ""
-        limit = max(5, max_results // max(1, len(selected)) + 3)
+    if not target_domain:
+        variants = _shopping_query_variants(query, budget) or [query]
+        tasks = []
+        for key in selected:
+            cfg = SOURCES[key]
+            domain = cfg["domains"][0] if cfg["domains"] else ""
+            limit = max(5, max_results // max(1, len(selected)) + 3)
 
-        # برای هر منبع فقط چند query قوی‌تر را اجرا می‌کنیم تا روی Render فشار ایجاد نشود.
-        local_variants = variants[:5] if key not in ("general", "instagram") else variants[:8]
-        for variant in local_variants:
-            if key == "instagram":
-                tasks.append(
-                    _search(f"{variant} {' OR '.join(INSTA_KEYWORDS[:3])}",
-                            domain="instagram.com", limit=limit + 1)
-                )
-            elif key == "general":
-                tasks.append(_search(variant, domain="", limit=limit + 2))
-            else:
-                tasks.append(_search(variant, domain=domain, limit=limit))
-
-    batches = await asyncio.gather(*tasks, return_exceptions=True)
+            # برای هر منبع فقط چند query قوی‌تر را اجرا می‌کنیم تا روی Render فشار ایجاد نشود.
+            local_variants = variants[:5] if key not in ("general", "instagram") else variants[:8]
+            for variant in local_variants:
+                if key == "instagram":
+                    tasks.append(
+                        _search(f"{variant} {' OR '.join(INSTA_KEYWORDS[:3])}",
+                                domain="instagram.com", limit=limit + 1)
+                    )
+                elif key == "general":
+                    tasks.append(_search(variant, domain="", limit=limit + 2))
+                else:
+                    tasks.append(_search(variant, domain=domain, limit=limit))
+    if not target_domain:
+        batches = await asyncio.gather(*tasks, return_exceptions=True)
 
     # جمع‌آوری لینک‌های یکتا
     links: dict[str, dict[str, str]] = {}
