@@ -133,11 +133,14 @@ def route_live_capability(prompt: str) -> str | None:
         re.I,
     )
     shopping_intent = re.search(
-        r"(?:خرید|بخر|بخرم|پیشنهاد.*(?:محصول|وسیله|کالا)|چی\s*(?:بخر|بخرم)|چه\s*(?:چیزی|محصول|وسیله|کالایی)|\bمحصول\b|\bکالا\b|\bوسیله\b|\bلوازم\b|\bگوشی\b|\bلپ.?تاپ\b|\bهدفون\b|\bکفش\b|\bتلویزیون\b|\bدوربین\b|\bکنسول\b)",
-        q,
-        re.I,
+        r"(?:خرید|بخر|بخرم|پیشنهاد.*(?:محصول|وسیله|کالا)|چی\s*(?:بخر|بخرم)|چه\s*(?:چیزی|محصول|وسیله|کالایی)|\bمحصول\b|\bکالا\b|\bوسیله\b|\bلوازم\b|\bگوشی\b|\bلپ.?تاپ\b|\bهدفون\b|\bکفش\b|\bتلویزیون\b|\bدوربین\b|\bکنسول\b|\bموجود(?:ه|هست)?\b|\bداره\b|\bپیدا\s*کن\b|\bبررسی\s*کن\b|\bببین\b)"
+        , q, re.I,
     )
-    if shopping_budget and shopping_intent:
+    explicit_shop_site = re.search(
+        r"(?:دیجی\s*کالا|دیجی‌کالا|ترب|ایمالز|تکنولایف|اسنپ\s*شاپ|باسلام|دیجی\s*استایل|آمازون|amazon|ebay|ایبی|aliexpress|علی\s*اکسپرس|walmart|best\s*buy|etsy|newegg|noon|temu|shein|nike|adidas|(?:https?://)?(?:www\.)?[a-z0-9][a-z0-9.-]+\.[a-z]{2,})"
+        , q, re.I,
+    )
+    if (shopping_budget and shopping_intent) or (explicit_shop_site and (shopping_intent or re.search(r"(?:محصول|کالا|وسیله|گوشی|لپ.?تاپ|هدفون|کفش|تلویزیون|دوربین|کنسول|موجود|داره|پیدا)", q, re.I))):
         if "search_shopping" in _registry():
             return "search_shopping"
 
