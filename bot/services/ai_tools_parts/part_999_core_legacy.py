@@ -180,6 +180,12 @@ def _lunar_age(birth_date: str) -> str:
     return lunar_age(p[0], p[1], p[2])
 
 
+def _current_datetime(timezone_name: str = "") -> str:
+    from bot.services.current_datetime import current_datetime
+
+    return current_datetime(timezone_name)
+
+
 def _world_clock() -> str:
     from bot.features.date.date_tools import world_clock
 
@@ -661,6 +667,35 @@ def _register_builtin_tools() -> None:
             "required": ["birth_date"],
         },
         handler=_lunar_age,
+    )
+    register_tool(
+        name="get_current_datetime",
+        description=(
+            "تاریخ و زمان دقیق فعلی را با ساعت واقعی سیستم و منطقه زمانی ربات برمی‌گرداند؛ "
+            "شامل میلادی، شمسی و قمری. برای سؤال‌هایی مثل «الان چه تاریخیه؟»، "
+            "«امروز چندمه؟»، «تاریخ دقیق الان» و «الان ساعت چنده؟» از این ابزار استفاده کن."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "timezone_name": {
+                    "type": "string",
+                    "description": "منطقه زمانی IANA اختیاری؛ اگر خالی باشد TIMEZONE تنظیم‌شده ربات استفاده می‌شود."
+                }
+            },
+        },
+        handler=_current_datetime,
+        keywords=[
+            r"تاریخ\s*(?:دقیق|فعلی|امروز)?",
+            r"امروز\s*چندمه",
+            r"الان\s*(?:چه\s*)?تاریخ",
+            r"تاریخ\s*الان",
+            r"الان\s*(?:ساعت|چه\s*ساعتی)",
+            r"current\s*(?:date|time|datetime)",
+            r"today'?s\s*date",
+            r"what\s*time\s*is\s*it",
+        ],
+        risk="read",
     )
     register_tool(
         name="world_clock",
