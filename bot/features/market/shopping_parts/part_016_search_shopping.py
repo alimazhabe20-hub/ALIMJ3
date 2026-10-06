@@ -28,17 +28,43 @@ def _shopping_is_phone(text: str) -> bool:
 
 
 def _shopping_query_variants(query: str, budget: int = 0) -> list[str]:
-    q=str(query or "").strip()
-    out=[q]
+    q = str(query or "").strip()
+    out = [q]
     if budget:
-        b=f"{budget:,}"
-        out += [f"بهترین گوشی تا {b} تومان", f"گوشی موبایل تا {b} تومان", f"گوشی خوب تا {b} تومان قیمت خرید", f"گوشی تا {b} تومان ترب", f"گوشی تا {b} تومان دیجی کالا"]
+        b = f"{budget:,}"
+        # Generic budget requests must stay generic.  The old implementation
+        # accidentally converted every budget query into a phone search.
         if _shopping_is_phone(q):
-            out += [f"سامسونگ تا {b} تومان گوشی", f"شیائومی تا {b} تومان گوشی", f"پوکو تا {b} تومان گوشی", f"آنر تا {b} تومان گوشی", f"آیفون تا {b} تومان گوشی"]
-    seen=set(); result=[]
+            out += [
+                f"بهترین گوشی تا {b} تومان",
+                f"گوشی موبایل تا {b} تومان",
+                f"گوشی خوب تا {b} تومان قیمت خرید",
+                f"گوشی تا {b} تومان ترب",
+                f"گوشی تا {b} تومان دیجی کالا",
+                f"سامسونگ تا {b} تومان گوشی",
+                f"شیائومی تا {b} تومان گوشی",
+                f"پوکو تا {b} تومان گوشی",
+                f"آنر تا {b} تومان گوشی",
+                f"آیفون تا {b} تومان گوشی",
+            ]
+        else:
+            out += [
+                f"وسایل کاربردی تا {b} تومان برای خرید",
+                f"محصولات کاربردی تا {b} تومان",
+                f"بهترین وسیله کاربردی تا {b} تومان",
+                f"لوازم کاربردی تا {b} تومان خرید",
+                f"پیشنهاد خرید تا {b} تومان",
+                f"محصول پرفروش تا {b} تومان",
+                f"لوازم دیجیتال کاربردی تا {b} تومان",
+                f"لوازم خانه کاربردی تا {b} تومان",
+            ]
+    seen = set()
+    result = []
     for x in out:
-        x=" ".join(x.split())
-        if x and x not in seen: seen.add(x); result.append(x)
+        x = " ".join(x.split())
+        if x and x not in seen:
+            seen.add(x)
+            result.append(x)
     return result
 
 
@@ -55,7 +81,7 @@ async def search_shopping(
     if not query:
         return "عبارت محصول برای جستجو مشخص نیست."
 
-    max_results = max(4, min(int(max_results or 10), 16))
+    max_results = max(4, min(int(max_results or 10), 22))
     source = (source or "all").lower().strip()
     budget = _shopping_budget(query)
     if budget and not max_price:
@@ -124,7 +150,7 @@ async def search_shopping(
             links[url] = item
 
     # بازرسی صفحات (حداکثر ۲۶ تا برای سرعت)
-    to_inspect = list(links.values())[:14]
+    to_inspect = list(links.values())[:26]
     inspect_tasks = [
         _inspect(x["url"], x["title"], x.get("snippet", "")) for x in to_inspect
     ]
