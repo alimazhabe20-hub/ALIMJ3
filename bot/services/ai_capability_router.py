@@ -112,7 +112,7 @@ def route_live_capability(prompt: str) -> str | None:
         return None
     # Keep this tiny and deterministic. Detailed scoring remains in the generic
     # selector; these cases must never be answered from stale model knowledge.
-    if re.search(r"(?:تاریخ\s*(?:دقیق|فعلی|الان|امروز)|امروز\s*چندمه|الان\s*(?:چه\s*)?تاریخ|current\s*(?:date|datetime)|today(?:\s*date)?)", q, re.I):
+    if re.search(r"(?:تاریخ\s*(?:دقیق|فعلی|الان|امروز|فردا|دیروز|پس\s*فردا)|(?:امروز|فردا|دیروز|پس\s*فردا)\s*(?:چندمه|چه\s*تاریخیه|چه\s*روزیه)?|الان\s*(?:چه\s*)?تاریخ|current\s*(?:date|datetime)|today(?:\s*date)?|tomorrow|yesterday)", q, re.I):
         return "get_current_datetime" if "get_current_datetime" in _registry() else None
     if re.search(r"(?:الان\s*(?:ساعت|چه\s*ساعتی)|ساعت\s*الان|what\s*time|current\s*time)", q, re.I):
         return "get_current_datetime" if "get_current_datetime" in _registry() else "world_clock"
@@ -122,6 +122,25 @@ def route_live_capability(prompt: str) -> str | None:
         for name in ("get_crypto_price", "get_market_prices"):
             if name in _registry():
                 return name
+
+    # Shopping is also a live-data capability.  Do not let the language model
+    # answer budget/product requests from its static knowledge.  This covers
+    # both explicit purchase requests and broad requests such as
+    # «یه وسیله کاربردی تا ۵۰ میلیون».
+    shopping_budget = re.search(
+        r"(?:بودجه|تا|زیر|حداکثر|حدود|حد)\s*[0-9۰-۹][0-9۰-۹,٬.]*\s*(?:میلیون|م|هزار|تومان|تومن)|[0-9۰-۹][0-9۰-۹,٬.]*\s*(?:میلیون|م)\s*(?:تومان|تومن)?",
+        q,
+        re.I,
+    )
+    shopping_intent = re.search(
+        r"(?:خرید|بخر|بخرم|پیشنهاد.*(?:محصول|وسیله|کالا)|چی\s*(?:بخر|بخرم)|چه\s*(?:چیزی|محصول|وسیله|کالایی)|\bمحصول\b|\bکالا\b|\bوسیله\b|\bلوازم\b|\bگوشی\b|\bلپ.?تاپ\b|\bهدفون\b|\bکفش\b|\bتلویزیون\b|\bدوربین\b|\bکنسول\b)",
+        q,
+        re.I,
+    )
+    if shopping_budget and shopping_intent:
+        if "search_shopping" in _registry():
+            return "search_shopping"
+
     return None
 
 
