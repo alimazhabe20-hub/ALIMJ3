@@ -27,6 +27,29 @@ def _shopping_is_phone(text: str) -> bool:
     return bool(re.search(r"گوشی|موبایل|اسمارت\s*فون|smart\s*phone|iphone|آیفون|سامسونگ|شیائومی|پوکو|honor|oneplus|pixel", str(text or ""), re.I))
 
 
+
+
+def _shopping_wants_foreign(text: str) -> bool:
+    """فقط با درخواست صریح کاربر جستجوی منابع خارجی را فعال می‌کند."""
+    import re
+    q = str(text or "").strip().lower()
+    patterns = (
+        r"سایت[‌ ]*ها?ی?\s*(?:خارجی|بین.?المللی|جهانی)",
+        r"منابع[‌ ]*(?:خارجی|بین.?المللی|جهانی)",
+        r"بازار[‌ ]*(?:خارجی|جهانی|بین.?المللی)",
+        r"(?:خارجی|بین.?المللی|جهانی)\s*(?:هم|نیز)?\s*(?:بگرد|جستجو|بررسی|چک|پیدا)",
+        r"(?:amazon|آمازون|ebay|ایبی|aliexpress|علی.?اکسپرس|walmart|best\s*buy|etsy|newegg|noon|temu|shein)",
+        r"(?:سایت|فروشگاه)\s+(?:خارج|جهان|بین.?الملل)",
+    )
+    return any(re.search(pat, q, re.I) for pat in patterns)
+
+
+def _shopping_iran_only_query(query: str) -> str:
+    """جستجوی عمومی پیش‌فرض را به بازار ایران متمایل می‌کند؛ منابع مستقیم همچنان جداگانه جستجو می‌شوند."""
+    q = str(query or "").strip()
+    # این قید برای موتور عمومی است، نه برای Torob/Digikala/... .
+    return f"{q} ایران تومان خرید فروشگاه"
+
 def _shopping_query_variants(query: str, budget: int = 0) -> list[str]:
     q = str(query or "").strip()
     out = [q]
@@ -115,208 +138,6 @@ def _strip_site_command(text: str) -> str:
     return " ".join(q.split()).strip(" ؟?!،,") or str(text or "").strip()
 
 
-
-
-# ---------------------------------------------------------------------------
-# منابع مستقیم بازار ایران
-# ---------------------------------------------------------------------------
-# موتور جستجو برای بعضی سایت‌ها روی Render ناپایدار است. این دو منبع را
-# مستقیم می‌خوانیم و فقط در صورت شکست به مسیر قدیمی search-engine برمی‌گردیم.
-
-async def _direct_torob(query: str, limit: int = 12, max_price: int = 0) -> list[ProductResult]:
-    """خواندن مستقیم نتایج جستجوی عمومی ترب؛ قیمت API برحسب تومان است."""
-    q = str(query or '').strip()
-    if not q:
-        return []
-    try:
-        url = 'https://api.torob.com/v4/base-product/search/'
-        params = {'q': q, 'page': 0, 'size': min(max(int(limit), 1), 30), 'source': 'torob_search'}
-        headers = {'User-Agent': UA, 'Accept': 'application/json', 'Accept-Language': 'fa-IR,fa;q=0.9'}
-        async with httpx.AsyncClient(timeout=8, follow_redirects=True, headers=headers) as client:
-            r = await client.get(url, params=params)
-        if r.status_code >= 400:
-            logger.debug('direct torob HTTP %s', r.status_code)
-            return []
-        data = r.json()
-        rows = data.get('results') if isinstance(data, dict) else data
-        if not isinstance(rows, list):
-            return []
-        out = []
-        seen = set()
-        for row in rows:
-            if not isinstance(row, dict) or row.get('is_adv'):
-                continue
-            title = str(row.get('name1') or row.get('name2') or '').strip()
-            prk = str(row.get('random_key') or row.get('prk') or '').strip()
-            raw_price = row.get('price')
-            try:
-                price = int(raw_price) if raw_price not in ('', None) else None
-            except Exception:
-                price = None
-            if max_price and price is not None and price > max_price:
-                continue
-            if not title or not prk or prk in seen:
-                continue
-            seen.add(prk)
-            out.append(ProductResult(
-                source='torob',
-                title=title,
-                url=f'https://torob.com/p/{prk}/',
-                price=price,
-                currency='تومان',
-                seller=str(row.get('shop_text') or '').strip(),
-                availability='',
-                image=str(row.get('image_url') or '').strip(),
-                match_hint=str(row.get('name2') or '').strip(),
-            ))
-        return out
-    except Exception as exc:
-        logger.debug('direct torob failed: %s', exc)
-        return []
-
-
-def _digikala_price(value, currency_hint='') -> int | None:
-    try:
-        if value in ('', None):
-            return None
-        n = int(float(str(value).replace(',', '').replace('٬', '').strip()))
-        # Digikala public API reports selling_price_rial; explicit toman fields
-        # are used when available.
-        if 'rial' in str(currency_hint).lower() or 'ریال' in str(currency_hint):
-            return n // 10
-        return n
-    except Exception:
-        return None
-
-
-def _digikala_product_from_row(row: dict) -> ProductResult | None:
-    if not isinstance(row, dict):
-        return None
-    pid = row.get('id') or row.get('product_id') or row.get('dkp')
-    title = row.get('title_fa') or row.get('title') or row.get('name') or row.get('title_en')
-    if not title:
-        return None
-    price = row.get('selling_price_tooman')
-    if price is None:
-        price = row.get('price_tooman')
-    if price is None:
-        price = _digikala_price(row.get('selling_price_rial'), 'rial')
-    if price is None:
-        price = _digikala_price(row.get('selling_price'), 'rial')
-    old = row.get('rrp_price_tooman')
-    if old is None:
-        old = _digikala_price(row.get('rrp_price_rial'), 'rial')
-    if pid is None:
-        return None
-    url = str(row.get('url') or '').strip()
-    if url.startswith('/'):
-        url = 'https://www.digikala.com' + url
-    if not url:
-        url = f'https://www.digikala.com/product/dkp-{pid}/'
-    rating = row.get('rating_stars')
-    hint = ''
-    if rating is not None:
-        hint = f'امتیاز کاربران: {rating}'
-        if row.get('rating_count') is not None:
-            hint += f' ({row.get("rating_count")} رأی)'
-    return ProductResult(
-        source='digikala', title=str(title).strip(), url=url,
-        price=price, old_price=old, currency='تومان',
-        seller='دیجی‌کالا', availability='', image=str(row.get('image') or '').strip(),
-        match_hint=hint,
-    )
-
-
-def _walk_digikala_rows(obj):
-    """استخراج انعطاف‌پذیر محصول از چند شکل رایج API دیجی‌کالا."""
-    if isinstance(obj, list):
-        for x in obj:
-            yield from _walk_digikala_rows(x)
-    elif isinstance(obj, dict):
-        keys = set(obj)
-        if (('id' in keys or 'product_id' in keys or 'dkp' in keys) and
-            any(k in keys for k in ('title', 'title_fa', 'name', 'selling_price_rial', 'selling_price_tooman'))):
-            yield obj
-        for k, v in obj.items():
-            if k in {'data', 'products', 'results', 'items', 'hits', 'entities', 'products_data'}:
-                yield from _walk_digikala_rows(v)
-
-
-async def _direct_digikala(query: str, limit: int = 12, max_price: int = 0) -> list[ProductResult]:
-    """جستجوی مستقیم دیجی‌کالا؛ چند endpoint عمومی را با fallback امتحان می‌کند."""
-    q = str(query or '').strip()
-    if not q:
-        return []
-    headers = {'User-Agent': UA, 'Accept': 'application/json', 'Accept-Language': 'fa-IR,fa;q=0.9'}
-    urls = [
-        ('https://api.digikala.com/v1/search/text-lenz/', {'q': q}),
-        ('https://api.digikala.com/v1/autocomplete/', {'q': q}),
-    ]
-    for url, params in urls:
-        try:
-            async with httpx.AsyncClient(timeout=8, follow_redirects=True, headers=headers) as client:
-                r = await client.get(url, params=params)
-            if r.status_code >= 400:
-                continue
-            data = r.json()
-            out, seen = [], set()
-            for row in _walk_digikala_rows(data):
-                item = _digikala_product_from_row(row)
-                if not item:
-                    continue
-                if max_price and item.price is not None and item.price > max_price:
-                    continue
-                key = item.url or item.title
-                if key in seen:
-                    continue
-                seen.add(key)
-                out.append(item)
-                if len(out) >= limit:
-                    return out
-            if out:
-                return out
-        except Exception as exc:
-            logger.debug('direct digikala failed %s: %s', url, exc)
-    return []
-
-
-def _shopping_live_query(query: str) -> str:
-    """بودجه و عبارت‌های دستوری را از query حذف می‌کند تا API جستجوی دقیق‌تری بگیرد."""
-    import re
-    q = _shopping_digits(query)
-    q = re.sub(r'(?:تا|زیر|حداکثر|حدود|بودجه|حد)\s*\d+(?:[.,]\d+)?\s*(?:میلیون|م|هزار)?\s*(?:تومان|تومن)?', ' ', q, flags=re.I)
-    q = re.sub(r'\d+(?:[.,]\d+)?\s*(?:میلیون|م)\s*(?:تومان|تومن)?', ' ', q, flags=re.I)
-    q = re.sub(r'\b\d{5,}\b\s*(?:تومان|تومن)?', ' ', q, flags=re.I)
-    q = re.sub(r'\b(?:پیدا\s*کن|برام\s*پیدا\s*کن|بگرد|جستجو\s*کن|میخوام|می\s*خوام)\b', ' ', q, flags=re.I)
-    return ' '.join(q.split()).strip() or str(query or '').strip()
-
-
-def _format_live_results(query: str, results: list[ProductResult], budget: int = 0) -> str:
-    from datetime import datetime, timezone
-    lines = [
-        f'🛒 **نتیجه زنده بازار ایران برای «{query}»**',
-        '',
-        f'⏱ زمان دریافت: {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}',
-        'قیمت‌ها مستقیماً از منبع خوانده شده‌اند؛ قیمت حدسی نمایش داده نمی‌شود.',
-        'قبل از خرید، قیمت و موجودی نهایی صفحه فروشنده را بررسی کنید.',
-        '',
-    ]
-    for i, x in enumerate(results, 1):
-        price = f'{x.price:,} تومان' if x.price is not None else 'قیمت اعلام نشده'
-        lines.append(f'{i}. **{x.title}**')
-        lines.append(f'🏪 {SOURCES.get(x.source, SOURCES["general"])["label"]} | 💰 {price}')
-        if x.old_price and x.old_price > (x.price or 0):
-            lines.append(f'🏷 قیمت قبل: {x.old_price:,} تومان')
-        if x.match_hint:
-            lines.append(f'ℹ️ {x.match_hint}')
-        lines.append(f'🔗 {x.url}')
-        lines.append('')
-    cheapest = min((x for x in results if x.price is not None), key=lambda x: x.price)
-    lines.append(f'🏆 ارزان‌ترین نتیجه معتبر: **{cheapest.price:,} تومان**')
-    if budget:
-        lines.append(f'🎯 سقف بودجه: **{budget:,} تومان**')
-    return '\n'.join(lines)
-
 async def search_shopping(
     query: str = "",
     source: str = "all",
@@ -335,39 +156,9 @@ async def search_shopping(
     target_domain = _explicit_shopping_site(query)
     target_query = _strip_site_command(query) if target_domain else query
     budget = _shopping_budget(query)
+    foreign_requested = _shopping_wants_foreign(query)
     if budget and not max_price:
         max_price = budget
-
-    # مسیر زنده و مستقیم بازار ایران: قبل از موتور جستجو اجرا می‌شود.
-    # این مسیر مشکل Render/DDG را دور می‌زند و فقط داده‌ای را برمی‌گرداند که
-    # خود منبع اعلام کرده است؛ هیچ قیمت حدسی تولید نمی‌شود.
-    live_query = _shopping_live_query(target_query if 'target_query' in locals() else query)
-    direct_results: list[ProductResult] = []
-    direct_tasks = []
-    if target_domain in ('torob.com', '') and (target_domain == 'torob.com' or source in ('all', 'همه', 'تمام', 'everywhere', 'web')):
-        direct_tasks.append(_direct_torob(live_query, max_results * 2, max_price))
-    if target_domain in ('digikala.com', '') and (target_domain == 'digikala.com' or source in ('all', 'همه', 'تمام', 'everywhere', 'web')):
-        direct_tasks.append(_direct_digikala(live_query, max_results * 2, max_price))
-    if direct_tasks:
-        direct_batches = await asyncio.gather(*direct_tasks, return_exceptions=True)
-        for batch in direct_batches:
-            if isinstance(batch, Exception):
-                continue
-            direct_results.extend(batch)
-
-    # اگر نتیجه معتبر مستقیم داریم، همان را با حداقل پردازش برگردان؛
-    # برای افزایش پوشش، مسیر قدیمی وب نیز فقط وقتی نتیجه کافی نیست ادامه می‌یابد.
-    if direct_results:
-        dedup = {}
-        for x in direct_results:
-            if max_price and x.price is not None and x.price > max_price:
-                continue
-            dedup[x.url] = x
-        direct_results = list(dedup.values())
-        direct_results.sort(key=lambda x: (x.price is None, x.price or 10**18))
-        if direct_results:
-            _save_history(direct_results[:max_results])
-            return _format_live_results(query, direct_results[:max_results], budget)
 
     # اگر کاربر سایت مشخصی گفته باشد، جستجو فقط روی همان سایت انجام می‌شود.
     if target_domain:
@@ -377,6 +168,7 @@ async def search_shopping(
         batches = await asyncio.gather(*tasks, return_exceptions=True)
     # انتخاب منابع
     elif source in ("all", "همه", "تمام", "everywhere", "web"):
+        # پیش‌فرض: بازار ایران. منابع خارجی فقط با درخواست صریح کاربر.
         preferred = ["torob", "digikala", "snappshop", "technolife", "mobile", "emalls", "basalam", "digistyle", "modiseh", "instagram", "general"]
         selected = [s for s in preferred if s in SOURCES]
     else:
@@ -407,7 +199,10 @@ async def search_shopping(
                                 domain="instagram.com", limit=limit + 1)
                     )
                 elif key == "general":
-                    tasks.append(_search(variant, domain="", limit=limit + 2))
+                    # موتور عمومی تنها در حالت «سایت‌های خارجی هم» آزادانه کل وب را می‌گردد.
+                    # در حالت عادی، جستجوی عمومی به بازار ایران متمایل می‌شود.
+                    general_query = variant if foreign_requested else _shopping_iran_only_query(variant)
+                    tasks.append(_search(general_query, domain="", limit=limit + 2))
                 else:
                     tasks.append(_search(variant, domain=domain, limit=limit))
     if not target_domain:
