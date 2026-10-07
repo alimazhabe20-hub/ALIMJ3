@@ -89,7 +89,7 @@ async def _search(query: str, domain: str = "", limit: int = 8, extra: str = "")
 
     headers = {"User-Agent": UA, "Accept-Language": "fa-IR,fa;q=0.9,en;q=0.8"}
     try:
-        async with httpx.AsyncClient(timeout=12, follow_redirects=True, headers=headers) as client:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True, headers=headers) as client:
             # DDG first: lowest overhead for the existing implementation.
             out = await _ddg(client)
             if not out:
@@ -98,17 +98,25 @@ async def _search(query: str, domain: str = "", limit: int = 8, extra: str = "")
                     ("bing", f"https://www.bing.com/search?q={quote_plus(q)}", _bing_links),
                     ("brave", f"https://search.brave.com/search?q={quote_plus(q)}", _brave_links),
                 ]
-                for name, url, parser in engines:
+                async def _engine(item):
+                    name, url, parser = item
                     try:
-                        r = await client.get(url)
+                        r = await client.get(url, timeout=4.0)
                         if r.status_code >= 400:
-                            continue
-                        out = parser(BeautifulSoup(r.text, "html.parser"))
-                        if out:
-                            logger.info("shopping search engine=%s query=%s results=%d", name, q, len(out))
-                            break
+                            return name, []
+                        return name, parser(BeautifulSoup(r.text, "html.parser"))
                     except Exception as exc:
                         logger.debug("shopping %s failed for %s: %s", name, q, exc)
+                        return name, []
+                engine_results = await asyncio.gather(*(_engine(x) for x in engines), return_exceptions=True)
+                for item in engine_results:
+                    if isinstance(item, Exception):
+                        continue
+                    name, candidate = item
+                    if candidate:
+                        out = candidate
+                        logger.info("shopping search engine=%s query=%s results=%d", name, q, len(out))
+                        break
 
         CACHE[key] = (now, json.dumps(out[:limit], ensure_ascii=False))
         return out[:limit]

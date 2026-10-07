@@ -159,26 +159,45 @@ async def search_shopping(
     # چند query مستقل می‌سازیم؛ تطابق دقیق دیگر شرط موفقیت نیست.
     if not target_domain:
         variants = _shopping_query_variants(query, budget) or [query]
+        # Render/AI tool calls have a short execution budget. The previous
+        # implementation could launch ~50 searches for one simple budget query
+        # and then inspect dozens of pages. Keep the live search bounded while
+        # preserving multiple independent sources.
+        if _shopping_is_phone(query) and budget:
+            selected = [x for x in ("torob", "technolife", "mobile", "digikala") if x in SOURCES]
+            variants = variants[:2]
+        elif budget:
+            selected = [x for x in ("torob", "digikala", "technolife", "emalls", "general") if x in SOURCES]
+            variants = variants[:2]
+        else:
+            selected = selected[:5]
+            variants = variants[:2]
+
         tasks = []
         for key in selected:
             cfg = SOURCES[key]
             domain = cfg["domains"][0] if cfg["domains"] else ""
-            limit = max(5, max_results // max(1, len(selected)) + 3)
-
-            # برای هر منبع فقط چند query قوی‌تر را اجرا می‌کنیم تا روی Render فشار ایجاد نشود.
-            local_variants = variants[:5] if key not in ("general", "instagram") else variants[:8]
-            for variant in local_variants:
+            limit = max(4, min(6, max_results // max(1, len(selected)) + 2))
+            for variant in variants:
                 if key == "instagram":
-                    tasks.append(
-                        _search(f"{variant} {' OR '.join(INSTA_KEYWORDS[:3])}",
-                                domain="instagram.com", limit=limit + 1)
-                    )
+                    tasks.append(_search(
+                        f"{variant} {' OR '.join(INSTA_KEYWORDS[:2])}",
+                        domain="instagram.com", limit=limit
+                    ))
                 elif key == "general":
-                    tasks.append(_search(variant, domain="", limit=limit + 2))
+                    tasks.append(_search(variant, domain="", limit=limit))
                 else:
                     tasks.append(_search(variant, domain=domain, limit=limit))
+
     if not target_domain:
-        batches = await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            batches = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=9.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("shopping search timed out; using partial results")
+            batches = []
 
     # جمع‌آوری لینک‌های یکتا
     links: dict[str, dict[str, str]] = {}
@@ -207,11 +226,18 @@ async def search_shopping(
             links[url] = item
 
     # بازرسی صفحات (حداکثر ۲۶ تا برای سرعت)
-    to_inspect = list(links.values())[:36]
+    to_inspect = list(links.values())[:12]
     inspect_tasks = [
         _inspect(x["url"], x["title"], x.get("snippet", "")) for x in to_inspect
     ]
-    results = await asyncio.gather(*inspect_tasks, return_exceptions=True)
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*inspect_tasks, return_exceptions=True),
+            timeout=8.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("shopping page inspection timed out; using partial results")
+        results = []
 
     clean: list[ProductResult] = []
     for x in results:
