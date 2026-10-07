@@ -522,13 +522,21 @@ def _shopping_prompt_hint(prompt: str) -> str:
         q, re.I,
     ):
         return ""
-    if not re.search(
+    _kw_hit = re.search(
         r"خرید|قیمت|فروشگاه|فروشنده|ارزان|بهترین|لینک خرید|اینستا|شاپ|"
         r"مقایسه.*قیمت|قیمت.*محصول|buy|price|shop",
         q,
         re.I,
-    ):
-        return ""
+    )
+    if not _kw_hit:
+        # v79: «یه گوشی تا ۵۰ میلیون پیدا کن» has none of the words above but is
+        # still a shopping request; ask the freshness classifier.
+        try:
+            from bot.services.ai_freshness import classify as _fresh_classify
+            if _fresh_classify(q).tool != "search_shopping":
+                return ""
+        except Exception:
+            return ""
 
     return (
         "\n\n[SHOPPING MODE]\n"
