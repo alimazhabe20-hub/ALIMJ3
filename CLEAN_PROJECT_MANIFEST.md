@@ -1,0 +1,97 @@
+# Clean Project Manifest
+
+## Duplicate filenames renamed
+- `bot/api/weather.py` → `bot/api/api_weather.py`
+- `bot/api/weather_extra.py` → `bot/api/api_weather_extra.py`
+- `bot/features/date/converters.py` → `bot/features/date/features_date_converters.py`
+- `bot/features/date/converters_parts/part_001_to_persian_num.py` → `bot/features/date/converters_parts/features_date_converters_parts_part_001_to_persian_num.py`
+- `bot/features/date/converters_parts/part_002__normalize.py` → `bot/features/date/converters_parts/features_date_converters_parts_part_002__normalize.py`
+- `bot/features/date/date_tools.py` → `bot/features/date/features_date_date_tools.py`
+- `bot/features/date/date_tools_parts/part_001_pn.py` → `bot/features/date/date_tools_parts/features_date_date_tools_parts_part_001_pn.py`
+- `bot/features/fonts/styles_parts/part_999_core_legacy.py` → `bot/features/fonts/styles_parts/features_fonts_styles_parts_part_999_core_legacy.py`
+- `bot/features/fun/fun_tools.py` → `bot/features/fun/features_fun_fun_tools.py`
+- `bot/features/fun/fun_tools_parts/part_001_pn.py` → `bot/features/fun/fun_tools_parts/features_fun_fun_tools_parts_part_001_pn.py`
+- `bot/features/market/economic_calendar_parts/part_999_core_legacy.py` → `bot/features/market/economic_calendar_parts/features_market_economic_calendar_parts_part_999_core_legacy.py`
+- `bot/features/market/finance_crypto_parts/part_999_core_legacy.py` → `bot/features/market/finance_crypto_parts/features_market_finance_crypto_parts_part_999_core_legacy.py`
+- `bot/features/market/finance_parts/part_999_core_legacy.py` → `bot/features/market/finance_parts/features_market_finance_parts_part_999_core_legacy.py`
+- `bot/features/religious/events.py` → `bot/features/religious/features_religious_events.py`
+- `bot/features/religious/events_parts/part_001__to_shamsi_str.py` → `bot/features/religious/events_parts/features_religious_events_parts_part_001__to_shamsi_str.py`
+- `bot/features/religious/events_parts/part_002__hijri_label.py` → `bot/features/religious/events_parts/features_religious_events_parts_part_002__hijri_label.py`
+- `bot/features/religious/events_parts/part_003__events_for_gregorian.py` → `bot/features/religious/events_parts/features_religious_events_parts_part_003__events_for_gregorian.py`
+- `bot/features/religious/events_parts/part_004_get_today_religious_events.py` → `bot/features/religious/events_parts/features_religious_events_parts_part_004_get_today_religious_events.py`
+- `bot/features/religious/events_parts/part_005_get_upcoming_religious_events.py` → `bot/features/religious/events_parts/features_religious_events_parts_part_005_get_upcoming_religious_events.py`
+- `bot/features/religious/events_parts/part_006_get_month_religious_events.py` → `bot/features/religious/events_parts/features_religious_events_parts_part_006_get_month_religious_events.py`
+- `bot/features/religious/events_parts/part_007_religious_countdown.py` → `bot/features/religious/events_parts/features_religious_events_parts_part_007_religious_countdown.py`
+- `bot/features/religious/events_parts/part_008_religious_month_view.py` → `bot/features/religious/events_parts/features_religious_events_parts_part_008_religious_month_view.py`
+- `bot/features/religious/istikhara_data_1_parts/part_999_core_legacy.py` → `bot/features/religious/istikhara_data_1_parts/features_religious_istikhara_data_1_parts_part_999_core_legacy.py`
+- `bot/features/religious/istikhara_data_2_parts/part_999_core_legacy.py` → `bot/features/religious/istikhara_data_2_parts/features_religious_istikhara_data_2_parts_part_999_core_legacy.py`
+- `bot/features/religious/istikhara_data_3_parts/part_999_core_legacy.py` → `bot/features/religious/istikhara_data_3_parts/features_religious_istikhara_data_3_parts_part_999_core_legacy.py`
+- `bot/features/religious/istikhara_data_4_parts/part_999_core_legacy.py` → `bot/features/religious/istikhara_data_4_parts/features_religious_istikhara_data_4_parts_part_999_core_legacy.py`
+- `bot/features/religious/religious_events_parts/part_001__to_shamsi_str.py` → `bot/features/religious/religious_events_parts/features_religious_religious_events_parts_part_001__to_shamsi_str.py`
+- `bot/features/religious/religious_events_parts/part_002__hijri_label.py` → `bot/features/religious/religious_events_parts/features_religious_religious_events_parts_part_002__hijri_label.py`
+- `bot/features/religious/religious_events_parts/part_003__events_for_gregorian.py` → `bot/features/religious/religious_events_parts/features_religious_religious_events_parts_part_003__events_for_gregorian.py`
+- `bot/features/religious/religious_events_parts/part_004_get_today_religious_events.py` → `bot/features/religious/religious_events_parts/features_religious_religious_events_parts_part_004_get_today_religious_events.py`
+- `bot/features/religious/religious_events_parts/part_005_get_upcoming_religious_events.py` → `bot/features/religious/religious_events_parts/features_religious_religious_events_parts_part_005_get_upcoming_religious_events.py`
+- `bot/features/religious/religious_events_parts/part_006_get_month_religious_events.py` → `bot/features/religious/religious_events_parts/features_religious_religious_events_parts_part_006_get_month_religious_events.py`
+- `bot/features/religious/religious_events_parts/part_007_religious_countdown.py` → `bot/features/religious/religious_events_parts/features_religious_religious_events_parts_part_007_religious_countdown.py`
+- `bot/features/religious/religious_events_parts/part_008_religious_month_view.py` → `bot/features/religious/religious_events_parts/features_religious_religious_events_parts_part_008_religious_month_view.py`
+- `bot/features/tools/app_tools.py` → `bot/features/tools/features_tools_app_tools.py`
+- `bot/features/tools/app_tools_parts/part_001_pn.py` → `bot/features/tools/app_tools_parts/features_tools_app_tools_parts_part_001_pn.py`
+- `bot/features/weather/weather.py` → `bot/features/weather/features_weather_weather.py`
+- `bot/features/weather/weather_extra.py` → `bot/features/weather/features_weather_weather_extra.py`
+- `bot/features/weather/weather_extra_parts/part_001_pn.py` → `bot/features/weather/weather_extra_parts/features_weather_weather_extra_parts_part_001_pn.py`
+- `bot/features/weather/weather_parts/part_999_core_legacy.py` → `bot/features/weather/weather_parts/features_weather_weather_parts_part_999_core_legacy.py`
+- `bot/handlers/callbacks_parts/part_999_core_legacy.py` → `bot/handlers/callbacks_parts/handlers_callbacks_parts_part_999_core_legacy.py`
+- `bot/handlers/commands_parts/part_999_core_legacy.py` → `bot/handlers/commands_parts/handlers_commands_parts_part_999_core_legacy.py`
+- `bot/handlers/market_handlers_parts/part_999_core_legacy.py` → `bot/handlers/market_handlers_parts/handlers_market_handlers_parts_part_999_core_legacy.py`
+- `bot/handlers/messages_parts/part_999_core_legacy.py` → `bot/handlers/messages_parts/handlers_messages_parts_part_999_core_legacy.py`
+- `bot/handlers/v71_handlers_parts/part_005_download_from_ytdlp.py` → `bot/handlers/v71_handlers_parts/handlers_v71_handlers_parts_part_005_download_from_ytdlp.py`
+- `bot/main_parts/part_999_core_legacy.py` → `bot/main_parts/main_parts_part_999_core_legacy.py`
+- `bot/services/ai_media_parts/part_999_core_legacy.py` → `bot/services/ai_media_parts/services_ai_media_parts_part_999_core_legacy.py`
+- `bot/services/ai_providers_parts/part_999_core_legacy.py` → `bot/services/ai_providers_parts/services_ai_providers_parts_part_999_core_legacy.py`
+- `bot/services/ai_runtime_parts/part_999_core_legacy.py` → `bot/services/ai_runtime_parts/services_ai_runtime_parts_part_999_core_legacy.py`
+- `bot/services/ai_service_parts/part_999_core_legacy.py` → `bot/services/ai_service_parts/services_ai_service_parts_part_999_core_legacy.py`
+- `bot/services/ai_tools_parts/part_999_core_legacy.py` → `bot/services/ai_tools_parts/services_ai_tools_parts_part_999_core_legacy.py`
+- `bot/services/auto_reactions_parts/part_002__normalize.py` → `bot/services/auto_reactions_parts/services_auto_reactions_parts_part_002__normalize.py`
+- `bot/services/downloader_parts/part_999_core_legacy.py` → `bot/services/downloader_parts/services_downloader_parts_part_999_core_legacy.py`
+- `bot/services/insta_downloader_parts/part_005_download_from_ytdlp.py` → `bot/services/insta_downloader_parts/services_insta_downloader_parts_part_005_download_from_ytdlp.py`
+- `bot/services/v61_v65_platform_parts/part_999_core_legacy.py` → `bot/services/v61_v65_platform_parts/services_v61_v65_platform_parts_part_999_core_legacy.py`
+- `bot/services/v73_platform_parts/part_001_redact_secrets.py` → `bot/services/v73_platform_parts/services_v73_platform_parts_part_001_redact_secrets.py`
+- `bot/services/v73_platform_parts/part_004_safe_archive_member.py` → `bot/services/v73_platform_parts/services_v73_platform_parts_part_004_safe_archive_member.py`
+- `bot/services/v74_platform_parts/part_001_redact_secrets.py` → `bot/services/v74_platform_parts/services_v74_platform_parts_part_001_redact_secrets.py`
+- `bot/services/v74_platform_parts/part_004_safe_archive_member.py` → `bot/services/v74_platform_parts/services_v74_platform_parts_part_004_safe_archive_member.py`
+- `bot/services/v74_platform_parts/part_005_safe_path.py` → `bot/services/v74_platform_parts/services_v74_platform_parts_part_005_safe_path.py`
+- `bot/services/v76_platform_parts/part_001__db.py` → `bot/services/v76_platform_parts/services_v76_platform_parts_part_001__db.py`
+- `bot/services/v76_platform_parts/part_002_redact.py` → `bot/services/v76_platform_parts/services_v76_platform_parts_part_002_redact.py`
+- `bot/services/v76_platform_parts/part_003_security_scan.py` → `bot/services/v76_platform_parts/services_v76_platform_parts_part_003_security_scan.py`
+- `bot/services/v76_platform_parts/part_004_safe_url.py` → `bot/services/v76_platform_parts/services_v76_platform_parts_part_004_safe_url.py`
+- `bot/services/v76_platform_parts/part_005_safe_path.py` → `bot/services/v76_platform_parts/services_v76_platform_parts_part_005_safe_path.py`
+- `bot/services/v77_platform_parts/part_001__db.py` → `bot/services/v77_platform_parts/services_v77_platform_parts_part_001__db.py`
+- `bot/services/v77_platform_parts/part_002_redact.py` → `bot/services/v77_platform_parts/services_v77_platform_parts_part_002_redact.py`
+- `bot/services/v77_platform_parts/part_003_security_scan.py` → `bot/services/v77_platform_parts/services_v77_platform_parts_part_003_security_scan.py`
+- `bot/services/v77_platform_parts/part_004_safe_url.py` → `bot/services/v77_platform_parts/services_v77_platform_parts_part_004_safe_url.py`
+- `bot/services/v77_platform_parts/part_005_safe_path.py` → `bot/services/v77_platform_parts/services_v77_platform_parts_part_005_safe_path.py`
+- `bot/services/visual_search_parts/part_002__normalize.py` → `bot/services/visual_search_parts/services_visual_search_parts_part_002__normalize.py`
+- `bot/utils/app_tools.py` → `bot/utils/utils_app_tools.py`
+- `bot/utils/converters.py` → `bot/utils/utils_converters.py`
+- `bot/utils/date_tools.py` → `bot/utils/utils_date_tools.py`
+- `bot/utils/events.py` → `bot/utils/utils_events.py`
+- `bot/utils/events_parts/part_999_core_legacy.py` → `bot/utils/events_parts/utils_events_parts_part_999_core_legacy.py`
+- `bot/utils/fun_tools.py` → `bot/utils/utils_fun_tools.py`
+- `bot/utils/helpers_parts/part_001_to_persian_num.py` → `bot/utils/helpers_parts/utils_helpers_parts_part_001_to_persian_num.py`
+- `bot/utils/keyboard_factory_parts/part_999_core_legacy.py` → `bot/utils/keyboard_factory_parts/utils_keyboard_factory_parts_part_999_core_legacy.py`
+- `bot/utils/motivation_parts/part_999_core_legacy.py` → `bot/utils/motivation_parts/utils_motivation_parts_part_999_core_legacy.py`
+- `bot/utils/texts_parts/part_999_core_legacy.py` → `bot/utils/texts_parts/utils_texts_parts_part_999_core_legacy.py`
+
+## Large legacy files split
+- `bot/handlers/messages_parts/part_019__text_handler_inner.py` → 2 ordered chunks
+- `bot/handlers/messages_parts/handlers_messages_parts_part_999_core_legacy.py` → 4 ordered chunks
+- `bot/handlers/callbacks_parts/handlers_callbacks_parts_part_999_core_legacy.py` → 2 ordered chunks
+- `bot/services/ai_providers_parts/services_ai_providers_parts_part_999_core_legacy.py` → 3 ordered chunks
+- `bot/services/downloader_parts/services_downloader_parts_part_999_core_legacy.py` → 4 ordered chunks
+- `bot/services/ai_media_parts/services_ai_media_parts_part_999_core_legacy.py` → 3 ordered chunks
+- `bot/services/ai_service_parts/services_ai_service_parts_part_999_core_legacy.py` → 8 ordered chunks
+- `bot/services/ai_tools_parts/services_ai_tools_parts_part_999_core_legacy.py` → 4 ordered chunks
+- `bot/features/market/finance_parts/features_market_finance_parts_part_999_core_legacy.py` → 5 ordered chunks
+- `bot/features/market/economic_calendar_parts/features_market_economic_calendar_parts_part_999_core_legacy.py` → 5 ordered chunks
+- `bot/features/market/finance_crypto_parts/features_market_finance_crypto_parts_part_999_core_legacy.py` → 3 ordered chunks

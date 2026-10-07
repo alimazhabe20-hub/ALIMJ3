@@ -1,0 +1,36 @@
+services:
+  alimj:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: alimj:80.2.0
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "8080"
+      STARTUP_CHECK: "true"
+      RELEASE_VERSION: "80.2.0"
+      TELEGRAM_LOCAL_MODE: "false"
+      TELEGRAM_API_BASE_URL: "https://api.telegram.org/bot"
+      TELEGRAM_API_FILE_BASE_URL: "https://api.telegram.org/file/bot"
+      TELEGRAM_MAX_UPLOAD_BYTES: "0"
+    ports:
+      - "8080:8080"
+    volumes:
+      - alimj-data:/app/data
+      - alimj-logs:/app/logs
+    init: true
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  alimj-data:
+  alimj-logs:
