@@ -87,6 +87,26 @@ def _shopping_price_history(query: str = "", days: int = 30) -> str:
     return shopping_price_history(query=query, days=int(days or 30))
 
 
+async def _create_shopping_price_alert(user_id: int = 0, query: str = "", target: int = 0) -> str:
+    from bot.features.market.shopping import create_shopping_price_alert
+    return create_shopping_price_alert(int(user_id), query, int(target or 0))
+
+
+def _list_shopping_price_alerts(user_id: int = 0) -> str:
+    from bot.features.market.shopping import list_shopping_price_alerts
+    return list_shopping_price_alerts(int(user_id))
+
+
+def _cancel_shopping_price_alert(user_id: int = 0, alert_id: int = 0) -> str:
+    from bot.features.market.shopping import cancel_shopping_price_alert
+    return cancel_shopping_price_alert(int(user_id), int(alert_id or 0))
+
+
+def _shopping_engine_status() -> str:
+    from bot.features.market.shopping import shopping_engine_status
+    return shopping_engine_status()
+
+
 async def _get_crypto_price(symbol: str = "btc", user_id: int = 0) -> str:
     from bot.features.market.finance import get_crypto_price
     return await get_crypto_price(symbol)
@@ -456,6 +476,37 @@ def _register_builtin_tools() -> None:
         },
         handler=_search_shopping,
         keywords=[r"خرید|قیمت.*محصول|قیمت.*کفش|قیمت.*گوشی|بهترین.*گوشی|چه.*گوشی|گوشی.*بخر|بودجه.*گوشی|بودجه.*خرید|بودجه|تا.*میلیون|زیر.*میلیون|حداکثر.*میلیون|وسیله.*کاربردی|محصول.*کاربردی|چی.*بخر|چه.*بخر|چه.*محصول|چه.*وسیله|پیشنهاد.*خرید|دیجی.?کالا|ترب|فروشگاه|لینک خرید|ارزان.?ترین|قیمت روز محصول|اینستا|شاپ اینستا|فروشگاه اینستاگرام"],
+    )
+
+    register_tool(
+        name="create_shopping_price_alert",
+        description="ثبت هشدار برای کاهش قیمت یک محصول در بازار ایران. وقتی قیمت زنده محصول به هدف یا کمتر رسید، ربات به کاربر پیام می‌دهد.",
+        parameters={"type":"object","properties":{"query":{"type":"string"},"target":{"type":"integer"}},"required":["query","target"]},
+        handler=_create_shopping_price_alert,
+        keywords=[r"اگر.*زیر|وقتی.*ارزان|هشدار.*قیمت|خبرم.*قیمت|وقتی.*رسید"],
+    )
+
+    register_tool(
+        name="list_shopping_price_alerts",
+        description="فهرست هشدارهای خرید کاربر.",
+        parameters={"type":"object","properties":{}},
+        handler=_list_shopping_price_alerts,
+        keywords=[r"هشدارهای خرید|هشدارهای قیمت|لیست هشدار"],
+    )
+
+    register_tool(
+        name="cancel_shopping_price_alert",
+        description="غیرفعال کردن یک هشدار خرید با شناسه.",
+        parameters={"type":"object","properties":{"alert_id":{"type":"integer"}},"required":["alert_id"]},
+        handler=_cancel_shopping_price_alert,
+        keywords=[r"لغو هشدار|حذف هشدار|غیرفعال کردن هشدار"],
+    )
+
+    register_tool(
+        name="shopping_engine_status",
+        description="وضعیت عملیاتی موتور Shopping v3؛ فقط برای تشخیص فنی.",
+        parameters={"type":"object","properties":{}},
+        handler=_shopping_engine_status,
     )
 
     register_tool(
