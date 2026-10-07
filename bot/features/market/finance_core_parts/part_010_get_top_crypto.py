@@ -53,7 +53,8 @@ async def get_top_crypto(limit: int = 20) -> str:
     if not coins:
         return "❌ لیست کریپتو موقتاً در دسترس نیست.\nکمی بعد دوباره امتحان کنید."
 
-    lines = [f"💎 {limit} ارز برتر کریپتو", "(دلار + تومان)", ""]
+    from bot.utils.table_renderer import render_table
+    rows = []
     for i, coin in enumerate(coins[:limit], 1):
         sym = coin.get("symbol") or "?"
         price = float(coin.get("price") or 0)
@@ -61,14 +62,11 @@ async def get_top_crypto(limit: int = 20) -> str:
         emoji = "🟢" if chg >= 0 else "🔴"
         toman = price * (usd_rial / 10) if usd_rial else 0
         p_str = f"${price:,.2f}" if price >= 1 else f"${price:.6f}"
-        chg_str = f"{chg:+.1f}%" if chg else ""
-        line = f"{pn(i)}. {sym} {emoji} {chg_str}".strip()
-        line += f"\n   {p_str}"
-        if toman:
-            line += f"  ≈  {pn(f'{toman:,.0f}')} تومان"
-        lines.append(line)
+        chg_str = f"{chg:+.1f}%" if chg else "—"
+        toman_str = f"{pn(f'{toman:,.0f}')} تومان" if toman else "—"
+        rows.append((f"{i}. {sym}", p_str, f"{emoji} {chg_str}", toman_str))
 
-    result = "\n".join(lines)
+    result = render_table(("# / ارز", "دلار", "۲۴H", "تومان"), rows, title=f"💎 {limit} ارز برتر کریپتو")
     _cache[key] = result
     _cache_t[key] = now
     return result

@@ -19,9 +19,10 @@ async def get_crypto_price(symbol: str = "btc") -> str:
     toman = float(usd_price) * (usd_rial / 10) if usd_rial else 0
     chg = info.get("usd_24h_change")
     price_str = f"${float(usd_price):,.8f}" if float(usd_price) < 1 else (f"${float(usd_price):,.4f}" if float(usd_price) < 1000 else f"${float(usd_price):,.2f}")
-    lines = [f"💰 قیمت {symbol.upper()}", f"💵 دلار: {price_str}"]
+    from bot.utils.table_renderer import render_table
+    rows = [["💵 دلار", price_str]]
     if toman:
-        lines.append(f"🇮🇷 تومان: {pn(f'{toman:,.0f}')}")
+        rows.append(["🇮🇷 تومان", pn(f"{toman:,.0f}")])
     if chg is not None:
-        lines.append(f"📊 تغییر ۲۴ساعت: {'🟢' if float(chg) >= 0 else '🔴'} {float(chg):+.2f}%")
-    return "\n".join(lines)
+        rows.append(["📊 تغییر ۲۴ساعت", f"{'🟢' if float(chg) >= 0 else '🔴'} {float(chg):+.2f}%"])
+    return render_table(("شاخص", "مقدار"), rows, title=f"💰 قیمت {symbol.upper()}")

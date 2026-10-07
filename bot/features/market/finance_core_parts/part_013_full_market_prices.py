@@ -1,6 +1,8 @@
 # Auto-split part 13: full_market_prices
 async def full_market_prices() -> str:
-    """قیمت بازار بدون کریپتو — یک درخواست JSON (سریع)"""
+    """قیمت بازار بدون کریپتو — خروجی جدولی و بدون عدد حدسی."""
+    from bot.utils.table_renderer import render_table
+
     bulk = await _fetch_tgju_bulk()
     data = {}
     for key, slug in TGJU_SLUGS.items():
@@ -16,31 +18,20 @@ async def full_market_prices() -> str:
                 if p and p > 1000:
                     data[key] = p
 
-    lines = ["💰 **قیمت بازار** (بدون کریپتو)\n"]
-
-    def fmt(label: str, key: str, unit: str = "ریال") -> str:
-        v = data.get(key)
-        if v is None:
-            return f"{label}: —"
-        toman = v / 10
-        return f"{label}: {pn(f'{v:,}')} {unit}  ({pn(f'{toman:,.0f}')} تومان)"
-
-    lines.append("—— ارز ——")
+    rows = []
     for label, key in [
         ("💵 دلار", "dollar"), ("💶 یورو", "euro"), ("💷 پوند", "pound"),
         ("🇦🇪 درهم", "dirham"), ("🇹🇷 لیر", "lira"),
         ("🇨🇳 یوان", "yuan"), ("🇷🇺 روبل", "ruble"),
         ("🇦🇫 افغانی", "afghani"), ("🇮🇶 دینار عراق", "dinar_iq"),
-    ]:
-        lines.append(fmt(label, key))
-
-    lines.append("\n—— فلزات و سکه ——")
-    for label, key in [
         ("🥇 طلای ۱۸", "gold18"), ("🥈 نقره ۹۹۹", "silver"), ("🟠 مس", "copper"),
         ("🪙 سکه امامی", "coin_emami"), ("🪙 سکه بهار", "coin_bahar"),
         ("🪙 نیم‌سکه", "coin_half"), ("🪙 ربع‌سکه", "coin_quarter"),
     ]:
-        lines.append(fmt(label, key))
+        v = data.get(key)
+        rows.append((label, pn(f"{v / 10:,.0f}") + " تومان" if v is not None else "—"))
 
-    lines.append("\n💡 کریپتو: از دکمه «۲۰ ارز برتر» یا تبدیل / نمودار / تحلیل استفاده کنید.")
-    return "\n".join(lines)
+    return (
+        render_table(("بازار", "قیمت"), rows, title="💰 قیمت بازار")
+        + "\n\n💡 کریپتو: از «۲۰ ارز برتر» یا تبدیل / نمودار / تحلیل استفاده کنید."
+    )
