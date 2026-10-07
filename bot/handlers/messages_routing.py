@@ -29,9 +29,7 @@ def _is_back_more(text):
     return "بازگشت به بیشتر" in text
 
 async def text_handler(*args, **kwargs):
-    # Route all normal text/ReplyKeyboard messages through the active dispatcher.
-    # _legacy_text_handler no longer exists after the routing split.
-    return await _text_handler_inner(*args, **kwargs)
+    return await _legacy_text_handler(*args, **kwargs)
 
 async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -49,7 +47,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if await handle_pre_ai_waiting(update, context, text, user_id, city, first_name):
         return
-    if await handle_ai_text(update, context, text, user_id, city, first_name, _is_back, _is_back_more):
+    if await handle_ai_text(update, context, text, user_id, city, first_name):
         return
     if await handle_waiting_dispatch(update, context, text, user_id, city, first_name, _is_back, _is_back_more):
         return
