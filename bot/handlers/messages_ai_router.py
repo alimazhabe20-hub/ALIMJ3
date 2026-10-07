@@ -129,8 +129,6 @@ async def handle_ai_text(update, context, text, user_id, city=None, first_name=N
                     "❌ فعلاً هیچ‌کدام از سرویس‌های AI پاسخ ندادند.\n\n" + str(exc)[:3000]
                 )
             return
-    if waiting:
-        if _is_back(text) or _is_back_more(text):
-            context.user_data.pop("waiting_for", None)
-            await update.message.reply_text("➕ منوی بیشتر:", reply_markup=get_more_keyboard())
+    # Waiting workflows are dispatched by messages_waiting_dispatch after AI routing.
+    # Do not reference an undefined legacy `waiting` variable here.
     return False

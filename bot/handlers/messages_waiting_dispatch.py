@@ -10,9 +10,7 @@ def _is_back(text):
 def _is_back_more(text):
     return "بازگشت به بیشتر" in text
 
-async def handle_waiting_dispatch(update, context, text, user_id, city=None, first_name=None):
-    # Resolve the current input workflow before routing the message.
-    # Without this assignment every normal text/button press raised NameError.
+async def handle_waiting_dispatch(update, context, text, user_id, city=None, first_name=None, *_args, **_kwargs):
     waiting = context.user_data.get("waiting_for")
     if waiting:
         if _is_back(text) or _is_back_more(text):
