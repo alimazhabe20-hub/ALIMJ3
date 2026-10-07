@@ -545,9 +545,30 @@ def _shopping_prompt_hint(prompt: str) -> str:
         "در صورت «بهترین»، کیفیت تطابق و اعتبار فروشگاه را هم لحاظ کن. "
         "اگر عکس محصول داری، از اطلاعات تصویری برند/مدل/رنگ/ظرفیت را استخراج کن و همان مشخصات را برای جستجو استفاده کن. "
         "اگر مدل دقیق نامشخص است، عدم قطعیت را شفاف بگو. قیمت، موجودی و لینک را حدس نزن. "
-        "به طور پیش‌فرض فقط بازار و منابع ایران را بررسی کن. جستجوی سایت‌ها و منابع خارجی فقط وقتی مجاز است که کاربر صریحاً بگوید سایت‌های خارجی/بین‌المللی/جهانی را هم بررسی کن، بازار جهانی را می‌خواهد، یا نام یک سایت خارجی مثل Amazon/eBay/AliExpress را بدهد. "
-        "وقتی جستجوی خارجی فعال شد، موتور جستجوی عمومی می‌تواند منابع جدید خارج از فهرست ثابت را نیز پیدا کند و محدود به چند دامنه از پیش تعریف‌شده نباش."
+        "به طور پیش‌فرض فقط بازار و منابع ایران را بررسی کن. جستجوی سایت‌ها و منابع خارجی فقط وقتی مجاز است که کاربر صریحاً بگوید سایت‌های خارجی/بین‌المللی/جهانی را هم بررسی کن، بازار جهانی را می‌خواهد، یا نام یک سایت خارجی مثل Amazon/eBay/AliExpress را بدهد."
     )
+
+
+async def _prefetch_live_shopping(user_id: int, prompt: str) -> str:
+    """برای درخواست خرید، داده زنده را قبل از AI تهیه می‌کند؛ مدل نباید بدون ابزار قیمت بسازد."""
+    try:
+        hint = _shopping_prompt_hint(prompt)
+        if not hint:
+            return ""
+        from bot.services.tool_runtime import execute_tool
+        result = await execute_tool(
+            "search_shopping",
+            {"query": prompt, "source": "all", "max_results": 8},
+            user_id=user_id,
+            source="ai_prefetch",
+        )
+        text = str(result or "").strip()
+        if not text:
+            return "[SHOPPING_LIVE_RESULT]\nنتیجه زنده‌ای دریافت نشد."
+        return "[SHOPPING_LIVE_RESULT]\n" + text[:4200]
+    except Exception as exc:
+        logger.warning("live shopping prefetch failed: %s", str(exc)[:300])
+        return "[SHOPPING_LIVE_RESULT]\nجستجوی زنده بازار در این لحظه نتیجه معتبر برنگرداند؛ قیمت یا محصول را حدس نزن."
 
 
 async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
@@ -581,6 +602,9 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
     shopping_hint = _shopping_prompt_hint(prompt)
     if shopping_hint:
         prompt = prompt + shopping_hint
+        live_shopping = await _prefetch_live_shopping(user_id, original_prompt)
+        if live_shopping:
+            prompt += "\n\n" + live_shopping + "\nفقط از داده بالا برای قیمت/موجودی/لینک استفاده کن؛ اگر نتیجه معتبر نیست، صریحاً بگو نتیجه زنده معتبر پیدا نشد."
     try:
         from bot.services.ai_freshness import build_instruction
         freshness_hint = build_instruction(original_prompt)
@@ -842,6 +866,13 @@ async def ask_ai_stream(user_id: int, prompt: str):
     options = available_model_options()
     if not options:
         raise RuntimeError("هیچ سرویس AI تنظیم نشده")
+
+    shopping_hint = _shopping_prompt_hint(original)
+    if shopping_hint:
+        original = original + shopping_hint
+        live_shopping = await _prefetch_live_shopping(user_id, prompt)
+        if live_shopping:
+            original += "\n\n" + live_shopping + "\nفقط از داده بالا برای قیمت/موجودی/لینک استفاده کن؛ اگر نتیجه معتبر نیست، صریحاً بگو نتیجه زنده معتبر پیدا نشد."
 
     try:
         from bot.services.ai_providers import _looks_simple_prompt
