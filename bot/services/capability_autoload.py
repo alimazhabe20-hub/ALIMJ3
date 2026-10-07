@@ -45,6 +45,7 @@ from typing import Any, Callable, Optional
 logger = logging.getLogger("rooze_ziba")
 
 _ENSURED = False
+_ENSURING = False
 _PENDING_DECORATED: list[dict[str, Any]] = []
 
 # Packages scanned for __ai_tools__ / @ai_tool modules.
@@ -167,9 +168,24 @@ def _walk_package(pkg_name: str) -> int:
 
 
 def ensure_all_capabilities_registered() -> dict:
-    """Idempotent: register decorated tools, bridges, and discovered modules."""
-    global _ENSURED
-    result = {"decorated": 0, "bridges": 0, "discovered": 0, "total": 0}
+    """Idempotently register all AI capabilities without recursive re-entry."""
+    global _ENSURED, _ENSURING
+    result = {"decorated": 0, "bridges": 0, "discovered": 0, "total": 0, "added": []}
+
+    # tool_runtime helpers call back into this function. During registration
+    # that callback must be a no-op, otherwise bridge registration recurses
+    # until Python raises ``maximum recursion depth exceeded``.
+    if _ENSURED:
+        try:
+            from bot.services.tool_runtime import _orig_get_registered_tool_names
+            names = set(_orig_get_registered_tool_names())
+            result["total"] = len(names)
+        except Exception:
+            pass
+        return result
+    if _ENSURING:
+        return result
+    _ENSURING = True
     try:
         from bot.services.tool_runtime import get_registered_tool_names
 
@@ -217,4 +233,5 @@ def ensure_all_capabilities_registered() -> dict:
         result["bridges"],
         result["discovered"],
     )
+    _ENSURING = False
     return result

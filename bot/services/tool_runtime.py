@@ -63,7 +63,11 @@ load_modular_part(__file__, 'tool_runtime_parts/part_010_clear_tool_cache.py')
 # ── Auto-connect: ensure full capability set is visible to the model ─────────
 def _ensure_caps() -> None:
     try:
-        from bot.services.capability_autoload import ensure_all_capabilities_registered
+        from bot.services.capability_autoload import _ENSURING, ensure_all_capabilities_registered
+        # Registration itself calls registry helpers. Do not re-enter the
+        # autoloader while it is already registering capabilities.
+        if _ENSURING:
+            return
         ensure_all_capabilities_registered()
     except Exception as exc:
         logger.debug("tool_runtime ensure caps: %s", exc)
