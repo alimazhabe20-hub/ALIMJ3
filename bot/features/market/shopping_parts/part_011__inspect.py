@@ -17,7 +17,7 @@ async def _inspect(url: str, title: str, snippet: str) -> ProductResult:
 
     try:
         async with httpx.AsyncClient(
-            timeout=6.5, follow_redirects=True, headers={"User-Agent": UA}
+            timeout=15.0, follow_redirects=True, headers={"User-Agent": UA}
         ) as client:
             r = await client.get(url)
             if r.status_code >= 400:

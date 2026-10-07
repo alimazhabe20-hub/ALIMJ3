@@ -80,7 +80,7 @@ async def _search(query: str, domain: str = "", limit: int = 8, extra: str = "")
             return name, []
 
     try:
-        async with httpx.AsyncClient(timeout=6.5, follow_redirects=True, headers=headers) as client:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers=headers) as client:
             engines = [
                 ("ddg", "post", SEARCH_URL, lambda soup: [
                     {"url": a.get("href") or "", "title": _clean_title(a.get_text(" ", strip=True)),
