@@ -30,7 +30,6 @@ def _shopping_is_phone(text: str) -> bool:
 
 
 def _shopping_wants_foreign(text: str) -> bool:
-    """فقط با درخواست صریح کاربر جستجوی منابع خارجی را فعال می‌کند."""
     import re
     q = str(text or "").strip().lower()
     patterns = (
@@ -43,12 +42,8 @@ def _shopping_wants_foreign(text: str) -> bool:
     )
     return any(re.search(pat, q, re.I) for pat in patterns)
 
-
 def _shopping_iran_only_query(query: str) -> str:
-    """جستجوی عمومی پیش‌فرض را به بازار ایران متمایل می‌کند؛ منابع مستقیم همچنان جداگانه جستجو می‌شوند."""
-    q = str(query or "").strip()
-    # این قید برای موتور عمومی است، نه برای Torob/Digikala/... .
-    return f"{q} ایران تومان خرید فروشگاه"
+    return f"{str(query or '').strip()} ایران تومان خرید فروشگاه"
 
 def _shopping_query_variants(query: str, budget: int = 0) -> list[str]:
     q = str(query or "").strip()
@@ -168,7 +163,6 @@ async def search_shopping(
         batches = await asyncio.gather(*tasks, return_exceptions=True)
     # انتخاب منابع
     elif source in ("all", "همه", "تمام", "everywhere", "web"):
-        # پیش‌فرض: بازار ایران. منابع خارجی فقط با درخواست صریح کاربر.
         preferred = ["torob", "digikala", "snappshop", "technolife", "mobile", "emalls", "basalam", "digistyle", "modiseh", "instagram", "general"]
         selected = [s for s in preferred if s in SOURCES]
     else:
@@ -191,7 +185,7 @@ async def search_shopping(
             limit = max(5, max_results // max(1, len(selected)) + 3)
 
             # برای هر منبع فقط چند query قوی‌تر را اجرا می‌کنیم تا روی Render فشار ایجاد نشود.
-            local_variants = variants[:5] if key not in ("general", "instagram") else variants[:8]
+            local_variants = variants[:2] if key not in ("general", "instagram") else variants[:3]
             for variant in local_variants:
                 if key == "instagram":
                     tasks.append(
@@ -199,10 +193,7 @@ async def search_shopping(
                                 domain="instagram.com", limit=limit + 1)
                     )
                 elif key == "general":
-                    # موتور عمومی تنها در حالت «سایت‌های خارجی هم» آزادانه کل وب را می‌گردد.
-                    # در حالت عادی، جستجوی عمومی به بازار ایران متمایل می‌شود.
-                    general_query = variant if foreign_requested else _shopping_iran_only_query(variant)
-                    tasks.append(_search(general_query, domain="", limit=limit + 2))
+                    tasks.append(_search(variant if foreign_requested else _shopping_iran_only_query(variant), domain="", limit=limit + 2))
                 else:
                     tasks.append(_search(variant, domain=domain, limit=limit))
     if not target_domain:
@@ -235,7 +226,7 @@ async def search_shopping(
             links[url] = item
 
     # بازرسی صفحات (حداکثر ۲۶ تا برای سرعت)
-    to_inspect = list(links.values())[:36]
+    to_inspect = list(links.values())[:12]
     inspect_tasks = [
         _inspect(x["url"], x["title"], x.get("snippet", "")) for x in to_inspect
     ]
