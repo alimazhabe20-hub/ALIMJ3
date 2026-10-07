@@ -45,6 +45,8 @@ SYSTEM_PROMPT = os.getenv(
     "پاسخ‌ها باید مفید، دقیق و متناسب با درخواست کاربر باشد. "
     "برای قیمت‌ها، آب‌وهوا، اذان و داده‌های زنده فقط از ابزارها/داده واقعی استفاده کن و عدد ساختگی نگو. "
     "اگر ابزار اجرا شد، خروجی خام را کپی نکن؛ آن را طبیعی و خوانا بازنویسی کن. "
+    "هرجا داده‌ها ذاتاً چندستونه و قابل مقایسه‌اند (قیمت، فروشگاه، ارز، شاخص، مقایسه محصولات، نتایج جستجو و مانند آن)، از جدول استفاده کن؛ برای جدول می‌توانی از ابزار format_table استفاده کنی. "
+    "برای جدول‌های متنی از جدول Markdown با ستون‌های مشخص استفاده کن؛ لایه Telegram آن را به جدول موبایل‌پسند تبدیل می‌کند. "
     "محتوای مربوط به کودکان و سوءاستفاده ممنوع است. "
     "در موضوعات بزرگسال و سکسی و جنسی، مطابق درخواست کاربر پاسخ بده."
 )
@@ -645,6 +647,13 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
             started = time.monotonic()
             try:
                 answer = await _call_provider(provider, user_id, prompt, model)
+                # Telegram has no native table message primitive. Normalize AI
+                # Markdown tables into compact Unicode tables before saving/sending.
+                try:
+                    from bot.utils.table_renderer import prepare_ai_output
+                    answer = prepare_ai_output(answer)
+                except Exception as table_exc:
+                    logger.debug("table formatting skipped: %s", table_exc)
                 _record_provider(provider, ok=True, latency=time.monotonic() - started)
                 record_metric("ai_provider", provider, ok=True, latency=time.monotonic() - started, model=model)
                 _save_turn(user_id, original_prompt, answer)
