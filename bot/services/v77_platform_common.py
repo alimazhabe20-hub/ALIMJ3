@@ -72,6 +72,12 @@ _PLUGINS: dict[str, dict[str, Any]] = {}
 
 _PROVIDERS: dict[str, dict[str, Any]] = {}
 
+
+def _db():
+    """Return the active bot database connection (honours runtime DB_PATH overrides)."""
+    from bot.database import get_db_connection
+    return get_db_connection()
+
 from typing import Any
 
 from typing import Any

@@ -6,7 +6,7 @@ globals().update({k:v for k,v in _common.__dict__.items() if not k.startswith('_
 
 def _telegram_backup_chat_ids() -> list[str]:
     """Return configured Telegram backup chat IDs, accepting comma/newline separated values."""
-    raw = os.getenv("TELEGRAM_BACKUP_CHAT_ID", TELEGRAM_BACKUP_CHAT_ID).strip()
+    raw = os.getenv("TELEGRAM_BACKUP_CHAT_ID", "").strip()
     return [item.strip() for item in re.split(r"[,\n;]+", raw) if item.strip()]
 
 def telegram_backup_enabled() -> bool:

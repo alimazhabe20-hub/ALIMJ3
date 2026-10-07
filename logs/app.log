@@ -1,0 +1,339 @@
+2026-10-07 20:51:09 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-10-07 20:51:09 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-10-07 20:51:09 | ERROR    | rooze_ziba | Database platform initialization failed: bot.services.v77_platform_runtime.init_v77_tables: name '_db' is not defined
+Traceback (most recent call last):
+  File "/tmp/botfix/ALIMJ3-main/bot/database.py", line 249, in init_db
+    initializer()
+    ~~~~~~~~~~~^^
+  File "/tmp/botfix/ALIMJ3-main/bot/services/v77_platform_runtime.py", line 34, in init_v77_tables
+    c=_db();c.executescript("""
+      ^^^
+NameError: name '_db' is not defined
+2026-10-07 20:51:09 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-10-07 20:51:09 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-10-07 20:51:09 | ERROR    | rooze_ziba | Database platform initialization failed: bot.services.v77_platform_runtime.init_v77_tables: name '_db' is not defined
+Traceback (most recent call last):
+  File "/tmp/botfix/ALIMJ3-main/bot/database.py", line 249, in init_db
+    initializer()
+    ~~~~~~~~~~~^^
+  File "/tmp/botfix/ALIMJ3-main/bot/services/v77_platform_runtime.py", line 34, in init_v77_tables
+    c=_db();c.executescript("""
+      ^^^
+NameError: name '_db' is not defined
+2026-10-07 20:51:09 | ERROR    | rooze_ziba | telegram_download_pinned_db -1001234567890: HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot123:TEST/getChat?chat_id=-1001234567890 (Caused by NameResolutionError("HTTPSConnection(host='api.telegram.org', port=443): Failed to resolve 'api.telegram.org' ([Errno -3] Temporary failure in name resolution)"))
+Traceback (most recent call last):
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connection.py", line 204, in _new_conn
+    sock = connection.create_connection(
+        (self._dns_host, self.port),
+    ...<2 lines>...
+        socket_options=self.socket_options,
+    )
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/util/connection.py", line 60, in create_connection
+    for res in socket.getaddrinfo(host, port, family, socket.SOCK_STREAM):
+               ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/socket.py", line 977, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+               ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+socket.gaierror: [Errno -3] Temporary failure in name resolution
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 788, in urlopen
+    response = self._make_request(
+        conn,
+    ...<10 lines>...
+        **response_kw,
+    )
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 488, in _make_request
+    raise new_e
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 464, in _make_request
+    self._validate_conn(conn)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 1106, in _validate_conn
+    conn.connect()
+    ~~~~~~~~~~~~^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connection.py", line 759, in connect
+    self.sock = sock = self._new_conn()
+                       ~~~~~~~~~~~~~~^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connection.py", line 211, in _new_conn
+    raise NameResolutionError(self.host, self, e) from e
+urllib3.exceptions.NameResolutionError: HTTPSConnection(host='api.telegram.org', port=443): Failed to resolve 'api.telegram.org' ([Errno -3] Temporary failure in name resolution)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/adapters.py", line 644, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 842, in urlopen
+    retries = retries.increment(
+        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
+    )
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/util/retry.py", line 543, in increment
+    raise MaxRetryError(_pool, url, reason) from reason  # type: ignore[arg-type]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+urllib3.exceptions.MaxRetryError: HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot123:TEST/getChat?chat_id=-1001234567890 (Caused by NameResolutionError("HTTPSConnection(host='api.telegram.org', port=443): Failed to resolve 'api.telegram.org' ([Errno -3] Temporary failure in name resolution)"))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/tmp/botfix/ALIMJ3-main/bot/db_persist_telegram.py", line 129, in telegram_download_pinned_db
+    r = _telegram_get("getChat", params={"chat_id": chat_id})
+  File "/tmp/botfix/ALIMJ3-main/bot/db_persist_telegram.py", line 21, in _telegram_get
+    return requests.get(url, timeout=max(REMOTE_BACKUP_TIMEOUT, 30), **kwargs)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/api.py", line 73, in get
+    return request("get", url, params=params, **kwargs)
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/api.py", line 59, in request
+    return session.request(method=method, url=url, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/sessions.py", line 589, in request
+    resp = self.send(prep, **send_kwargs)
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/adapters.py", line 677, in send
+    raise ConnectionError(e, request=request)
+requests.exceptions.ConnectionError: HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot123:TEST/getChat?chat_id=-1001234567890 (Caused by NameResolutionError("HTTPSConnection(host='api.telegram.org', port=443): Failed to resolve 'api.telegram.org' ([Errno -3] Temporary failure in name resolution)"))
+2026-10-07 20:51:14 | ERROR    | rooze_ziba | telegram_download_pinned_db -1001234567890: HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot123:TEST/getChat?chat_id=-1001234567890 (Caused by NameResolutionError("HTTPSConnection(host='api.telegram.org', port=443): Failed to resolve 'api.telegram.org' ([Errno -3] Temporary failure in name resolution)"))
+Traceback (most recent call last):
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connection.py", line 204, in _new_conn
+    sock = connection.create_connection(
+        (self._dns_host, self.port),
+    ...<2 lines>...
+        socket_options=self.socket_options,
+    )
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/util/connection.py", line 60, in create_connection
+    for res in socket.getaddrinfo(host, port, family, socket.SOCK_STREAM):
+               ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/socket.py", line 977, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+               ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+socket.gaierror: [Errno -3] Temporary failure in name resolution
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 788, in urlopen
+    response = self._make_request(
+        conn,
+    ...<10 lines>...
+        **response_kw,
+    )
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 488, in _make_request
+    raise new_e
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 464, in _make_request
+    self._validate_conn(conn)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 1106, in _validate_conn
+    conn.connect()
+    ~~~~~~~~~~~~^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connection.py", line 759, in connect
+    self.sock = sock = self._new_conn()
+                       ~~~~~~~~~~~~~~^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connection.py", line 211, in _new_conn
+    raise NameResolutionError(self.host, self, e) from e
+urllib3.exceptions.NameResolutionError: HTTPSConnection(host='api.telegram.org', port=443): Failed to resolve 'api.telegram.org' ([Errno -3] Temporary failure in name resolution)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/adapters.py", line 644, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 842, in urlopen
+    retries = retries.increment(
+        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
+    )
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/util/retry.py", line 543, in increment
+    raise MaxRetryError(_pool, url, reason) from reason  # type: ignore[arg-type]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+urllib3.exceptions.MaxRetryError: HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot123:TEST/getChat?chat_id=-1001234567890 (Caused by NameResolutionError("HTTPSConnection(host='api.telegram.org', port=443): Failed to resolve 'api.telegram.org' ([Errno -3] Temporary failure in name resolution)"))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/tmp/botfix/ALIMJ3-main/bot/db_persist_telegram.py", line 129, in telegram_download_pinned_db
+    r = _telegram_get("getChat", params={"chat_id": chat_id})
+  File "/tmp/botfix/ALIMJ3-main/bot/db_persist_telegram.py", line 21, in _telegram_get
+    return requests.get(url, timeout=max(REMOTE_BACKUP_TIMEOUT, 30), **kwargs)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/api.py", line 73, in get
+    return request("get", url, params=params, **kwargs)
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/api.py", line 59, in request
+    return session.request(method=method, url=url, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/sessions.py", line 589, in request
+    resp = self.send(prep, **send_kwargs)
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/adapters.py", line 677, in send
+    raise ConnectionError(e, request=request)
+requests.exceptions.ConnectionError: HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot123:TEST/getChat?chat_id=-1001234567890 (Caused by NameResolutionError("HTTPSConnection(host='api.telegram.org', port=443): Failed to resolve 'api.telegram.org' ([Errno -3] Temporary failure in name resolution)"))
+2026-10-07 20:51:14 | ERROR    | rooze_ziba | telegram_download_pinned_db -1001234567890: HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot123:TEST/getChat?chat_id=-1001234567890 (Caused by NameResolutionError("HTTPSConnection(host='api.telegram.org', port=443): Failed to resolve 'api.telegram.org' ([Errno -3] Temporary failure in name resolution)"))
+Traceback (most recent call last):
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connection.py", line 204, in _new_conn
+    sock = connection.create_connection(
+        (self._dns_host, self.port),
+    ...<2 lines>...
+        socket_options=self.socket_options,
+    )
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/util/connection.py", line 60, in create_connection
+    for res in socket.getaddrinfo(host, port, family, socket.SOCK_STREAM):
+               ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/socket.py", line 977, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+               ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+socket.gaierror: [Errno -3] Temporary failure in name resolution
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 788, in urlopen
+    response = self._make_request(
+        conn,
+    ...<10 lines>...
+        **response_kw,
+    )
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 488, in _make_request
+    raise new_e
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 464, in _make_request
+    self._validate_conn(conn)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 1106, in _validate_conn
+    conn.connect()
+    ~~~~~~~~~~~~^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connection.py", line 759, in connect
+    self.sock = sock = self._new_conn()
+                       ~~~~~~~~~~~~~~^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connection.py", line 211, in _new_conn
+    raise NameResolutionError(self.host, self, e) from e
+urllib3.exceptions.NameResolutionError: HTTPSConnection(host='api.telegram.org', port=443): Failed to resolve 'api.telegram.org' ([Errno -3] Temporary failure in name resolution)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/adapters.py", line 644, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/connectionpool.py", line 842, in urlopen
+    retries = retries.increment(
+        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
+    )
+  File "/opt/pyvenv/lib/python3.13/site-packages/urllib3/util/retry.py", line 543, in increment
+    raise MaxRetryError(_pool, url, reason) from reason  # type: ignore[arg-type]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+urllib3.exceptions.MaxRetryError: HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot123:TEST/getChat?chat_id=-1001234567890 (Caused by NameResolutionError("HTTPSConnection(host='api.telegram.org', port=443): Failed to resolve 'api.telegram.org' ([Errno -3] Temporary failure in name resolution)"))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/tmp/botfix/ALIMJ3-main/bot/db_persist_telegram.py", line 129, in telegram_download_pinned_db
+    r = _telegram_get("getChat", params={"chat_id": chat_id})
+  File "/tmp/botfix/ALIMJ3-main/bot/db_persist_telegram.py", line 21, in _telegram_get
+    return requests.get(url, timeout=max(REMOTE_BACKUP_TIMEOUT, 30), **kwargs)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/api.py", line 73, in get
+    return request("get", url, params=params, **kwargs)
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/api.py", line 59, in request
+    return session.request(method=method, url=url, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/sessions.py", line 589, in request
+    resp = self.send(prep, **send_kwargs)
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+  File "/opt/pyvenv/lib/python3.13/site-packages/requests/adapters.py", line 677, in send
+    raise ConnectionError(e, request=request)
+requests.exceptions.ConnectionError: HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot123:TEST/getChat?chat_id=-1001234567890 (Caused by NameResolutionError("HTTPSConnection(host='api.telegram.org', port=443): Failed to resolve 'api.telegram.org' ([Errno -3] Temporary failure in name resolution)"))
+2026-10-07 20:51:39 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-10-07 20:51:39 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-10-07 20:51:39 | INFO     | rooze_ziba | Database initialized: /tmp/tmppgfdzagc/bot.db (schema V1)
+2026-10-07 20:51:39 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-10-07 20:51:39 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-10-07 20:51:39 | INFO     | rooze_ziba | Database initialized: /tmp/tmphdsuhi36/bot.db (schema V1)
+2026-10-07 20:51:39 | INFO     | rooze_ziba | Database initialized: /tmp/tmphdsuhi36/bot.db (schema V1)
+2026-10-07 20:51:39 | ERROR    | rooze_ziba | auto_restore_if_empty Telegram restore failed
+Traceback (most recent call last):
+  File "/tmp/botfix/ALIMJ3-main/bot/db_persist_backup.py", line 119, in auto_restore_if_empty
+    ok, msg = telegram_download_pinned_db()
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/botfix/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <lambda>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+                                                                   ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/botfix/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <genexpr>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+RuntimeError: network down
+2026-10-07 20:51:39 | INFO     | rooze_ziba | DB OK — local=7
+2026-10-07 20:51:43 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-10-07 20:51:43 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-10-07 20:51:43 | INFO     | rooze_ziba | Database initialized: /tmp/tmplki3kwjj/bot.db (schema V1)
+2026-10-07 20:51:43 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-10-07 20:51:43 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-10-07 20:51:43 | INFO     | rooze_ziba | Database initialized: /tmp/tmpfw3w443t/bot.db (schema V1)
+2026-10-07 20:51:43 | INFO     | rooze_ziba | Database initialized: /tmp/tmpfw3w443t/bot.db (schema V1)
+2026-10-07 20:51:44 | ERROR    | rooze_ziba | auto_restore_if_empty Telegram restore failed
+Traceback (most recent call last):
+  File "/tmp/botfix/ALIMJ3-main/bot/db_persist_backup.py", line 119, in auto_restore_if_empty
+    ok, msg = telegram_download_pinned_db()
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/botfix/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <lambda>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+                                                                   ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/botfix/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <genexpr>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+RuntimeError: network down
+2026-10-07 20:51:44 | INFO     | rooze_ziba | DB OK — local=7
+2026-10-07 20:51:59 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-10-07 20:51:59 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-10-07 20:51:59 | INFO     | rooze_ziba | Database initialized: /tmp/tmpkrnresyu/bot.db (schema V1)
+2026-10-07 20:51:59 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-10-07 20:51:59 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-10-07 20:51:59 | INFO     | rooze_ziba | Database initialized: /tmp/tmpft7i5s6c/bot.db (schema V1)
+2026-10-07 20:51:59 | INFO     | rooze_ziba | Database initialized: /tmp/tmpft7i5s6c/bot.db (schema V1)
+2026-10-07 20:51:59 | ERROR    | rooze_ziba | auto_restore_if_empty Telegram restore failed
+Traceback (most recent call last):
+  File "/tmp/botfix/ALIMJ3-main/bot/db_persist_backup.py", line 119, in auto_restore_if_empty
+    ok, msg = telegram_download_pinned_db()
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/botfix/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <lambda>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+                                                                   ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/botfix/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <genexpr>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+RuntimeError: network down
+2026-10-07 20:51:59 | INFO     | rooze_ziba | DB OK — local=7
+2026-10-07 20:52:34 | INFO     | rooze_ziba | Skip backup — DB has 0 users
+2026-10-07 20:52:34 | ERROR    | rooze_ziba | auto_restore_if_empty Telegram restore failed
+Traceback (most recent call last):
+  File "/tmp/botfix/ALIMJ3-main/bot/db_persist_backup.py", line 119, in auto_restore_if_empty
+    ok, msg = telegram_download_pinned_db()
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/botfix/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <lambda>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+                                                                   ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/botfix/ALIMJ3-main/tests/test_telegram_backup.py", line 46, in <genexpr>
+    monkeypatch.setattr(dp, "telegram_download_pinned_db", lambda: (_ for _ in ()).throw(RuntimeError("network down")))
+RuntimeError: network down
+2026-10-07 20:52:34 | INFO     | rooze_ziba | DB OK — local=7
+2026-10-07 20:52:34 | INFO     | rooze_ziba | Pre-migration DB backup created: test.pre_migration_v1.db
+2026-10-07 20:52:34 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-10-07 20:52:34 | INFO     | rooze_ziba | Database initialized: /tmp/tmp8tt20_u0/test.db (schema V1)
+2026-10-07 20:52:37 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-10-07 20:52:37 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-10-07 20:52:37 | INFO     | rooze_ziba | Database initialized: /tmp/tmpepfvmy0o/bot.db (schema V1)
+2026-10-07 20:52:37 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-10-07 20:52:37 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-10-07 20:52:37 | INFO     | rooze_ziba | Database initialized: /tmp/tmpxudf2z7m/bot.db (schema V1)
+2026-10-07 20:52:37 | INFO     | rooze_ziba | Database initialized: /tmp/tmpxudf2z7m/bot.db (schema V1)
+2026-10-07 20:52:49 | INFO     | rooze_ziba | Pre-migration DB backup created: bot.pre_migration_v1.db
+2026-10-07 20:52:49 | INFO     | rooze_ziba | Database schema baseline registered at V1
+2026-10-07 20:52:49 | INFO     | rooze_ziba | Database initialized: /tmp/alimbot-smoke/bot.db (schema V1)

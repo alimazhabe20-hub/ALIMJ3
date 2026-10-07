@@ -31,3 +31,19 @@ for _m in _split_modules:
     for _k, _v in _m.__dict__.items():
         if not _k.startswith("__") and _k not in {"_m","_o","_k","_v"}:
             globals()[_k] = _v
+
+
+# Compatibility wrappers: keep the public facade's monkey-patchable dependency
+# surface identical to the pre-refactor module.
+def auto_restore_if_empty(*args, **kwargs):
+    for _name in (
+        "telegram_backup_enabled", "telegram_download_pinned_db",
+        "github_enabled", "github_download_db", "_user_count", "DB_PATH",
+    ):
+        if _name in globals():
+            setattr(_db_persist_backup, _name, globals()[_name])
+    return _db_persist_backup.auto_restore_if_empty(*args, **kwargs)
+
+
+def get_last_restore_status(*args, **kwargs):
+    return _db_persist_backup.get_last_restore_status(*args, **kwargs)

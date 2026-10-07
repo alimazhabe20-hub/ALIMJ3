@@ -32,6 +32,8 @@ _split_modules.append(_v77_platform_registration)
 for _k, _v in _v77_platform_registration.__dict__.items():
     if not _k.startswith("__"):
         globals()[_k] = _v
+        for _m in _split_modules:
+            _m.__dict__.setdefault(_k, _v)
 
 # Export every historical symbol, including private helpers used by sibling modules.
 for _m in _split_modules:
