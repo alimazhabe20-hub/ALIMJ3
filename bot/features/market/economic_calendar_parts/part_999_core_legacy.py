@@ -510,17 +510,6 @@ def _merge_ff_html_values(events: list[dict[str, Any]], rows: list[dict[str, Any
                 e[field] = value
 
 
-def _refresh_ff_html_values(events: list[dict[str, Any]]) -> None:
-    all_rows: list[dict[str, Any]] = []
-    for url in FF_HTML_URLS:
-        try:
-            all_rows.extend(_parse_ff_html(url))
-        except Exception as exc:
-            logger.debug("Forex Factory HTML enrichment failed for %s: %s", url, exc)
-    if all_rows:
-        _merge_ff_html_values(events, all_rows)
-
-
 
 BIQUOTE_URL = "https://biquote.io/api/calendar"
 
