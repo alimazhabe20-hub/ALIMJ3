@@ -599,6 +599,7 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
         logger.debug("non-fatal exception: %s", exc)
 
     original_prompt = prompt
+    live_shopping = ""
     shopping_hint = _shopping_prompt_hint(prompt)
     if shopping_hint:
         prompt = prompt + shopping_hint
@@ -699,6 +700,14 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
                 await asyncio.sleep(0.05)
 
     logger.error("AI request failed across all providers: %s", " | ".join(errors[:8]))
+    # V7: live shopping data must not be lost when AI providers are unavailable
+    # (for example Gemini HTTP 429). Return the collected market data directly.
+    if shopping_hint and live_shopping:
+        direct = live_shopping
+        if direct.startswith("[SHOPPING_LIVE_RESULT]"):
+            direct = direct[len("[SHOPPING_LIVE_RESULT]"):].strip()
+        if direct and "نتیجه زنده‌ای دریافت نشد" not in direct and "نتیجه معتبر برنگرداند" not in direct:
+            return direct[:7000], "shopping-direct"
     if any("INVALID_API_KEY" in e for e in errors):
         raise RuntimeError("INVALID_API_KEY: " + next(e for e in errors if "INVALID_API_KEY" in e)[:240])
     detail = errors[0] if errors else "unknown"
@@ -858,6 +867,8 @@ async def ask_ai_stream(user_id: int, prompt: str):
         prompt = prompt[:MAX_INPUT]
 
     original = prompt
+    live_shopping = ""
+    shopping_hint = ""
     try:
         _extract_and_store_memory(user_id, original)
     except Exception as _exc:
@@ -928,6 +939,19 @@ async def ask_ai_stream(user_id: int, prompt: str):
                 await asyncio.sleep(0.05)
 
     logger.error("AI streaming facade failed across all providers: %s", " | ".join(errors[:8]))
+    # V7: never discard successful live shopping results just because the AI
+    # formatter hit a provider quota (Gemini 429) or all AI providers failed.
+    if shopping_hint and live_shopping:
+        direct = live_shopping
+        if direct.startswith("[SHOPPING_LIVE_RESULT]"):
+            direct = direct[len("[SHOPPING_LIVE_RESULT]"):].strip()
+        if direct and "نتیجه زنده‌ای دریافت نشد" not in direct and "نتیجه معتبر برنگرداند" not in direct:
+            chunk_size = max(80, int(os.getenv("AI_STREAM_CHUNK", "180")))
+            for i in range(0, len(direct[:7000]), chunk_size):
+                yield direct[i:i + chunk_size], None
+                await asyncio.sleep(0)
+            yield None, "shopping-direct"
+            return
     if any("INVALID_API_KEY" in e for e in errors):
         raise RuntimeError("INVALID_API_KEY: " + next(e for e in errors if "INVALID_API_KEY" in e)[:240])
     detail = errors[0] if errors else "unknown"
