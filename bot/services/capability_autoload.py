@@ -59,6 +59,14 @@ _BRIDGE_MODULES = (
     "bot.services.ai_full_bridge",
 )
 
+# Core tool facade. This module contains the actual built-in tool registrations
+# (including search_shopping). It must be imported before bridge/discovery so
+# those tools are present in the shared registry. Importing it while ENSURING is
+# safe because its own autoload call becomes a no-op.
+_CORE_TOOL_MODULES = (
+    "bot.services.ai_tools",
+)
+
 
 def ai_tool(
     *,
@@ -187,6 +195,14 @@ def ensure_all_capabilities_registered() -> dict:
         return result
     _ENSURING = True
     try:
+        # Load the stable AI tool facade first. Its module-level registrations
+        # are the source of truth for built-in capabilities such as shopping.
+        for mod_name in _CORE_TOOL_MODULES:
+            try:
+                importlib.import_module(mod_name)
+            except Exception as exc:
+                logger.warning("core AI tool module load failed %s: %s", mod_name, exc)
+
         from bot.services.tool_runtime import get_registered_tool_names
 
         before = set(get_registered_tool_names())
