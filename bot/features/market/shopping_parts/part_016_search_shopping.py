@@ -1,3 +1,9 @@
+try:
+    import logging as _shopping_logging
+    logger = _shopping_logging.getLogger('rooze_ziba')
+except Exception:
+    logger = None
+
 def _shopping_digits(text: str) -> str:
     table = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
     return str(text or "").translate(table)
@@ -319,3 +325,16 @@ async def search_shopping(
         lines.append(f"\n📊 منابع: {src_summary}")
 
     return "\n".join(lines)
+
+# ── LIVE IMPLEMENTATION OVERRIDE ────────────────────────────────────────────
+# The legacy implementation above is kept for backward compatibility, but the
+# public search_shopping entry point must use the standalone live engine.
+# This prevents stale DDG-only/AI-dependent behavior from winning at runtime.
+try:
+    from bot.features.market.shopping_parts.part_016_search_shopping_live import (
+        search_shopping as _live_search_shopping,
+    )
+    search_shopping = _live_search_shopping
+except Exception as _live_exc:  # pragma: no cover
+    logger.warning("live shopping engine unavailable; using legacy engine: %s", _live_exc)
+
