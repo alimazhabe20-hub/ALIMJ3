@@ -114,3 +114,6 @@ load_modular_part(__file__, 'shopping_parts/part_015_shopping_price_history.py')
 
 
 load_modular_part(__file__, 'shopping_parts/part_016_search_shopping.py')
+
+# Shopping Engine v3 must be the final public implementation.
+load_modular_part(__file__, 'shopping_parts/part_016_search_shopping_live.py')
