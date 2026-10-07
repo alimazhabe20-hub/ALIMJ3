@@ -1,3 +1,14 @@
+## Live-data patch (v79 logic) — always-fresh answers
+- `ai_freshness.py`: classifier now detects recommendation/find/compare/budget/spec/new-model requests
+  (e.g. «یه گوشی تا ۵۰ میلیون پیدا کن»), AI/software versions, office holders, sports results and
+  current-events questions, and routes them to `search_shopping` / `web_search` before the model answers.
+- Fixed false positives: «ارزون» ≠ ارز, «هواوی» ≠ هوا, «طلایی» ≠ طلا, «الان … چنده» ≠ ساعت/تاریخ,
+  and bare «تاریخ» no longer forces the clock tool.
+- `web_search`: supports Tavily / Brave / Serper / SearXNG via env keys with automatic fallback to
+  DuckDuckGo; removed the harmful `(current as of DATE)` query suffix; requests recent results for news-like queries.
+- Shopping hint now also fires for budget-style requests with no «قیمت/خرید» keyword.
+- Tests added in `tests/test_freshness_and_upload_contracts.py`.
+
 ## V78.0.0 — Update Center
 - Safe remote release discovery with local runtime/dependency/schema checks.
 - Added `/update`, `/updates`, and `🔄 بررسی بروزرسانی`.
