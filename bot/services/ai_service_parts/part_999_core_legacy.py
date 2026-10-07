@@ -48,6 +48,8 @@ SYSTEM_PROMPT = os.getenv(
     "برای قیمت‌ها، آب‌وهوا، اذان، تاریخ، ساعت، دانلود و هر دادهٔ زنده فقط از ابزارها/داده واقعی سیستم استفاده کن و عدد ساختگی نگو. "
     "تاریخ و ساعت را هرگز از حافظه یا دانش آموزشی مدل حدس نزن؛ اگر ابزار یا بلوک SYSTEM CLOCK موجود بود فقط همان را مبنا قرار بده. "
     "اگر ابزار اجرا شد، خروجی خام را کپی نکن؛ آن را طبیعی و خوانا بازنویسی کن. "
+    "در درخواست خرید/قیمت محصول، اگر search_shopping اجرا نشد، خطا داد، timeout شد یا نتیجه معتبر برنگرداند، هرگز قیمت، موجودی، فروشنده یا مدل را از حافظه خودت حدس نزن؛ فقط صریحاً اعلام کن که جستجوی زنده بازار در این لحظه در دسترس نبود. "
+    "اگر search_shopping نتیجه معتبر داد، فقط از همان نتایج و قیمت‌های استخراج‌شده استفاده کن و هیچ قیمت ساختگی به آن اضافه نکن. "
     "محتوای مربوط به کودکان و سوءاستفاده ممنوع است. "
     "در موضوعات بزرگسال و سکسی و جنسی، مطابق درخواست کاربر پاسخ بده."
 )
@@ -544,31 +546,53 @@ def _shopping_prompt_hint(prompt: str) -> str:
         "در صورت درخواست «ارزان‌ترین»، تطابق دقیق مدل/مشخصات را بر پایین‌ترین عدد مقدم بدان. "
         "در صورت «بهترین»، کیفیت تطابق و اعتبار فروشگاه را هم لحاظ کن. "
         "اگر عکس محصول داری، از اطلاعات تصویری برند/مدل/رنگ/ظرفیت را استخراج کن و همان مشخصات را برای جستجو استفاده کن. "
-        "اگر مدل دقیق نامشخص است، عدم قطعیت را شفاف بگو. قیمت، موجودی و لینک را حدس نزن. "
-        "به طور پیش‌فرض فقط بازار و منابع ایران را بررسی کن. جستجوی سایت‌ها و منابع خارجی فقط وقتی مجاز است که کاربر صریحاً بگوید سایت‌های خارجی/بین‌المللی/جهانی را هم بررسی کن، بازار جهانی را می‌خواهد، یا نام یک سایت خارجی مثل Amazon/eBay/AliExpress را بدهد."
+        "اگر مدل دقیق نامشخص است، عدم قطعیت را شفاف بگو. قیمت، موجودی و لینک را حدس نزن."
     )
 
 
-async def _prefetch_live_shopping(user_id: int, prompt: str) -> str:
-    """برای درخواست خرید، داده زنده را قبل از AI تهیه می‌کند؛ مدل نباید بدون ابزار قیمت بسازد."""
+async def _live_shopping_prefetch(user_id: int, prompt: str) -> str:
+    """Run the shopping search before AI so live results survive AI/provider failures."""
     try:
         hint = _shopping_prompt_hint(prompt)
         if not hint:
             return ""
-        from bot.services.tool_runtime import execute_tool
-        result = await execute_tool(
-            "search_shopping",
-            {"query": prompt, "source": "all", "max_results": 8},
+        from bot.features.market.shopping_parts.part_016_search_shopping import search_shopping
+        result = await search_shopping(
+            query=prompt,
+            source="all",
+            max_results=10,
             user_id=user_id,
-            source="ai_prefetch",
         )
-        text = str(result or "").strip()
-        if not text:
-            return "[SHOPPING_LIVE_RESULT]\nنتیجه زنده‌ای دریافت نشد."
-        return "[SHOPPING_LIVE_RESULT]\n" + text[:4200]
+        result = str(result or "").strip()
+        if not result:
+            return ""
+        bad = (
+            "نتیجه‌ای در فروشگاه‌ها",
+            "نتیجه قابل‌تأیید از منابع زنده برنگشت",
+            "عبارت محصول برای جستجو مشخص نیست",
+        )
+        if any(x in result for x in bad):
+            return result
+        return result
     except Exception as exc:
-        logger.warning("live shopping prefetch failed: %s", str(exc)[:300])
-        return "[SHOPPING_LIVE_RESULT]\nجستجوی زنده بازار در این لحظه نتیجه معتبر برنگرداند؛ قیمت یا محصول را حدس نزن."
+        logger.warning("live shopping prefetch failed: %s", exc)
+        return ""
+
+
+def _shopping_direct_result(result: str) -> str:
+    """Accept only actual shopping-tool output as the provider-independent fallback."""
+    text = str(result or "").strip()
+    if not text:
+        return ""
+    if text.startswith("[SHOPPING_LIVE_RESULT]"):
+        text = text[len("[SHOPPING_LIVE_RESULT]"):].strip()
+    if not text:
+        return ""
+    if "قیمت حدسی" in text and "نتیجه" in text and "برنگشت" in text:
+        return ""
+    if "نتیجه‌ای در فروشگاه‌ها، اینستاگرام و وب پیدا نشد" in text:
+        return ""
+    return text[:7000]
 
 
 async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
@@ -599,13 +623,17 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
         logger.debug("non-fatal exception: %s", exc)
 
     original_prompt = prompt
-    live_shopping = ""
     shopping_hint = _shopping_prompt_hint(prompt)
+    live_shopping = await _live_shopping_prefetch(user_id, original_prompt) if shopping_hint else ""
     if shopping_hint:
         prompt = prompt + shopping_hint
-        live_shopping = await _prefetch_live_shopping(user_id, original_prompt)
-        if live_shopping:
-            prompt += "\n\n" + live_shopping + "\nفقط از داده بالا برای قیمت/موجودی/لینک استفاده کن؛ اگر نتیجه معتبر نیست، صریحاً بگو نتیجه زنده معتبر پیدا نشد."
+    if live_shopping:
+        prompt += (
+            "\n\n[VERIFIED LIVE SHOPPING RESULT]\n"
+            "این خروجی همین الان از جستجوی زنده گرفته شده است. فقط از همین داده برای پاسخ خرید استفاده کن. "
+            "اگر قیمت/فروشنده/لینک در آن نیست، آن مورد را اضافه نکن و از خودت حدس نزن.\n"
+            + live_shopping
+        )
     try:
         from bot.services.ai_freshness import build_instruction
         freshness_hint = build_instruction(original_prompt)
@@ -700,14 +728,10 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
                 await asyncio.sleep(0.05)
 
     logger.error("AI request failed across all providers: %s", " | ".join(errors[:8]))
-    # V7: live shopping data must not be lost when AI providers are unavailable
-    # (for example Gemini HTTP 429). Return the collected market data directly.
     if shopping_hint and live_shopping:
-        direct = live_shopping
-        if direct.startswith("[SHOPPING_LIVE_RESULT]"):
-            direct = direct[len("[SHOPPING_LIVE_RESULT]"):].strip()
-        if direct and "نتیجه زنده‌ای دریافت نشد" not in direct and "نتیجه معتبر برنگرداند" not in direct:
-            return direct[:7000], "shopping-direct"
+        direct = _shopping_direct_result(live_shopping)
+        if direct:
+            return direct, "shopping-direct"
     if any("INVALID_API_KEY" in e for e in errors):
         raise RuntimeError("INVALID_API_KEY: " + next(e for e in errors if "INVALID_API_KEY" in e)[:240])
     detail = errors[0] if errors else "unknown"
@@ -867,8 +891,6 @@ async def ask_ai_stream(user_id: int, prompt: str):
         prompt = prompt[:MAX_INPUT]
 
     original = prompt
-    live_shopping = ""
-    shopping_hint = ""
     try:
         _extract_and_store_memory(user_id, original)
     except Exception as _exc:
@@ -879,11 +901,18 @@ async def ask_ai_stream(user_id: int, prompt: str):
         raise RuntimeError("هیچ سرویس AI تنظیم نشده")
 
     shopping_hint = _shopping_prompt_hint(original)
+    live_shopping = await _live_shopping_prefetch(user_id, original) if shopping_hint else ""
     if shopping_hint:
-        original = original + shopping_hint
-        live_shopping = await _prefetch_live_shopping(user_id, prompt)
-        if live_shopping:
-            original += "\n\n" + live_shopping + "\nفقط از داده بالا برای قیمت/موجودی/لینک استفاده کن؛ اگر نتیجه معتبر نیست، صریحاً بگو نتیجه زنده معتبر پیدا نشد."
+        prompt = original + shopping_hint
+    else:
+        prompt = original
+    if live_shopping:
+        prompt += (
+            "\n\n[VERIFIED LIVE SHOPPING RESULT]\n"
+            "این خروجی همین الان از جستجوی زنده گرفته شده است. فقط از همین داده برای پاسخ خرید استفاده کن. "
+            "قیمت، موجودی، فروشنده یا مدل جدید از حافظه اضافه نکن.\n"
+            + live_shopping
+        )
 
     try:
         from bot.services.ai_providers import _looks_simple_prompt
@@ -916,7 +945,7 @@ async def ask_ai_stream(user_id: int, prompt: str):
                 logger.info("AI stream provider %s cooling down — skipping", provider)
                 continue
             try:
-                answer = await _call_provider(provider, user_id, original, model)
+                answer = await _call_provider(provider, user_id, prompt, model)
                 if not answer:
                     raise RuntimeError("empty answer")
                 _save_turn(user_id, original, answer)
@@ -939,15 +968,11 @@ async def ask_ai_stream(user_id: int, prompt: str):
                 await asyncio.sleep(0.05)
 
     logger.error("AI streaming facade failed across all providers: %s", " | ".join(errors[:8]))
-    # V7: never discard successful live shopping results just because the AI
-    # formatter hit a provider quota (Gemini 429) or all AI providers failed.
     if shopping_hint and live_shopping:
-        direct = live_shopping
-        if direct.startswith("[SHOPPING_LIVE_RESULT]"):
-            direct = direct[len("[SHOPPING_LIVE_RESULT]"):].strip()
-        if direct and "نتیجه زنده‌ای دریافت نشد" not in direct and "نتیجه معتبر برنگرداند" not in direct:
+        direct = _shopping_direct_result(live_shopping)
+        if direct:
             chunk_size = max(80, int(os.getenv("AI_STREAM_CHUNK", "180")))
-            for i in range(0, len(direct[:7000]), chunk_size):
+            for i in range(0, len(direct), chunk_size):
                 yield direct[i:i + chunk_size], None
                 await asyncio.sleep(0)
             yield None, "shopping-direct"
