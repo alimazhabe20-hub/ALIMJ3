@@ -91,12 +91,18 @@ load_modular_part(__file__, 'helpers_parts/part_004_get_calendar_buttons.py')
 load_modular_part(__file__, 'helpers_parts/part_005_get_calendar_text.py')
 
 
+# ───────────────── سازگاری با messages.py یکپارچه ─────────────────
+def get_ai_answer_keyboard(user_id=None):
+    """کیبورد زیر پاسخ AI — سازگاری با messages.py قدیمی/یکپارچه.
 
-
-
-
-
-
+    اول get_ai_result_keyboard (ادامه پاسخ + اکشن‌های هوشمند) را امتحان می‌کند؛
+    اگر در دسترس نبود به get_ai_keyboard برمی‌گردد.
+    """
+    try:
+        from bot.services.ai_extras import get_ai_result_keyboard
+        return get_ai_result_keyboard(user_id)
+    except Exception:
+        return get_ai_keyboard(user_id)
 
 
 # Compatibility facade contract: these are intentionally re-exported names used
@@ -104,6 +110,7 @@ load_modular_part(__file__, 'helpers_parts/part_005_get_calendar_text.py')
 __all__ = [
     "build_message", "to_persian_num", "get_calendar_buttons", "get_calendar_text",
     "get_refresh_button", "get_main_keyboard", "get_ai_keyboard", "get_ai_model_keyboard",
+    "get_ai_answer_keyboard",
     "get_more_keyboard", "get_date_tools_keyboard", "get_religious_keyboard",
     "get_market_keyboard", "get_weather_geo_keyboard", "get_tools_keyboard",
     "get_azan_keyboard", "get_fun_keyboard", "get_joke_keyboard", "get_profile_keyboard",
