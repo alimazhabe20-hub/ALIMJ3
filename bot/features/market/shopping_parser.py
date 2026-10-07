@@ -1,3 +1,4 @@
+from __future__ import annotations
 """shopping: parser responsibilities."""
 from .shopping_common import *  # noqa: F401,F403
 from . import shopping_common as _common
