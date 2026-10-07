@@ -829,14 +829,16 @@ def _register_builtin_tools() -> None:
     
     register_tool(
         name="web_search",
-        description="جستجو در اینترنت برای اطلاعات به‌روز.",
+        description=("جستجوی زنده در اینترنت. برای هر چیزی که با زمان تغییر می‌کند اجباری است: "
+                     "مدل/مشخصات/نسخه جدید محصولات و نرم‌افزار و مدل‌های AI، اخبار، نتایج ورزشی، "
+                     "مقام‌ها و مسئولان فعلی، قوانین و رویدادهای جاری. هرگز از حافظه مدل جواب نده."),
         parameters={
             "type": "object",
             "properties": {"query": {"type": "string"}},
             "required": ["query"],
         },
         handler=_tool_web_search,
-        keywords=[r"جستجو\s*کن|در\s*اینترنت"],
+        keywords=[r"جستجو\s*کن|در\s*اینترنت|سرچ\s*کن|گوگل\s*کن|در\s*وب|search\s+(?:the\s+)?(?:web|internet)"],
     )
     register_tool(
         name="create_reminder",
