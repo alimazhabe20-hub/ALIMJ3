@@ -4,72 +4,419 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
-import re
 import time
-from pathlib import Path
-from urllib.parse import quote
 from collections import defaultdict, deque
 from typing import Deque, Dict, List, Optional, Tuple
 
 import httpx
 
 from bot.logger import logger
-from bot.utils.observability import record as record_metric
-from bot.utils.task_manager import spawn
-
-# V26 modular facade: runtime state/config and provider implementations live in
-# dedicated modules while legacy ai_service import paths remain stable.
-from bot.services.ai_runtime import (
-    GEMINI_SAFETY_SETTINGS, MAX_INPUT, MAX_OUTPUT, HISTORY_ITEMS, TIMEOUT,
-    KEY_COOLDOWN_SEC, KEY_SHORT_COOLDOWN_SEC, AI_RETRY_COUNT, AI_RETRY_BASE_SEC,
-    AI_SIMPLE_MAX_CHARS, AI_COMPLEX_MIN_CHARS, AI_PROVIDER_FAILURE_THRESHOLD,
-    AI_PROVIDER_COOLDOWN_SEC, AI_PROVIDER_MAX_COOLDOWN_SEC,
-    AI_ROUTING_COST_WEIGHT, AI_ROUTING_QUALITY_WEIGHT, AI_ROUTING_LATENCY_WEIGHT,
-    AI_ROUTING_MODE, _AI_MODEL_PROFILES, _DEFAULT_ORDER, _HISTORY, _LOCKS,
-    _USER_SELECTION, _SUMMARY_RUNNING, _PROVIDER_HEALTH, _get_http, close_http,
-    _split_keys, _provider_keys, _key_id, _is_key_available, _mark_key_cooldown,
-    _is_quota_error, _next_keys, _advance_rr, clear_history, _valid_selected_model,
-    get_selected_model, set_selected_model, clear_selected_model, _env_models,
-    available_model_options, available_providers, models_for_provider, _PROVIDER_PRETTY,
-    enabled_providers, default_model_info, set_selected_provider, key_pool_status,
-    _model_profile, _route_score, _provider_rank, _provider_available, _record_provider,
-)
-from bot.services.ai_providers import _post_json, _extract_openai, _gemini, _openai_compatible, _groq, _cerebras, _openrouter, _cloudflare, _call_provider
 
 # ── System Prompt ───────────────────────────────────────────────────────────
 SYSTEM_PROMPT = os.getenv(
     "AI_SYSTEM_PROMPT",
-    "تو دستیار هوشمند ربات «روز زیبا» هستی و از طریق ابزارها (tools) به قابلیت‌های واقعی همین ربات وصل هستی. "
-    "تقریباً همه قابلیت‌های منو — بازار، تاریخ، مذهبی، هوا، خرید، یادآوری، یادداشت، دانلود لینک، فونت، جوک، پروفایل و … — "
-    "از طریق ابزارهای ثبت‌شده در دسترس توست؛ در صورت نیاز از list_ai_capabilities یا ai_capability_catalog استفاده کن. "
-    "با لحنی گرم، طبیعی و محترمانه فارسی روان صحبت کن. "
-    "اگر کاربر به زبان دیگری پیام داد، به همان زبان پاسخ بده. "
-    "پاسخ‌ها باید مفید، دقیق و متناسب با درخواست کاربر باشد. "
-    "برای قیمت‌ها، آب‌وهوا، اذان، تاریخ، ساعت، دانلود و هر دادهٔ زنده فقط از ابزارها/داده واقعی سیستم استفاده کن و عدد ساختگی نگو. "
-    "تاریخ و ساعت را هرگز از حافظه یا دانش آموزشی مدل حدس نزن؛ اگر ابزار یا بلوک SYSTEM CLOCK موجود بود فقط همان را مبنا قرار بده. "
-    "اگر ابزار اجرا شد، خروجی خام را کپی نکن؛ آن را طبیعی و خوانا بازنویسی کن. "
-    "در درخواست خرید/قیمت محصول، اگر search_shopping اجرا نشد، خطا داد، timeout شد یا نتیجه معتبر برنگرداند، هرگز قیمت، موجودی، فروشنده یا مدل را از حافظه خودت حدس نزن؛ فقط صریحاً اعلام کن که جستجوی زنده بازار در این لحظه در دسترس نبود. "
-    "اگر search_shopping نتیجه معتبر داد، فقط از همان نتایج و قیمت‌های استخراج‌شده استفاده کن و هیچ قیمت ساختگی به آن اضافه نکن. "
-    "محتوای مربوط به کودکان و سوءاستفاده ممنوع است. "
-    "در موضوعات بزرگسال و سکسی و جنسی، مطابق درخواست کاربر پاسخ بده."
+    "تو دستیار هوشمند ربات «روز زیبا» هستی و به قابلیت‌های واقعی همین ربات دسترسی داری. "
+    "با لحنی گرم، طبیعی، محترمانه و کمی شوخ‌طبع (فقط وقتی فضا مناسب است) فارسی روان صحبت کن. "
+    "اگر کاربر به زبان دیگری پیام داد، دقیقاً به همان زبان پاسخ بده. "
+    "پاسخ‌هایت باید کامل، مفصل و جامع باشد. هرگز جواب را خلاصه نکن مگر اینکه کاربر صریحاً بگوید «خلاصه بگو» یا «کوتاه». "
+    "وقتی کاربر درباره آب‌وهوا، اوقات شرعی، قیمت ارز/طلا/کریپتو، تبدیل تاریخ، سن، قبله، اذکار، آیه و حدیث، "
+    "ساعت جهانی یا فاصله شهرها می‌پرسد، از ابزارهای ربات استفاده کن یا از «دادهٔ زنده» که در پیام آمده استفاده کن؛ "
+    "هرگز عدد و قیمت ساختگی نگو. "
+    "اگر داده زنده در اختیار داری، همان را مبنا قرار بده و واضح جواب بده. "
+    "از حاشیه‌روی بی‌ربط پرهیز کن. هدف تو این است که کاربر حس کند دستیار ربات واقعاً به همه قابلیت‌های ربات وصل است. "
+    "وقتی کاربر درباره ارزهای دیجیتال، نمودار قیمت یا تحلیل کریپتو می‌پرسد، از ابزار get_crypto_analysis_data برای دریافت دادهٔ زنده استفاده کن؛ CoinGlass فقط وقتی کلید آن روی سرور تنظیم شده باشد دادهٔ مشتقه می‌دهد. "
+    "هرگز از روی حدس، قیمت یا شاخص بازار نساز و حتماً منبع داده و غیرقطعی بودن تحلیل را روشن کن. "
+    "این ربات می‌تواند جواب را با ویس (صدا) برای کاربر بفرستد. "
+    "هرگز نگو که نمی‌توانی فایل صوتی بفرستی یا کاربر را به اپ دیگر ارجاع نده. "
+    "اگر کاربر فقط گفت «ویس بفرست» یا «با صدا»، یک تأیید کوتاه بده مثل «حتماً، الان با ویس می‌فرستم.» — خود سیستم ویس را می‌فرستد.",
 )
 
+MAX_INPUT = int(os.getenv("AI_MAX_INPUT", "6000"))
+# سقف خروجی بالاتر تا جواب‌ها کامل و مفصل باشند
+MAX_OUTPUT = int(os.getenv("AI_MAX_OUTPUT", "2800"))
+HISTORY_ITEMS = max(2, int(os.getenv("AI_HISTORY_ITEMS", "8")))
+# timeout کمی بالاتر چون جواب‌های کامل‌تر زمان بیشتری می‌گیرند
+TIMEOUT = float(os.getenv("AI_TIMEOUT", "40"))
 
-def _memory_block(user_id: int, query: str = "") -> str:
-    """Build a bounded, relevance-ranked memory block for the current request."""
+# مدت خاموشی کلید بعد از محدودیت روزانه (ثانیه) — پیش‌فرض ۱۲ ساعت
+KEY_COOLDOWN_SEC = int(os.getenv("AI_KEY_COOLDOWN_SEC", str(12 * 3600)))
+# خاموشی کوتاه برای rate-limit لحظه‌ای (ثانیه)
+KEY_SHORT_COOLDOWN_SEC = int(os.getenv("AI_KEY_SHORT_COOLDOWN_SEC", "90"))
+
+_DEFAULT_ORDER = [
+    x.strip().lower()
+    for x in os.getenv(
+        "AI_DEFAULT_ORDER",
+        # groq اول چون مدل‌های instant خیلی سریع‌اند
+        "groq,gemini,cerebras,cloudflare,openrouter",
+    ).split(",")
+    if x.strip()
+]
+
+_HISTORY: Dict[int, Deque[Tuple[str, str]]] = defaultdict(
+    lambda: deque(maxlen=HISTORY_ITEMS)
+)
+_LOCKS: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+# (provider, model) — model="*" یعنی همه مدل‌های اون ارائه‌دهنده
+_USER_SELECTION: Dict[int, Tuple[str, str]] = {}
+# کاربران در حال خلاصه‌سازی؛ از ساخت چند task همزمان جلوگیری می‌کند.
+_SUMMARY_RUNNING: set[int] = set()
+
+# کلاینت HTTP مشترک برای اتصال مجدد و سرعت بیشتر
+_HTTP: Optional[httpx.AsyncClient] = None
+
+
+def _get_http() -> httpx.AsyncClient:
+    global _HTTP
+    if _HTTP is None or _HTTP.is_closed:
+        _HTTP = httpx.AsyncClient(
+            timeout=httpx.Timeout(TIMEOUT, connect=5.0),
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=40),
+            http2=False,
+        )
+    return _HTTP
+
+async def close_http() -> None:
+    """بستن کلاینت HTTP در shutdown ربات."""
+    global _HTTP
+    if _HTTP is not None and not _HTTP.is_closed:
+        await _HTTP.aclose()
+    _HTTP = None
+
+# ── Key Pool: چند کلید + چرخش وقتی یکی تمام شد ─────────────────────────────
+# key_id -> cooldown_until (unix timestamp)
+_KEY_COOLDOWN: Dict[str, float] = {}
+# provider -> index of last used key (round-robin)
+_KEY_RR: Dict[str, int] = defaultdict(int)
+
+
+def _split_keys(*env_names: str) -> List[str]:
+    """از یک یا چند env، کلیدها را با کاما جدا می‌کند."""
+    keys: List[str] = []
+    seen = set()
+    for name in env_names:
+        raw = os.getenv(name, "") or ""
+        for part in raw.replace(";", ",").split(","):
+            k = part.strip()
+            if k and k not in seen:
+                seen.add(k)
+                keys.append(k)
+    return keys
+
+
+def _provider_keys(provider: str) -> List[str]:
+    if provider == "gemini":
+        return _split_keys("GEMINI_API_KEY", "GEMINI_API_KEYS")
+    if provider == "groq":
+        return _split_keys("GROQ_API_KEY", "GROQ_API_KEYS")
+    if provider == "cerebras":
+        return _split_keys("CEREBRAS_API_KEY", "CEREBRAS_API_KEYS")
+    if provider == "openrouter":
+        return _split_keys("OPENROUTER_API_KEY", "OPENROUTER_API_KEYS")
+    if provider == "cloudflare":
+        # برای کلودفلر توکن‌ها؛ اکانت معمولاً یکی است
+        return _split_keys("CLOUDFLARE_AUTH_TOKEN", "CLOUDFLARE_AUTH_TOKENS")
+    return []
+
+
+def _key_id(provider: str, key: str) -> str:
+    # فقط چند کاراکتر آخر برای لاگ امن
+    tail = key[-6:] if len(key) >= 6 else key
+    return f"{provider}:{tail}"
+
+
+def _is_key_available(kid: str) -> bool:
+    until = _KEY_COOLDOWN.get(kid, 0)
+    if until <= time.time():
+        _KEY_COOLDOWN.pop(kid, None)
+        return True
+    return False
+
+
+def _mark_key_cooldown(provider: str, key: str, *, daily: bool = True) -> None:
+    kid = _key_id(provider, key)
+    sec = KEY_COOLDOWN_SEC if daily else KEY_SHORT_COOLDOWN_SEC
+    _KEY_COOLDOWN[kid] = time.time() + sec
+    logger.warning(
+        "AI key cooldown: %s for %ss (daily=%s)", kid, sec, daily
+    )
+
+
+def _is_quota_error(status: int, data) -> bool:
+    """تشخیص محدودیت روزانه / سهمیه / rate limit."""
+    if status in (429, 403):
+        return True
+    text = str(data).lower()
+    markers = (
+        "quota",
+        "rate limit",
+        "rate_limit",
+        "resource exhausted",
+        "resource_exhausted",
+        "too many requests",
+        "exceeded",
+        "limit exceeded",
+        "daily limit",
+        "usage limit",
+        "insufficient_quota",
+        "tokens per day",
+        "tpm",
+        "rpm",
+    )
+    return any(m in text for m in markers)
+
+
+def _next_keys(provider: str) -> List[str]:
+    """
+    لیست کلیدهای قابل استفاده به ترتیب round-robin.
+    کلیدهای در حال cooldown آخر می‌آیند (اگر همه تمام باشند باز هم امتحان می‌شوند).
+    """
+    keys = _provider_keys(provider)
+    if not keys:
+        return []
+    n = len(keys)
+    start = _KEY_RR[provider] % n
+    ordered = keys[start:] + keys[:start]
+    available = [k for k in ordered if _is_key_available(_key_id(provider, k))]
+    cooled = [k for k in ordered if not _is_key_available(_key_id(provider, k))]
+    return available + cooled
+
+
+def _advance_rr(provider: str) -> None:
+    keys = _provider_keys(provider)
+    if keys:
+        _KEY_RR[provider] = (_KEY_RR[provider] + 1) % len(keys)
+
+
+# ── User selection ──────────────────────────────────────────────────────────
+
+def clear_history(user_id: int, *, clear_long_term: bool = False) -> None:
+    _HISTORY.pop(user_id, None)
+    try:
+        from bot.database import clear_ai_history_summary, delete_ai_memory
+        clear_ai_history_summary(user_id)
+        if clear_long_term:
+            delete_ai_memory(user_id)
+    except Exception:
+        pass
+
+
+def _valid_selected_model(pref: Tuple[str, str] | None) -> Tuple[str, str] | None:
+    """Return a saved selection only if its provider/model still exists."""
+    if not pref:
+        return None
+    provider, model = pref
+    provider = (provider or "").strip().lower()
+    model = (model or "*").strip()
+    if provider not in {p for p, _label, _model in available_model_options()}:
+        return None
+    models = models_for_provider(provider)
+    if not models:
+        return None
+    if model == "*" or model in models:
+        return provider, model
+    return provider, "*"
+
+def get_selected_model(user_id: int) -> Tuple[str, str] | None:
+    if user_id in _USER_SELECTION:
+        return _USER_SELECTION[user_id]
+    try:
+        from bot.database import get_ai_preference
+        pref = get_ai_preference(user_id)
+        if pref:
+            valid = _valid_selected_model(pref)
+            if valid:
+                _USER_SELECTION[user_id] = valid
+                if valid != pref:
+                    try:
+                        set_ai_preference(user_id, valid[0], valid[1])
+                    except Exception:
+                        pass
+                return valid
+            clear_selected_model(user_id)
+    except Exception as e:
+        logger.warning("get_ai_preference failed: %s", e)
+    return None
+
+
+def set_selected_model(user_id: int, provider: str, model: str) -> None:
+    _USER_SELECTION[user_id] = (provider, model)
+    try:
+        from bot.database import set_ai_preference
+        set_ai_preference(user_id, provider, model)
+    except Exception as e:
+        logger.warning("set_ai_preference failed: %s", e)
+
+
+def clear_selected_model(user_id: int) -> None:
+    _USER_SELECTION.pop(user_id, None)
+    try:
+        from bot.database import clear_ai_preference
+        clear_ai_preference(user_id)
+    except Exception as e:
+        logger.warning("clear_ai_preference failed: %s", e)
+
+
+def _env_models(env_name: str, default: List[str]) -> List[str]:
+    raw = os.getenv(env_name, "")
+    values = [x.strip() for x in raw.split(",") if x.strip()]
+    return values or default
+
+
+def available_model_options() -> List[Tuple[str, str, str]]:
+    """همه مدل‌ها به ترتیب ارائه‌دهنده و سرعت (سریع‌ترین اول)."""
+    raw: Dict[str, List[Tuple[str, str, str]]] = {}
+
+    if _provider_keys("gemini"):
+        items = []
+        # مدل‌های پایدار جدید؛ Lite برای سرعت، 3.6 برای کیفیت
+        for model in _env_models(
+            "GEMINI_MODELS",
+            ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite"],
+        ):
+            label = "Gemini • " + model.replace("gemini-", "Gemini ")
+            items.append(("gemini", label, model))
+        raw["gemini"] = items
+
+    if _provider_keys("groq"):
+        items = []
+        # instant اول = خیلی سریع
+        for model in _env_models(
+            "GROQ_MODELS",
+            [
+                "llama-3.1-8b-instant",
+                "openai/gpt-oss-20b",
+                "llama-3.3-70b-versatile",
+                "openai/gpt-oss-120b",
+            ],
+        ):
+            items.append(("groq", "Groq • " + model, model))
+        raw["groq"] = items
+
+    if _provider_keys("cerebras"):
+        items = []
+        for model in _env_models(
+            "CEREBRAS_MODELS",
+            [os.getenv("CEREBRAS_MODEL", "gpt-oss-120b")],
+        ):
+            items.append(("cerebras", "Cerebras • " + model, model))
+        raw["cerebras"] = items
+
+    if os.getenv("CLOUDFLARE_ACCOUNT_ID") and _provider_keys("cloudflare"):
+        items = []
+        for model in _env_models(
+            "CLOUDFLARE_MODELS",
+            [os.getenv("CLOUDFLARE_MODEL", "@cf/meta/llama-3.2-3b-instruct")],
+        ):
+            items.append(("cloudflare", "Cloudflare • " + model, model))
+        raw["cloudflare"] = items
+
+    if _provider_keys("openrouter"):
+        items = []
+        for model in _env_models(
+            "OPENROUTER_MODELS",
+            [os.getenv("OPENROUTER_MODEL", "openrouter/free")],
+        ):
+            items.append(("openrouter", "OpenRouter • " + model, model))
+        raw["openrouter"] = items
+
+    ordered: List[Tuple[str, str, str]] = []
+    seen = set()
+    for p in _DEFAULT_ORDER:
+        if p in raw and p not in seen:
+            ordered.extend(raw[p])
+            seen.add(p)
+    for p, items in raw.items():
+        if p not in seen:
+            ordered.extend(items)
+    return ordered
+
+
+_PROVIDER_PRETTY = {
+    "gemini": "Gemini",
+    "groq": "Groq",
+    "cerebras": "Cerebras",
+    "cloudflare": "Cloudflare",
+    "openrouter": "OpenRouter",
+}
+
+
+def available_providers() -> List[Tuple[str, str]]:
+    """
+    لیست ارائه‌دهنده‌های فعال برای دکمهٔ انتخاب.
+    هر آیتم: (provider_id, label)
+    با انتخاب یک ارائه‌دهنده، همه مدل‌هایش به‌صورت خودکار امتحان می‌شوند.
+    """
+    options = available_model_options()
+    by_provider: Dict[str, int] = {}
+    for provider, _label, _model in options:
+        by_provider[provider] = by_provider.get(provider, 0) + 1
+
+    result: List[Tuple[str, str]] = []
+    seen = set()
+    for p in _DEFAULT_ORDER:
+        if p in by_provider and p not in seen:
+            pretty = _PROVIDER_PRETTY.get(p, p)
+            n = by_provider[p]
+            keys = len(_provider_keys(p))
+            suffix = f" ({n} مدل)" if n > 1 else ""
+            if keys > 1:
+                suffix += f" ×{keys} کلید"
+            result.append((p, f"{pretty}{suffix}"))
+            seen.add(p)
+    for p, n in by_provider.items():
+        if p not in seen:
+            pretty = _PROVIDER_PRETTY.get(p, p)
+            suffix = f" ({n} مدل)" if n > 1 else ""
+            result.append((p, f"{pretty}{suffix}"))
+    return result
+
+
+def models_for_provider(provider: str) -> List[str]:
+    """مدل‌های یک ارائه‌دهنده به ترتیب سرعت (اول = سریع‌تر)."""
+    return [m for p, _l, m in available_model_options() if p == provider]
+
+
+def enabled_providers() -> List[str]:
+    return [label for _p, label in available_providers()]
+
+
+def default_model_info() -> str:
+    providers = available_providers()
+    if not providers:
+        return "هیچ"
+    return providers[0][1]
+
+
+def set_selected_provider(user_id: int, provider: str) -> None:
+    """انتخاب ارائه‌دهنده — همه مدل‌هایش شامل می‌شوند (model='*')."""
+    set_selected_model(user_id, provider, "*")
+
+
+def key_pool_status() -> str:
+    """برای ادمین: وضعیت کلیدها."""
+    lines = []
+    for provider in ("gemini", "groq", "cerebras", "openrouter", "cloudflare"):
+        keys = _provider_keys(provider)
+        if not keys:
+            continue
+        avail = sum(1 for k in keys if _is_key_available(_key_id(provider, k)))
+        lines.append(f"{provider}: {avail}/{len(keys)} فعال")
+    return "\n".join(lines) if lines else "هیچ کلیدی تنظیم نشده"
+
+
+def _memory_block(user_id: int) -> str:
+    """بلوک حافظه بلندمدت + خلاصه تاریخچه برای تزریق به سیستم."""
     parts = []
     try:
         from bot.database import get_ai_memory, get_ai_history_summary
-        # Query-aware retrieval prevents unrelated long-term facts from leaking
-        # into every prompt while retaining the legacy fallback when no match exists.
-        mem = get_ai_memory(user_id, limit=12, query=query)
+        mem = get_ai_memory(user_id, limit=30)
         if mem:
             lines = [f"- {k}: {v}" for k, v in mem]
-            parts.append("حافظه مرتبط درباره این کاربر:\n" + "\n".join(lines))
+            parts.append("حافظه بلندمدت درباره این کاربر:\n" + "\n".join(lines))
         summary = get_ai_history_summary(user_id)
         if summary:
-            # Keep summary bounded so memory cannot crowd out the current request.
-            parts.append("خلاصه گفتگوهای قبلی:\n" + summary[-2200:])
+            parts.append("خلاصه گفتگوهای قبلی:\n" + summary)
     except Exception as e:
         logger.warning("memory_block: %s", e)
     return "\n\n".join(parts)
@@ -90,8 +437,8 @@ def _extract_and_store_memory(user_id: int, prompt: str) -> None:
             try:
                 from bot.database import set_ai_memory
                 set_ai_memory(user_id, "name", m2.group(1).strip())
-            except Exception as _exc:
-                logger.debug("%s: %s", __name__, _exc)
+            except Exception:
+                pass
         return
     fact = m.group(1).strip()[:500]
     if not fact:
@@ -110,32 +457,66 @@ def _extract_and_store_memory(user_id: int, prompt: str) -> None:
         logger.warning("store memory: %s", e)
 
 
+async def _maybe_summarize_history(user_id: int) -> None:
+    """وقتی تاریخچه پر شد، یک‌بار خلاصه می‌سازد و بخش قدیمی را سبک می‌کند."""
+    history = _HISTORY[user_id]
+    if len(history) < HISTORY_ITEMS or user_id in _SUMMARY_RUNNING:
+        return
+
+    _SUMMARY_RUNNING.add(user_id)
+    try:
+        snapshot = list(history)
+        lines = []
+        for role, content in snapshot:
+            tag = "کاربر" if role == "user" else "دستیار"
+            lines.append(f"{tag}: {content[:500]}")
+        blob = "\n".join(lines)[:5000]
+        summary_prompt = (
+            "این گفتگو را در حداکثر ۸ خط فارسی خلاصه کن. "
+            "حقایق مهم درباره کاربر، تصمیم‌ها و موضوعات اصلی را نگه دار:\n\n" + blob
+        )
+
+        summary = None
+        for provider, _label, model in available_model_options():
+            try:
+                if provider == "groq":
+                    summary = await _openai_compatible(
+                        "Groq", "groq", 0, summary_prompt,
+                        url=os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+                        + "/chat/completions",
+                        model=model,
+                        use_tools=False,
+                    )
+                elif provider == "gemini":
+                    summary = await _gemini(0, summary_prompt, model, use_tools=False)
+                else:
+                    continue
+                if summary:
+                    break
+            except Exception:
+                continue
+
+        if summary:
+            from bot.database import get_ai_history_summary, set_ai_history_summary
+            prev = get_ai_history_summary(user_id) or ""
+            merged = (prev + "\n" + summary).strip() if prev else summary
+            set_ai_history_summary(user_id, merged[-3500:])
+
+            # نصف جدیدتر تاریخچه را نگه می‌داریم.
+            keep = max(2, HISTORY_ITEMS // 2)
+            while len(history) > keep:
+                history.popleft()
+    except Exception as e:
+        logger.warning("auto summarize failed: %s", e)
+    finally:
+        _SUMMARY_RUNNING.discard(user_id)
+
+
 def _messages(user_id: int, prompt: str) -> List[dict]:
     system = SYSTEM_PROMPT
-    try:
-        from bot.database import get_user_preferences
-        style = get_user_preferences(user_id).get("response_style", "balanced")
-        style_prompt = {
-            "short": "پاسخ‌ها را تا حد ممکن کوتاه، مستقیم و کم‌حجم بده.",
-            "long": "برای درخواست‌های پیچیده پاسخ کامل، ساختاریافته و با جزئیات مفید بده.",
-            "balanced": "پاسخ‌ها را متعادل و متناسب با پیچیدگی درخواست نگه دار.",
-        }.get(style)
-        if style_prompt:
-            system += "\n\nترجیح پاسخ کاربر: " + style_prompt
-    except Exception as _exc:
-        logger.debug("%s: %s", __name__, _exc)
-    mem = _memory_block(user_id, prompt)
+    mem = _memory_block(user_id)
     if mem:
         system = system + "\n\n" + mem
-    # V19: local hybrid retrieval adds only relevant memory/knowledge context.
-    # It never performs a network request on the normal prompt path.
-    try:
-        from bot.services.retrieval import build_local_context
-        retrieved = build_local_context(user_id, prompt)
-        if retrieved:
-            system += "\n\n" + retrieved
-    except Exception as e:
-        logger.debug("local retrieval skipped: %s", e)
     messages = [{"role": "system", "content": system}]
     for role, content in _HISTORY[user_id]:
         messages.append({"role": role, "content": content})
@@ -147,6 +528,420 @@ def _save_turn(user_id: int, prompt: str, answer: str) -> None:
     history = _HISTORY[user_id]
     history.append(("user", prompt))
     history.append(("assistant", answer))
+    # خلاصه‌سازی در پس‌زمینه وقتی پر شد
+    if len(history) >= HISTORY_ITEMS:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(_maybe_summarize_history(user_id))
+        except Exception:
+            pass
+
+
+async def _post_json(url: str, *, headers=None, json=None, params=None) -> tuple[int, dict]:
+    client = _get_http()
+    response = await client.post(url, headers=headers, json=json, params=params)
+    try:
+        data = response.json()
+    except Exception:
+        data = {"raw": response.text[:1200]}
+    return response.status_code, data
+
+
+def _extract_openai(data: dict) -> str:
+    choices = data.get("choices") or []
+    if not choices:
+        raise RuntimeError(str(data)[:900])
+
+    message = choices[0].get("message") or {}
+    content = message.get("content")
+
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if text:
+                    parts.append(str(text))
+        content = "".join(parts)
+
+    if not content:
+        raise RuntimeError("Provider returned an empty answer")
+
+    return str(content).strip()
+
+
+# ── Provider callers with key rotation ──────────────────────────────────────
+
+async def _gemini(
+    user_id: int,
+    prompt: str,
+    model: str,
+    *,
+    use_tools: bool = True,
+    max_tool_rounds: int = 2,
+) -> str:
+    """
+    Gemini REST caller with real function-calling support.
+
+    نسخه قبلی فقط برای Gemini از keyword injection استفاده می‌کرد، در حالی که
+    registry ابزارها برای OpenAI-compatibleها واقعاً اجرا می‌شد. این نسخه هر دو
+    مسیر را دارد: function calling واقعی + دادهٔ زندهٔ keyword-based به‌عنوان fallback.
+    """
+    keys = _next_keys("gemini")
+    if not keys:
+        raise RuntimeError("هیچ کلید Gemini تنظیم نشده")
+
+    from bot.services.ai_tools import get_tool_definitions, execute_tool, parse_tool_arguments
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+    contents = []
+    for role, content in _HISTORY[user_id]:
+        contents.append({
+            "role": "model" if role == "assistant" else "user",
+            "parts": [{"text": content}],
+        })
+    contents.append({"role": "user", "parts": [{"text": prompt}]})
+
+    # OpenAI-style registry -> Gemini functionDeclarations
+    gemini_tools = []
+    if use_tools:
+        declarations = []
+        for tool in get_tool_definitions():
+            fn = tool.get("function") or {}
+            if fn.get("name"):
+                declarations.append({
+                    "name": fn["name"],
+                    "description": fn.get("description", ""),
+                    "parameters": fn.get(
+                        "parameters",
+                        {"type": "object", "properties": {}},
+                    ),
+                })
+        if declarations:
+            gemini_tools = [{"functionDeclarations": declarations}]
+
+    errors = []
+    for key in keys:
+        try:
+            working_contents = list(contents)
+
+            for _round in range(max_tool_rounds + 1 if use_tools else 1):
+                payload = {
+                    "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                    "contents": working_contents,
+                    "generationConfig": {"maxOutputTokens": MAX_OUTPUT},
+                }
+                if gemini_tools and _round < max_tool_rounds:
+                    payload["tools"] = gemini_tools
+
+                status, data = await _post_json(
+                    url, params={"key": key}, json=payload
+                )
+
+                if status >= 400:
+                    if _is_quota_error(status, data):
+                        text = str(data).lower()
+                        daily = status == 403 or "daily" in text or "quota" in text
+                        _mark_key_cooldown("gemini", key, daily=daily)
+                        errors.append(f"{_key_id('gemini', key)} HTTP {status}")
+                        break
+                    raise RuntimeError(
+                        f"Gemini HTTP {status}: {str(data)[:900]}"
+                    )
+
+                candidates = data.get("candidates") or []
+                if not candidates:
+                    raise RuntimeError(
+                        f"Gemini پاسخ خالی داد: {str(data)[:900]}"
+                    )
+
+                content = candidates[0].get("content") or {}
+                parts = content.get("parts") or []
+
+                function_calls = [
+                    p.get("functionCall") or p.get("function_call")
+                    for p in parts
+                    if p.get("functionCall") or p.get("function_call")
+                ]
+
+                if function_calls and use_tools and _round < max_tool_rounds:
+                    # پاسخ مدل را عیناً به history موقت اضافه کن.
+                    working_contents.append({
+                        "role": "model",
+                        "parts": parts,
+                    })
+
+                    response_parts = []
+                    for call in function_calls:
+                        name = call.get("name") or ""
+                        args = call.get("args") or call.get("arguments") or {}
+                        args = parse_tool_arguments(args)
+                        result = await execute_tool(
+                            name, args, user_id=user_id
+                        )
+                        call_id = (
+                            call.get("id")
+                            or call.get("callId")
+                            or call.get("call_id")
+                            or f"call_{_round}_{name}"
+                        )
+                        response_parts.append({
+                            "functionResponse": {
+                                "name": name,
+                                "id": call_id,
+                                "response": {"result": result},
+                            }
+                        })
+
+                    if response_parts:
+                        working_contents.append({
+                            "role": "user",
+                            "parts": response_parts,
+                        })
+                        continue
+
+                text = "".join(
+                    p.get("text", "")
+                    for p in parts
+                    if isinstance(p, dict)
+                ).strip()
+
+                if not text:
+                    raise RuntimeError(
+                        f"Gemini پاسخ متنی خالی داد: {str(data)[:700]}"
+                    )
+
+                _advance_rr("gemini")
+                return text
+
+        except RuntimeError as exc:
+            errors.append(str(exc)[:300])
+            continue
+        except Exception as exc:
+            errors.append(str(exc)[:300])
+            continue
+
+    raise RuntimeError(
+        "همه کلیدهای Gemini تمام/خطا: " + " | ".join(errors[:5])
+    )
+
+
+async def _openai_compatible(
+    name: str,
+    provider: str,
+    user_id: int,
+    prompt: str,
+    *,
+    url: str,
+    model: str,
+    extra_headers=None,
+    use_tools: bool = True,
+) -> str:
+    from bot.services.ai_tools import (
+        get_tool_definitions,
+        execute_tool,
+        parse_tool_arguments,
+    )
+
+    keys = _next_keys(provider)
+    if not keys:
+        raise RuntimeError(f"هیچ کلید {name} تنظیم نشده")
+
+    errors = []
+    for key in keys:
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+        if extra_headers:
+            headers.update(extra_headers)
+
+        messages = _messages(user_id, prompt)
+        # حداکثر ۲ دور tool calling تا گیر نکند
+        max_tool_rounds = 2 if use_tools else 0
+
+        try:
+            for _round in range(max_tool_rounds + 1):
+                payload = {
+                    "model": model,
+                    "messages": messages,
+                    "max_tokens": MAX_OUTPUT,
+                    "temperature": 0.6,
+                }
+                if use_tools and _round < max_tool_rounds:
+                    tools = get_tool_definitions()
+                    if tools:
+                        payload["tools"] = tools
+                        payload["tool_choice"] = "auto"
+
+                status, data = await _post_json(url, headers=headers, json=payload)
+                if status >= 400:
+                    # بعضی مدل‌ها tools را پشتیبانی نمی‌کنند → بدون tool دوباره امتحان
+                    err_text = str(data).lower()
+                    if use_tools and any(
+                        marker in err_text
+                        for marker in (
+                            "tool_calls", "tool call", "tool_choice",
+                            "function calling", "function_call",
+                            "function calls", "unsupported parameter",
+                        )
+                    ):
+                        use_tools = False
+                        payload.pop("tools", None)
+                        payload.pop("tool_choice", None)
+                        status, data = await _post_json(
+                            url, headers=headers, json=payload
+                        )
+                    if status >= 400:
+                        if _is_quota_error(status, data):
+                            daily = (
+                                "daily" in str(data).lower()
+                                or "quota" in str(data).lower()
+                                or status == 403
+                            )
+                            _mark_key_cooldown(
+                                provider, key, daily=daily or status == 429
+                            )
+                            errors.append(f"{_key_id(provider, key)} HTTP {status}")
+                            break
+                        raise RuntimeError(
+                            f"{name} HTTP {status}: {str(data)[:900]}"
+                        )
+
+                choices = data.get("choices") or []
+                if not choices:
+                    raise RuntimeError(str(data)[:900])
+
+                message = choices[0].get("message") or {}
+                tool_calls = message.get("tool_calls") or []
+
+                if tool_calls and use_tools:
+                    # پاسخ assistant با tool_calls را به تاریخچه اضافه کن
+                    messages.append(message)
+                    for tc in tool_calls:
+                        fn = tc.get("function") or {}
+                        fname = fn.get("name") or ""
+                        fargs = parse_tool_arguments(fn.get("arguments"))
+                        result = await execute_tool(
+                            fname, fargs, user_id=user_id
+                        )
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.get("id") or fname,
+                                "content": result,
+                            }
+                        )
+                    continue  # دور بعد با نتایج tool
+
+                text = _extract_openai(data)
+                _advance_rr(provider)
+                return text
+
+            # اگر از حلقه key بیرون آمدیم بدون return
+            continue
+        except RuntimeError as exc:
+            msg = str(exc)
+            if _is_quota_error(0, msg) or "429" in msg or "403" in msg:
+                _mark_key_cooldown(provider, key, daily=True)
+            errors.append(msg[:200])
+            continue
+
+    raise RuntimeError(f"همه کلیدهای {name} تمام/خطا: " + " | ".join(errors[:5]))
+
+
+async def _groq(user_id: int, prompt: str, model: str) -> str:
+    return await _openai_compatible(
+        "Groq",
+        "groq",
+        user_id,
+        prompt,
+        url=os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+        + "/chat/completions",
+        model=model,
+    )
+
+
+async def _cerebras(user_id: int, prompt: str, model: str) -> str:
+    return await _openai_compatible(
+        "Cerebras",
+        "cerebras",
+        user_id,
+        prompt,
+        url="https://api.cerebras.ai/v1/chat/completions",
+        model=model,
+    )
+
+
+async def _openrouter(user_id: int, prompt: str, model: str) -> str:
+    return await _openai_compatible(
+        "OpenRouter",
+        "openrouter",
+        user_id,
+        prompt,
+        url="https://openrouter.ai/api/v1/chat/completions",
+        model=model,
+        extra_headers={"X-Title": "Rooze Ziba"},
+    )
+
+
+async def _cloudflare(user_id: int, prompt: str, model: str) -> str:
+    account = os.getenv("CLOUDFLARE_ACCOUNT_ID")
+    if not account:
+        raise RuntimeError("CLOUDFLARE_ACCOUNT_ID تنظیم نشده")
+    keys = _next_keys("cloudflare")
+    if not keys:
+        raise RuntimeError("هیچ توکن Cloudflare تنظیم نشده")
+
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}"
+    payload = {
+        "messages": _messages(user_id, prompt),
+        "max_tokens": MAX_OUTPUT,
+    }
+
+    errors = []
+    for token in keys:
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        try:
+            status, data = await _post_json(url, headers=headers, json=payload)
+            if status >= 400 or not data.get("success", True):
+                if _is_quota_error(status, data):
+                    _mark_key_cooldown("cloudflare", token, daily=True)
+                    errors.append(f"{_key_id('cloudflare', token)} HTTP {status}")
+                    continue
+                raise RuntimeError(f"Cloudflare HTTP {status}: {str(data)[:900]}")
+
+            result = data.get("result") or {}
+            text = result.get("response") or result.get("text")
+            if not text:
+                raise RuntimeError(f"Cloudflare empty response: {str(data)[:900]}")
+            _advance_rr("cloudflare")
+            return str(text).strip()
+        except RuntimeError as exc:
+            errors.append(str(exc)[:200])
+            continue
+
+    raise RuntimeError("همه توکن‌های Cloudflare تمام/خطا: " + " | ".join(errors[:5]))
+
+
+async def _call_provider(provider: str, user_id: int, prompt: str, model: str) -> str:
+    if provider == "gemini":
+        return await _gemini(user_id, prompt, model)
+    if provider == "groq":
+        return await _groq(user_id, prompt, model)
+    if provider == "cerebras":
+        return await _cerebras(user_id, prompt, model)
+    if provider == "cloudflare":
+        return await _cloudflare(user_id, prompt, model)
+    if provider == "openrouter":
+        return await _openrouter(user_id, prompt, model)
+    raise RuntimeError(f"Unknown AI provider: {provider}")
+
 
 
 async def _gemini_with_media(
@@ -155,108 +950,73 @@ async def _gemini_with_media(
     model: str,
     media: list[tuple[bytes, str]] | None = None,
 ) -> str:
-    """Gemini multimodal + function calling برای ابزارهای AI، از جمله خرید تصویری."""
+    """Gemini multimodal: متن + عکس (و در صورت نیاز چند فایل تصویری)."""
     keys = _next_keys("gemini")
     if not keys:
         raise RuntimeError("هیچ کلید Gemini تنظیم نشده")
 
-    from bot.services.ai_tools import get_tool_definitions, execute_tool, parse_tool_arguments
-    from bot.services.tool_runtime import select_capability_tool
-
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     contents = []
     for role, content in _HISTORY[user_id]:
-        contents.append({
-            "role": "model" if role == "assistant" else "user",
-            "parts": [{"text": content}],
-        })
+        contents.append(
+            {
+                "role": "model" if role == "assistant" else "user",
+                "parts": [{"text": content}],
+            }
+        )
 
     parts = []
     if media:
         for data, mime in media:
+            # محدودیت اندازه ~4MB برای inline
             if len(data) > 4_500_000:
                 raise RuntimeError("حجم فایل برای تحلیل خیلی بزرگ است (حداکثر حدود ۴ مگابایت).")
-            parts.append({"inline_data": {"mime_type": mime or "image/jpeg", "data": base64.b64encode(data).decode("ascii")}})
+            parts.append(
+                {
+                    "inline_data": {
+                        "mime_type": mime or "image/jpeg",
+                        "data": base64.b64encode(data).decode("ascii"),
+                    }
+                }
+            )
     parts.append({"text": prompt})
     contents.append({"role": "user", "parts": parts})
 
-    declarations = []
-    for tool in get_tool_definitions():
-        fn = tool.get("function") or {}
-        if fn.get("name"):
-            declarations.append({
-                "name": fn["name"],
-                "description": fn.get("description", ""),
-                "parameters": fn.get("parameters", {"type": "object", "properties": {}}),
-            })
-    gemini_tools = [{"functionDeclarations": declarations}] if declarations else []
+    payload = {
+        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": contents,
+        "generationConfig": {"maxOutputTokens": MAX_OUTPUT},
+    }
 
     errors = []
     for key in keys:
         try:
-            working = list(contents)
-            for round_no in range(4):
-                payload = {
-                    "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-                    "contents": working,
-                    "generationConfig": {"maxOutputTokens": min(MAX_OUTPUT, 3072 if len(prompt) < 900 else 6144)},
-                    "safetySettings": GEMINI_SAFETY_SETTINGS,
-                }
-                if gemini_tools and round_no < 3:
-                    payload["tools"] = gemini_tools
-                    forced_tool = select_capability_tool(prompt)
-                    if forced_tool:
-                        payload["toolConfig"] = {
-                            "functionCallingConfig": {
-                                "mode": "ANY",
-                                "allowedFunctionNames": [forced_tool],
-                            }
-                        }
-
-                status, data = await _post_json(url, params={"key": key}, json=payload)
-                if status >= 400:
-                    if _is_quota_error(status, data):
-                        daily = status != 429 or "daily" in str(data).lower() or "quota" in str(data).lower()
-                        _mark_key_cooldown("gemini", key, daily=daily)
-                        errors.append(f"{_key_id('gemini', key)} HTTP {status}")
-                        break
-                    raise RuntimeError(f"Gemini HTTP {status}: {str(data)[:900]}")
-
-                candidates = data.get("candidates") or []
-                if not candidates:
-                    raise RuntimeError(f"Gemini پاسخ خالی داد: {str(data)[:900]}")
-                content = candidates[0].get("content") or {}
-                out_parts = content.get("parts") or []
-                function_calls = [
-                    p.get("functionCall") or p.get("function_call")
-                    for p in out_parts
-                    if p.get("functionCall") or p.get("function_call")
-                ]
-                if function_calls and round_no < 3:
-                    working.append({"role": "model", "parts": out_parts})
-                    response_parts = []
-                    for call in function_calls:
-                        name = call.get("name") or ""
-                        args = parse_tool_arguments(call.get("args") or call.get("arguments") or {})
-                        result = await execute_tool(name, args, user_id=user_id)
-                        call_id = call.get("id") or call.get("callId") or call.get("call_id")
-                        fr = {"name": name, "response": {"result": result}}
-                        if call_id:
-                            fr["id"] = call_id
-                        response_parts.append({"functionResponse": fr})
-                    working.append({"role": "user", "parts": response_parts})
+            status, data = await _post_json(url, params={"key": key}, json=payload)
+            if status >= 400:
+                if _is_quota_error(status, data):
+                    daily = status != 429 or "daily" in str(data).lower() or "quota" in str(data).lower()
+                    _mark_key_cooldown("gemini", key, daily=daily)
+                    errors.append(f"{_key_id('gemini', key)} HTTP {status}")
                     continue
+                raise RuntimeError(f"Gemini HTTP {status}: {str(data)[:900]}")
 
-                text = "".join(p.get("text", "") for p in out_parts if isinstance(p, dict)).strip()
-                if not text:
-                    raise RuntimeError(f"Gemini پاسخ متنی خالی داد: {str(data)[:700]}")
-                _advance_rr("gemini")
-                return text
+            try:
+                parts_out = data["candidates"][0]["content"]["parts"]
+                text = "".join(p.get("text", "") for p in parts_out).strip()
+            except Exception:
+                raise RuntimeError(f"Gemini unexpected response: {str(data)[:900]}")
+
+            if not text:
+                raise RuntimeError("Gemini returned an empty answer")
+
+            _advance_rr("gemini")
+            return text
         except RuntimeError as exc:
-            errors.append(str(exc)[:250])
-            continue
-        except Exception as exc:
-            errors.append(str(exc)[:250])
+            if "HTTP" in str(exc) and any(x in str(exc) for x in ("429", "403", "quota")):
+                _mark_key_cooldown("gemini", key, daily=True)
+                errors.append(str(exc)[:200])
+                continue
+            errors.append(str(exc)[:200])
             continue
 
     raise RuntimeError("همه کلیدهای Gemini تمام/خطا: " + " | ".join(errors[:5]))
@@ -370,24 +1130,22 @@ async def ask_ai_media(
         errors: list[str] = []
 
         # برای تصویر: اولویت با Gemini (بینایی)
-        providers = list(dict.fromkeys(p for p, _l, _m in options))
-        if selected and selected[0] in providers:
-            providers.remove(selected[0]); providers.insert(0, selected[0])
-        if images and "gemini" in providers and (not selected or selected[0] != "gemini"):
-            providers.remove("gemini"); providers.insert(0, "gemini")
-        if len(providers) > 1:
-            head = providers[:1]
-            tail = sorted(providers[1:], key=_provider_rank)
-            ordered_providers = head + tail
-        else:
-            ordered_providers = providers
+        ordered_providers: list[str] = []
+        if images:
+            ordered_providers.append("gemini")
+        if selected:
+            p = selected[0]
+            if p not in ordered_providers:
+                ordered_providers.insert(0, p)
+        for p, _l, _m in options:
+            if p not in ordered_providers:
+                ordered_providers.append(p)
 
         for provider in ordered_providers:
             models = models_for_provider(provider)
             if not models:
                 continue
             for model in models:
-                started = time.monotonic()
                 try:
                     if images and provider == "gemini":
                         answer = await _gemini_with_media(
@@ -400,19 +1158,15 @@ async def ask_ai_media(
                             raise RuntimeError(
                                 f"{provider} از تحلیل تصویر پشتیبانی نمی‌کند؛ Gemini را انتخاب کن."
                             )
-                        answer = await _call_provider(provider, user_id, prompt, model)
+                        answer = await _call_provider(provider, user_id, provider_prompt, model)
                     else:
-                        answer = await _call_provider(provider, user_id, prompt, model)
+                        answer = await _call_provider(provider, user_id, provider_prompt, model)
 
-                    _record_provider(provider, ok=True, latency=time.monotonic() - started)
-                    record_metric("ai_provider", provider, ok=True, latency=time.monotonic() - started, model=model)
                     _save_turn(user_id, original_prompt[:500], answer)
                     if not selected:
                         set_selected_model(user_id, provider, "*")
                     return answer, f"{provider} / {model}"
                 except Exception as exc:
-                    _record_provider(provider, ok=False, latency=time.monotonic() - started)
-                    record_metric("ai_provider", provider, ok=False, latency=time.monotonic() - started, model=model)
                     msg = str(exc).replace("\n", " ")[:400]
                     errors.append(f"{provider}/{model}: {msg}")
                     logger.warning("ask_ai_media failed: %s", msg)
@@ -430,169 +1184,788 @@ IMAGE_GEN_MODEL = os.getenv(
     "GEMINI_IMAGE_MODEL",
     "gemini-3.1-flash-image",
 )
-TTS_VOICE = os.getenv("TTS_VOICE", "fa-IR-DilaraNeural")
-
-IMAGE_GEN_MODEL_FALLBACKS = tuple(
-    x.strip() for x in os.getenv(
-        "GEMINI_IMAGE_MODEL_FALLBACKS",
-        "gemini-3.1-flash-lite-image,gemini-2.5-flash-image",
-    ).split(",") if x.strip()
-)
 
 
+async def generate_or_edit_image(
+    prompt: str,
+    *,
+    source_image: bytes | None = None,
+    source_mime: str = "image/jpeg",
+) -> tuple[bytes, str]:
+    """
+    ساخت تصویر از متن، یا ویرایش تصویر با دستور متنی.
+    خروجی: (image_bytes, mime_type)
+    نیاز به کلید Gemini دارد.
+    """
+    prompt = (prompt or "").strip()
+    if not prompt:
+        raise RuntimeError("توضیح تصویر خالی است.")
 
-async def generate_or_edit_image(*args, **kwargs):
-    from bot.services.ai_media import generate_or_edit_image as _fn
-    return await _fn(*args, **kwargs)
+    keys = _next_keys("gemini")
+    if not keys:
+        raise RuntimeError("برای ساخت/ویرایش تصویر به کلید Gemini نیاز است.")
 
-def extract_image_prompt(*args, **kwargs):
-    from bot.services.ai_media import extract_image_prompt as _fn
-    return _fn(*args, **kwargs)
+    model = IMAGE_GEN_MODEL
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
-def looks_like_image_request(*args, **kwargs):
-    from bot.services.ai_media import looks_like_image_request as _fn
-    return _fn(*args, **kwargs)
+    parts = []
+    if source_image:
+        if len(source_image) > 4_500_000:
+            raise RuntimeError("حجم تصویر برای ویرایش خیلی بزرگ است.")
+        parts.append(
+            {
+                "inline_data": {
+                    "mime_type": source_mime or "image/jpeg",
+                    "data": base64.b64encode(source_image).decode("ascii"),
+                }
+            }
+        )
+        full_prompt = (
+            "Edit this image according to the following instruction. "
+            "Return the edited image.\n\n" + prompt
+        )
+    else:
+        full_prompt = (
+            "Generate a high-quality image for this request. "
+            "Return an image.\n\n" + prompt
+        )
+    parts.append({"text": full_prompt})
 
-def looks_like_image_edit(*args, **kwargs):
-    from bot.services.ai_media import looks_like_image_edit as _fn
-    return _fn(*args, **kwargs)
+    payload = {
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {
+            "responseModalities": ["TEXT", "IMAGE"],
+        },
+    }
 
-async def speech_to_text(*args, **kwargs):
-    from bot.services.ai_media import speech_to_text as _fn
-    return await _fn(*args, **kwargs)
-
-async def analyze_voice_emotion(*args, **kwargs):
-    from bot.services.ai_media import analyze_voice_emotion as _fn
-    return await _fn(*args, **kwargs)
-
-async def text_to_speech(*args, **kwargs):
-    from bot.services.ai_media import text_to_speech as _fn
-    return await _fn(*args, **kwargs)
-
-def wants_emotion_analysis(*args, **kwargs):
-    from bot.services.ai_media import wants_emotion_analysis as _fn
-    return _fn(*args, **kwargs)
-
-def wants_voice_chat_mode(*args, **kwargs):
-    from bot.services.ai_media import wants_voice_chat_mode as _fn
-    return _fn(*args, **kwargs)
-
-def wants_end_voice_chat(*args, **kwargs):
-    from bot.services.ai_media import wants_end_voice_chat as _fn
-    return _fn(*args, **kwargs)
-
-def wants_voice_reply(*args, **kwargs):
-    from bot.services.ai_media import wants_voice_reply as _fn
-    return _fn(*args, **kwargs)
-
-def is_voice_only_request(*args, **kwargs):
-    from bot.services.ai_media import is_voice_only_request as _fn
-    return _fn(*args, **kwargs)
-
-def strip_voice_prefix(*args, **kwargs):
-    from bot.services.ai_media import strip_voice_prefix as _fn
-    return _fn(*args, **kwargs)
-
-def should_auto_voice_reply(*args, **kwargs):
-    from bot.services.ai_media import should_auto_voice_reply as _fn
-    return _fn(*args, **kwargs)
-
-async def generate_music(*args, **kwargs):
-    from bot.services.ai_media import generate_music as _fn
-    return await _fn(*args, **kwargs)
-
-async def analyze_video(*args, **kwargs):
-    from bot.services.ai_media import analyze_video as _fn
-    return await _fn(*args, **kwargs)
-
-async def translate_voice(*args, **kwargs):
-    from bot.services.ai_media import translate_voice as _fn
-    return await _fn(*args, **kwargs)
-
-
-def _shopping_prompt_hint(prompt: str) -> str:
-    """راهنمای کوتاه و کم‌هزینه برای routing خرید."""
-    q = (prompt or "").strip()
-    if not q:
-        return ""
-    # درخواست‌های مالی/بازاریابی را هرگز shopping تلقی نکن؛ کلمه «قیمت» در
-    # تحلیل بازار کاملاً طبیعی است و نباید به ابزار خرید route شود.
-    if re.search(
-        r"تحلیل|بازار|کریپتو|رمزارز|بیت.?کوین|اتریوم|طلا|XAU|USD|USDT|"
-        r"حمایت|مقاومت|RSI|ADX|ATR|BOS|CHOCH|Funding|Open.?Interest|"
-        r"لانگ|شورت|معامله|ترید|سیگنال|تایم.?فریم",
-        q, re.I,
-    ):
-        return ""
-    _kw_hit = re.search(
-        r"خرید|قیمت|فروشگاه|فروشنده|ارزان|بهترین|لینک خرید|اینستا|شاپ|"
-        r"مقایسه.*قیمت|قیمت.*محصول|buy|price|shop",
-        q,
-        re.I,
-    )
-    if not _kw_hit:
-        # v79: «یه گوشی تا ۵۰ میلیون پیدا کن» has none of the words above but is
-        # still a shopping request; ask the freshness classifier.
+    errors = []
+    for key in keys:
         try:
-            from bot.services.ai_freshness import classify as _fresh_classify
-            if _fresh_classify(q).tool != "search_shopping":
-                return ""
-        except Exception:
-            return ""
+            status, data = await _post_json(url, params={"key": key}, json=payload)
+            if status >= 400:
+                if _is_quota_error(status, data):
+                    _mark_key_cooldown("gemini", key, daily=True)
+                    errors.append(f"{_key_id('gemini', key)} HTTP {status}")
+                    continue
+                # fallback مدل قدیمی‌تر
+                if "not found" in str(data).lower() or status == 404:
+                    alt = os.getenv("GEMINI_IMAGE_MODEL_FALLBACK", "gemini-2.5-flash-image")
+                    if model != alt:
+                        model = alt
+                        url = (
+                            f"https://generativelanguage.googleapis.com/v1beta/models/"
+                            f"{model}:generateContent"
+                        )
+                        status, data = await _post_json(
+                            url, params={"key": key}, json=payload
+                        )
+                        if status >= 400:
+                            raise RuntimeError(
+                                f"Gemini image HTTP {status}: {str(data)[:700]}"
+                            )
+                    else:
+                        raise RuntimeError(
+                            f"Gemini image HTTP {status}: {str(data)[:700]}"
+                        )
+                else:
+                    raise RuntimeError(
+                        f"Gemini image HTTP {status}: {str(data)[:700]}"
+                    )
 
-    return (
-        "\n\n[SHOPPING MODE]\n"
-        "این درخواست خرید است. قبل از پاسخ نهایی، ابزار search_shopping را در اولویت قرار بده. "
-        "در صورت درخواست «ارزان‌ترین»، تطابق دقیق مدل/مشخصات را بر پایین‌ترین عدد مقدم بدان. "
-        "در صورت «بهترین»، کیفیت تطابق و اعتبار فروشگاه را هم لحاظ کن. "
-        "اگر عکس محصول داری، از اطلاعات تصویری برند/مدل/رنگ/ظرفیت را استخراج کن و همان مشخصات را برای جستجو استفاده کن. "
-        "اگر مدل دقیق نامشخص است، عدم قطعیت را شفاف بگو. قیمت، موجودی و لینک را حدس نزن."
+            candidates = data.get("candidates") or []
+            if not candidates:
+                raise RuntimeError(f"پاسخ خالی از مدل تصویر: {str(data)[:500]}")
+
+            out_parts = (candidates[0].get("content") or {}).get("parts") or []
+            text_bits = []
+            image_bytes = None
+            mime = "image/png"
+            for part in out_parts:
+                if "text" in part and part["text"]:
+                    text_bits.append(part["text"])
+                inline = part.get("inlineData") or part.get("inline_data")
+                if inline and inline.get("data"):
+                    image_bytes = base64.b64decode(inline["data"])
+                    mime = inline.get("mimeType") or inline.get("mime_type") or "image/png"
+
+            if not image_bytes:
+                msg = " ".join(text_bits)[:500] or str(data)[:500]
+                raise RuntimeError(
+                    "مدل تصویری برنگرداند. ممکن است این مدل در کلید شما فعال نباشد یا محدودیت داشته باشد.\n"
+                    + msg
+                )
+
+            _advance_rr("gemini")
+            return image_bytes, mime
+        except RuntimeError as exc:
+            errors.append(str(exc)[:250])
+            continue
+
+    raise RuntimeError(
+        "ساخت/ویرایش تصویر ناموفق بود.\n" + " | ".join(errors[:5])
     )
 
 
-async def _live_shopping_prefetch(user_id: int, prompt: str) -> str:
-    """Run the shopping search before AI so live results survive AI/provider failures."""
+def looks_like_image_request(text: str) -> bool:
+    """آیا پیام درخواست ساخت تصویر است؟"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    patterns = (
+        r"تصویر\s*بساز",
+        r"عکس\s*بساز",
+        r"عکس\s*تولید",
+        r"تصویر\s*تولید",
+        r"بکش",
+        r"نقاشی\s*کن",
+        r"generate\s+(an?\s+)?image",
+        r"draw\s+(me\s+)?",
+        r"create\s+(an?\s+)?image",
+        r"image\s+of",
+        r"طراحی\s*کن",
+        r"پرامپت\s*تصویر",
+    )
+    import re
+    return any(re.search(p, t, re.I) for p in patterns)
+
+
+def looks_like_image_edit(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return False
+    patterns = (
+        r"ویرایش",
+        r"تغییر\s*بده",
+        r"عوض\s*کن",
+        r"اضافه\s*کن",
+        r"حذف\s*کن",
+        r"edit\s+(this\s+)?image",
+        r"change\s+",
+        r"remove\s+",
+        r"add\s+",
+        r"بدل\s*کن",
+        r"سبک\s*",
+    )
+    import re
+    return any(re.search(p, t, re.I) for p in patterns)
+
+
+
+# ── تبدیل متن به ویس (TTS) ─────────────────────────────────────────────────
+
+TTS_VOICE = os.getenv("TTS_VOICE", "fa-IR-DilaraNeural")  # فارسی زن
+# جایگزین‌ها: fa-IR-FaridNeural (مرد)
+
+
+
+# ── ویس → متن (Speech-to-Text) ─────────────────────────────────────────────
+
+async def speech_to_text(
+    audio_bytes: bytes,
+    *,
+    filename: str = "voice.ogg",
+    mime: str = "audio/ogg",
+) -> str:
+    """
+    تبدیل ویس/صوت به متن.
+    اولویت: Groq Whisper → سپس Gemini.
+    """
+    if not audio_bytes:
+        raise RuntimeError("فایل صوتی خالی است.")
+
+    errors = []
+
+    # ۱) Groq Whisper (سریع و معمولاً رایگان در سهمیه)
+    groq_keys = _next_keys("groq")
+    if groq_keys:
+        import httpx as _httpx
+
+        for key in groq_keys:
+            try:
+                url = (
+                    os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+                    + "/audio/transcriptions"
+                )
+                model = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
+                files = {
+                    "file": (filename or "audio.ogg", audio_bytes, mime or "audio/ogg"),
+                }
+                data = {
+                    "model": model,
+                    "language": os.getenv("STT_LANGUAGE", "fa"),  # فارسی
+                    "response_format": "text",
+                }
+                headers = {"Authorization": f"Bearer {key}"}
+                async with _httpx.AsyncClient(timeout=60.0) as client:
+                    resp = await client.post(
+                        url, headers=headers, data=data, files=files
+                    )
+                if resp.status_code >= 400:
+                    if _is_quota_error(resp.status_code, resp.text):
+                        _mark_key_cooldown("groq", key, daily=True)
+                        errors.append(f"groq STT HTTP {resp.status_code}")
+                        continue
+                    errors.append(f"groq STT HTTP {resp.status_code}: {resp.text[:200]}")
+                    continue
+                text = (resp.text or "").strip()
+                # گاهی JSON برمی‌گردد
+                if text.startswith("{"):
+                    try:
+                        import json as _json
+                        text = (_json.loads(text).get("text") or "").strip()
+                    except Exception:
+                        pass
+                if text:
+                    _advance_rr("groq")
+                    return text
+                errors.append("groq STT empty")
+            except Exception as e:
+                errors.append(f"groq STT: {e}")
+                continue
+
+    # ۲) Gemini (ورودی audio)
+    gemini_keys = _next_keys("gemini")
+    if gemini_keys:
+        model = os.getenv("GEMINI_STT_MODEL", "gemini-3.1-flash-lite")
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model}:generateContent"
+        )
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "inline_data": {
+                                "mime_type": mime or "audio/ogg",
+                                "data": base64.b64encode(audio_bytes).decode("ascii"),
+                            }
+                        },
+                        {
+                            "text": (
+                                "این فایل صوتی را دقیقاً به متن پیاده کن. "
+                                "فقط متن گفتار را برگردان، بدون توضیح اضافه."
+                            )
+                        },
+                    ],
+                }
+            ],
+            "generationConfig": {"maxOutputTokens": 2048},
+        }
+        for key in gemini_keys:
+            try:
+                status, data = await _post_json(url, params={"key": key}, json=payload)
+                if status >= 400:
+                    if _is_quota_error(status, data):
+                        _mark_key_cooldown("gemini", key, daily=True)
+                    errors.append(f"gemini STT HTTP {status}")
+                    continue
+                parts = data["candidates"][0]["content"]["parts"]
+                text = "".join(p.get("text", "") for p in parts).strip()
+                if text:
+                    _advance_rr("gemini")
+                    return text
+                errors.append("gemini STT empty")
+            except Exception as e:
+                errors.append(f"gemini STT: {e}")
+                continue
+
+    raise RuntimeError(
+        "نتوانستم ویس را به متن تبدیل کنم. کلید Groq یا Gemini لازم است.\n"
+        + " | ".join(errors[:5])
+    )
+
+
+
+async def analyze_voice_emotion(
+    audio_bytes: bytes,
+    *,
+    transcript: str = "",
+    filename: str = "voice.ogg",
+    mime: str = "audio/ogg",
+) -> str:
+    """
+    تشخیص احساسات و لحن از روی صدا (و در صورت وجود متن پیاده‌شده).
+    با Gemini روی خود فایل صوتی کار می‌کند.
+    """
+    if not audio_bytes:
+        raise RuntimeError("فایل صوتی خالی است.")
+
+    keys = _next_keys("gemini")
+    if not keys:
+        # بدون Gemini: تخمین ضعیف از روی متن
+        if transcript:
+            return _emotion_from_text_fallback(transcript)
+        raise RuntimeError("برای تشخیص احساس از صدا به کلید Gemini نیاز است.")
+
+    if len(audio_bytes) > 4_500_000:
+        audio_bytes = audio_bytes[:4_500_000]
+
+    model = os.getenv("GEMINI_EMOTION_MODEL", os.getenv("GEMINI_STT_MODEL", "gemini-3.1-flash-lite"))
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+    prompt = (
+        "تو یک تحلیل‌گر لحن و احساس صدا هستی. این فایل صوتی را گوش بده "
+        "(و اگر متن پیاده‌شده آمد از آن هم کمک بگیر) و به فارسی پاسخ بده.\n\n"
+        "ساختار پاسخ دقیقاً این باشد:\n"
+        "😊 احساس غالب: ...\n"
+        "📊 شدت (۰ تا ۱۰): ...\n"
+        "🎙 لحن/انرژی: ...\n"
+        "💬 احساسات فرعی: ...\n"
+        "📝 توضیح کوتاه: ...\n\n"
+        "احساسات ممکن: شادی، غم، عصبانیت، اضطراب، آرامش، هیجان، خستگی، "
+        "اعتمادبه‌نفس، تردید، مهربانی، بی‌حوصلگی، ترس، تعجب.\n"
+        "اگر صدا واضح نبود صادقانه بگو."
+    )
+    if transcript:
+        prompt += f"\n\nمتن پیاده‌شده از صدا:\n{transcript[:1500]}"
+
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": mime or "audio/ogg",
+                            "data": base64.b64encode(audio_bytes).decode("ascii"),
+                        }
+                    },
+                    {"text": prompt},
+                ],
+            }
+        ],
+        "generationConfig": {"maxOutputTokens": 800},
+    }
+
+    errors = []
+    for key in keys:
+        try:
+            status, data = await _post_json(url, params={"key": key}, json=payload)
+            if status >= 400:
+                if _is_quota_error(status, data):
+                    _mark_key_cooldown("gemini", key, daily=True)
+                    errors.append(f"HTTP {status}")
+                    continue
+                raise RuntimeError(f"Gemini emotion HTTP {status}: {str(data)[:400]}")
+            parts = data["candidates"][0]["content"]["parts"]
+            text = "".join(x.get("text", "") for x in parts).strip()
+            if text:
+                _advance_rr("gemini")
+                return text
+            errors.append("empty")
+        except Exception as e:
+            errors.append(str(e)[:200])
+            continue
+
+    if transcript:
+        return _emotion_from_text_fallback(transcript)
+    raise RuntimeError("تشخیص احساس ناموفق: " + " | ".join(errors[:4]))
+
+
+def _emotion_from_text_fallback(transcript: str) -> str:
+    """تخمین خیلی ساده فقط از روی واژه‌ها (وقتی Gemini نباشد)."""
+    t = (transcript or "").lower()
+    rules = [
+        (["عصبانی", "خفه", "لعنت", "حالم بده از", "کیفم کوک نیست"], "عصبانیت"),
+        (["میترسم", "نگران", "استرس", "دلهره"], "اضطراب/نگرانی"),
+        (["خوشحالم", "عالی", "محشر", "عاشق", "خنده‌ام"], "شادی"),
+        (["غمگین", "گریه", "دلتنگ", "تنها", "سخت"], "غم"),
+        (["خسته‌ام", "حالم نیست", "بی‌حال"], "خستگی"),
+        (["آروم", "خوبه", "ممنون", "مرسی"], "آرامش"),
+    ]
+    found = []
+    for words, label in rules:
+        if any(w in t for w in words):
+            found.append(label)
+    if not found:
+        found = ["خنثی / نامشخص از روی متن"]
+    return (
+        "😊 احساس غالب (تخمین از متن، نه صدا): "
+        + "، ".join(found)
+        + "\n📝 برای تشخیص دقیق از لحن صدا، کلید Gemini لازم است."
+    )
+
+
+async def text_to_speech(text: str, *, voice: str | None = None) -> bytes:
+    """
+    متن → فایل صوتی ogg/mp3 (edge-tts، بدون نیاز به API Key).
+    خروجی bytes مناسب ارسال با reply_voice در تلگرام.
+    """
+    text = (text or "").strip()
+    if not text:
+        raise RuntimeError("متن خالی است.")
+    # تلگرام برای voice محدودیت حدود ۱ دقیقه دارد؛ متن را کمی محدود کن
+    if len(text) > 1200:
+        text = text[:1200] + " …"
+
+    voice = voice or TTS_VOICE
     try:
-        hint = _shopping_prompt_hint(prompt)
-        if not hint:
-            return ""
-        from bot.features.market.shopping_parts.part_016_search_shopping import search_shopping
-        result = await search_shopping(
-            query=prompt,
-            source="all",
-            max_results=10,
-            user_id=user_id,
+        import edge_tts
+        import tempfile
+        from pathlib import Path as _P
+
+        communicate = edge_tts.Communicate(text, voice)
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            tmp = f.name
+        await communicate.save(tmp)
+        data = _P(tmp).read_bytes()
+        try:
+            _P(tmp).unlink(missing_ok=True)
+        except Exception:
+            pass
+        if not data:
+            raise RuntimeError("فایل صوتی خالی بود.")
+        return data
+    except ImportError:
+        raise RuntimeError(
+            "کتابخانه edge-tts نصب نیست. در requirements.txt بنویس: edge-tts"
         )
-        result = str(result or "").strip()
-        if not result:
-            return ""
-        bad = (
-            "نتیجه‌ای در فروشگاه‌ها",
-            "نتیجه قابل‌تأیید از منابع زنده برنگشت",
-            "عبارت محصول برای جستجو مشخص نیست",
-        )
-        if any(x in result for x in bad):
-            return result
-        return result
-    except Exception as exc:
-        logger.warning("live shopping prefetch failed: %s", exc)
-        return ""
+    except Exception as e:
+        raise RuntimeError(f"ساخت ویس ناموفق: {e}")
 
 
-def _shopping_direct_result(result: str) -> str:
-    """Accept only actual shopping-tool output as the provider-independent fallback."""
-    text = str(result or "").strip()
-    if not text:
-        return ""
-    if text.startswith("[SHOPPING_LIVE_RESULT]"):
-        text = text[len("[SHOPPING_LIVE_RESULT]"):].strip()
-    if not text:
-        return ""
-    if "قیمت حدسی" in text and "نتیجه" in text and "برنگشت" in text:
-        return ""
-    if "نتیجه‌ای در فروشگاه‌ها، اینستاگرام و وب پیدا نشد" in text:
-        return ""
-    return text[:7000]
+
+
+def wants_emotion_analysis(text: str) -> bool:
+    """آیا کاربر صریحاً تشخیص احساس از صدا خواسته؟"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    import re
+    patterns = (
+        r"تشخیص\s*احساس",
+        r"احساس(ات)?\s*(من|صدا|از\s*صدا)?",
+        r"لحن(م|م\s*چطور)",
+        r"از\s*صدا(م)?\s*(بگو|تحلیل|تشخیص)",
+        r"حالم\s*از\s*صدا",
+        r"emotion",
+        r"تحلیل\s*احساس",
+        r"چه\s*احساسی",
+    )
+    return any(re.search(p, t, re.I) for p in patterns)
+
+
+def wants_voice_chat_mode(text: str) -> bool:
+    """درخواست شروع مکالمه ویسی پایدار (نه فقط یک‌بار)."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    import re
+    patterns = (
+        r"ویس\s*حرف\s*بزن",
+        r"با\s*ویس\s*حرف",
+        r"حرف\s*بزنیم\s*(با\s*)?ویس",
+        r"صحبت\s*(صوتی|ویسی|با\s*صدا)",
+        r"چت\s*صوتی",
+        r"مکالمه\s*(ی\s*)?(صوتی|ویسی)",
+        r"از\s*این\s*به\s*بعد\s*(با\s*)?(ویس|صدا)",
+        r"فقط\s*ویس",
+        r"voice\s*chat",
+        r"let'?s\s*talk\s*(by\s*)?voice",
+        r"با\s*صدا\s*حرف",
+        r"صدا\s*حرف\s*بزن",
+        r"بیا\s*ویس",
+        r"ویس\s*باش",
+        r"حالت\s*ویس",
+        r"حالت\s*صوتی",
+    )
+    return any(re.search(p, t, re.I) for p in patterns)
+
+
+def wants_end_voice_chat(text: str) -> bool:
+    """پایان حالت مکالمه ویسی."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    import re
+    patterns = (
+        r"قطع\s*ویس",
+        r"بدون\s*ویس",
+        r"دیگه\s*ویس\s*ن",
+        r"متن(ی)?\s*حرف\s*بزن",
+        r"حالت\s*متنی",
+        r"ویس\s*رو\s*خاموش",
+        r"خاموش\s*کردن\s*ویس",
+        r"end\s*voice",
+        r"stop\s*voice",
+        r"فقط\s*متن",
+    )
+    return any(re.search(p, t, re.I) for p in patterns)
+
+
+def wants_voice_reply(text: str) -> bool:
+    """درخواست صریح ویس برای همین پیام."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    import re
+    if wants_voice_chat_mode(t):
+        return True
+    patterns = (
+        r"^با\s*ویس\b",
+        r"^با\s*صدا\b",
+        r"^ویس\s*[:：]",
+        r"^صدا\s*[:：]",
+        r"ویس\s*بفرست",
+        r"صدا\s*بفرست",
+        r"بفرست\s*ویس",
+        r"بفرست\s*صدا",
+        r"فایل\s*صوتی",
+        r"صوتی\s*بفرست",
+        r"\bبا\s*ویس\s*بگو\b",
+        r"\bبا\s*صدا\s*بگو\b",
+        r"\bجواب(تو)?\s*(رو\s*)?با\s*ویس\b",
+        r"\bجواب(تو)?\s*(رو\s*)?با\s*صدا\b",
+        r"\bبرام\s*بخون\b",
+        r"\bspeak\b",
+        r"\bvoice\s*reply\b",
+        r"\btts\b",
+        r"send\s*(a\s*)?voice",
+    )
+    return any(re.search(p, t, re.I) for p in patterns)
+
+
+def is_voice_only_request(text: str) -> bool:
+    """فقط درخواست ویس بدون سؤال دیگر (مثل: ویس بفرست)."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    import re
+    t2 = re.sub(
+        r"^(لطفا|خواهشا|میشه|میتونی|می‌تونی)\s*",
+        "",
+        t,
+        flags=re.I,
+    ).strip()
+    patterns = (
+        r"^ویس\s*بفرست\s*$",
+        r"^صدا\s*بفرست\s*$",
+        r"^بفرست\s*ویس\s*$",
+        r"^بفرست\s*صدا\s*$",
+        r"^با\s*ویس\s*$",
+        r"^با\s*صدا\s*$",
+        r"^بخون\s*$",
+        r"^بخوان\s*$",
+        r"^voice\s*$",
+        r"^tts\s*$",
+        r"^فایل\s*صوتی\s*بفرست\s*$",
+    )
+    return any(re.search(p, t2, re.I) for p in patterns)
+
+
+
+def strip_voice_prefix(text: str) -> str:
+    import re
+    t = (text or "").strip()
+    t = re.sub(
+        r"^(با\s*ویس|با\s*صدا|ویس|صدا)\s*[:：]?\s*",
+        "",
+        t,
+        flags=re.I,
+    )
+    t = re.sub(r"\b(با\s*ویس\s*بگو|با\s*صدا\s*بگو)\b", "", t, flags=re.I)
+    return t.strip() or text.strip()
+
+
+def should_auto_voice_reply(
+    user_text: str,
+    answer: str,
+    *,
+    input_was_voice: bool = False,
+    explicit_voice: bool = False,
+    voice_chat_mode: bool = False,
+) -> bool:
+    """
+    ویس فقط وقتی:
+      ۱) کاربر صریحاً خواسته (با ویس / بخون / ...)
+      ۲) حالت مکالمه ویسی روشن است («ویس حرف بزنیم»)
+    ورودی ویس به‌تنهایی کافی نیست — الکی ویس نمی‌فرستد.
+    """
+    ans = (answer or "").strip()
+    if not ans:
+        return False
+
+    # فقط درخواست صریح یا حالت مکالمه ویسی
+    if explicit_voice or voice_chat_mode:
+        return True
+
+    return False
+
+
+
+
+# ── موسیقی / افکت صوتی (Gemini Lyria در صورت پشتیبانی کلید) ────────────────
+
+async def generate_music(prompt: str) -> bytes:
+    """
+    ساخت کلیپ صوتی.
+    اولویت: مدل‌های Lyria / پاسخ AUDIO در Gemini.
+    اگر API موسیقی ندهد، خطای واضح برمی‌گرداند.
+    """
+    prompt = (prompt or "").strip()
+    if not prompt:
+        raise RuntimeError("توضیح موسیقی خالی است.")
+    keys = _next_keys("gemini")
+    if not keys:
+        raise RuntimeError("برای ساخت موسیقی به کلید Gemini نیاز است.")
+
+    models = [
+        os.getenv("GEMINI_MUSIC_MODEL", "").strip(),
+        "lyria-3-clip-preview",
+        "lyria-3-pro-preview",
+    ]
+    models = [m for m in models if m]
+    # حذف تکراری با حفظ ترتیب
+    seen = set()
+    models = [m for m in models if not (m in seen or seen.add(m))]
+
+    errors = []
+    for model in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        payloads = [
+        {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        },
+    ]
+        for key in keys:
+            for payload in payloads:
+                try:
+                    status, data = await _post_json(url, params={"key": key}, json=payload)
+                    if status >= 400:
+                        errors.append(f"{model} HTTP {status}")
+                        if _is_quota_error(status, data):
+                            _mark_key_cooldown("gemini", key, daily=True)
+                        continue
+                    parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts") or []
+                    for part in parts:
+                        inline = part.get("inlineData") or part.get("inline_data")
+                        if inline and inline.get("data"):
+                            raw = base64.b64decode(inline["data"])
+                            if raw:
+                                _advance_rr("gemini")
+                                return raw
+                    errors.append(f"{model}: no audio part")
+                except Exception as e:
+                    errors.append(str(e)[:120])
+    raise RuntimeError(
+        "ساخت موسیقی روی این کلید/مدل در دسترس نبود. "
+        "مدل Lyria باید روی پروژه Google AI Studio فعال باشد.\n"
+        + " | ".join(errors[:5])
+    )
+
+
+
+async def analyze_video(
+    video_bytes: bytes,
+    prompt: str = "",
+    *,
+    mime: str = "video/mp4",
+) -> str:
+    """تحلیل ویدیو کوتاه با Gemini."""
+    keys = _next_keys("gemini")
+    if not keys:
+        raise RuntimeError("برای تحلیل ویدیو به Gemini نیاز است.")
+    if len(video_bytes) > 15_000_000:
+        raise RuntimeError("ویدیو خیلی بزرگ است (حد حدود ۱۵ مگ).")
+
+    model = os.getenv("GEMINI_VIDEO_MODEL", "gemini-3.1-flash-lite")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    text = (prompt or "").strip() or (
+        "این ویدیو کوتاه را خلاصه و تحلیل کن: موضوع، افراد/اشیاء مهم، "
+        "متن یا گفتار شنیده‌شده، و نکات کلیدی."
+    )
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": mime or "video/mp4",
+                            "data": base64.b64encode(video_bytes).decode("ascii"),
+                        }
+                    },
+                    {"text": text},
+                ],
+            }
+        ],
+        "generationConfig": {"maxOutputTokens": MAX_OUTPUT},
+    }
+    errors = []
+    for key in keys:
+        try:
+            status, data = await _post_json(url, params={"key": key}, json=payload)
+            if status >= 400:
+                if _is_quota_error(status, data):
+                    _mark_key_cooldown("gemini", key, daily=True)
+                errors.append(f"HTTP {status}")
+                continue
+            parts = data["candidates"][0]["content"]["parts"]
+            out = "".join(x.get("text", "") for x in parts).strip()
+            if out:
+                _advance_rr("gemini")
+                return out
+        except Exception as e:
+            errors.append(str(e)[:150])
+    raise RuntimeError("تحلیل ویدیو ناموفق: " + " | ".join(errors[:4]))
+
+
+async def translate_voice(
+    audio_bytes: bytes,
+    *,
+    target_lang: str = "en",
+    filename: str = "voice.ogg",
+    mime: str = "audio/ogg",
+) -> tuple[str, str, bytes]:
+    """ویس → متن → ترجمه → ویس مقصد. خروجی: (متن اصلی, ترجمه, audio)."""
+    src_text = await speech_to_text(audio_bytes, filename=filename, mime=mime)
+    target_lang = (target_lang or "en").lower()
+    lang_name = {
+        "en": "English",
+        "fa": "Persian",
+        "ar": "Arabic",
+        "tr": "Turkish",
+        "de": "German",
+        "fr": "French",
+    }.get(target_lang, target_lang)
+
+    prompt = (
+        "Translate the following text to "
+        + lang_name
+        + ". Return only the translation.\n\n"
+        + src_text
+    )
+    translated = None
+    options = available_model_options()
+    for provider, _label, model in options:
+        try:
+            translated = await _call_provider(provider, 0, prompt, model)
+            if translated:
+                break
+        except Exception:
+            continue
+    if not translated:
+        raise RuntimeError("ترجمه ناموفق بود.")
+
+    voice = TTS_VOICE
+    if target_lang.startswith("en"):
+        voice = "en-US-JennyNeural"
+    elif target_lang.startswith("ar"):
+        voice = "ar-SA-ZariyahNeural"
+    elif target_lang.startswith("de"):
+        voice = "de-DE-KatjaNeural"
+    elif target_lang.startswith("fr"):
+        voice = "fr-FR-DeniseNeural"
+    elif target_lang.startswith("tr"):
+        voice = "tr-TR-EmelNeural"
+    elif target_lang.startswith("fa"):
+        voice = TTS_VOICE
+
+    audio_out = await text_to_speech(translated, voice=voice)
+    return src_text, translated, audio_out
+
 
 
 async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
@@ -608,43 +1981,22 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
             "هیچ سرویس AI تنظیم نشده است. حداقل یک API Key در Render قرار بده."
         )
 
-    try:
-        from bot.services.ai_providers import _looks_simple_prompt
-        from bot.services.ai_runtime import reset_provider_circuits
-        if _looks_simple_prompt(prompt):
-            reset_provider_circuits()
-            # Prefer providers that typically work on free keys (gemini, openrouter)
-            rank = {"gemini": 0, "openrouter": 1, "groq": 2, "cerebras": 3, "cloudflare": 4}
-            options = sorted(
-                options,
-                key=lambda x: (rank.get(x[0], 9), options.index(x)),
-            )
-    except Exception as exc:
-        logger.debug("non-fatal exception: %s", exc)
-
     original_prompt = prompt
-    shopping_hint = _shopping_prompt_hint(prompt)
-    live_shopping = await _live_shopping_prefetch(user_id, original_prompt) if shopping_hint else ""
-    if shopping_hint:
-        prompt = prompt + shopping_hint
-    if live_shopping:
-        prompt += (
-            "\n\n[VERIFIED LIVE SHOPPING RESULT]\n"
-            "این خروجی همین الان از جستجوی زنده گرفته شده است. فقط از همین داده برای پاسخ خرید استفاده کن. "
-            "اگر قیمت/فروشنده/لینک در آن نیست، آن مورد را اضافه نکن و از خودت حدس نزن.\n"
-            + live_shopping
-        )
-    try:
-        from bot.services.ai_freshness import build_instruction
-        freshness_hint = build_instruction(original_prompt)
-        if freshness_hint:
-            prompt = prompt + freshness_hint
-    except Exception as exc:
-        logger.debug("freshness instruction skipped: %s", exc)
     try:
         _extract_and_store_memory(user_id, original_prompt)
-    except Exception as _exc:
-        logger.debug("%s: %s", __name__, _exc)
+    except Exception:
+        pass
+
+    live_shopping = await _live_shopping_prefetch(original_prompt)
+    provider_prompt = original_prompt
+    if live_shopping:
+        provider_prompt = (
+            original_prompt
+            + "\n\n[SHOPPING_LIVE_RESULT]\n"
+            + live_shopping[:12000]
+            + "\n[/SHOPPING_LIVE_RESULT]\n"
+            + "برای اطلاعات خرید فقط از داده زنده بالا استفاده کن و قیمت/موجودی جدید از خودت نساز."
+        )
     # ساخت لیست (provider, model) برای امتحان — سریع‌ترین‌ها اول
     def _models_of(provider: str) -> List[Tuple[str, str]]:
         return [(provider, m) for m in models_for_provider(provider)]
@@ -670,30 +2022,7 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
                     item for item in available_for_selected if item not in ordered
                 )
 
-        # ۲) Routing تطبیقی: کار ساده ابتدا به سریع‌ترین مسیر، کار پیچیده ابتدا به مدل‌های قوی‌تر.
-        # انتخاب صریح کاربر همیشه اولویت اول را حفظ می‌کند.
-        if not selected:
-            text_len = len(original_prompt)
-            tool_heavy = any(x in original_prompt.lower() for x in (
-                "قیمت", "بازار", "کریپتو", "آب و هوا", "هوا", "خرید", "لینک",
-                "تحلیل", "کد", "برنامه", "فایل", "عکس", "ویس", "یادآوری",
-            ))
-            complex_request = text_len >= AI_COMPLEX_MIN_CHARS or tool_heavy
-            rank = {"gemini": 0, "cerebras": 1, "groq": 2, "openrouter": 3, "cloudflare": 4}
-            if not complex_request:
-                rank = {"groq": 0, "gemini": 1, "cerebras": 2, "cloudflare": 3, "openrouter": 4}
-            # V5: choose by task fit (quality/cost/latency) while retaining the
-            # existing provider preference as a deterministic tie-breaker.
-            options = sorted(
-                options,
-                key=lambda x: (
-                    _route_score(x[0], x[2], complex_request=complex_request),
-                    rank.get(x[0], 9),
-                    options.index(x),
-                ),
-            )
-
-        # ۳) بقیه ارائه‌دهنده‌ها (fallback)
+        # ۲) بقیه ارائه‌دهنده‌ها (fallback) به ترتیب پیش‌فرض
         for provider, _label, model in options:
             item = (provider, model)
             if item not in ordered:
@@ -703,39 +2032,50 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
             key = (provider, model)
             if key in tried:
                 continue
-            # Soft: log cooldown but still try (invalid-key storms used to mute the bot).
-            if not selected and not _provider_available(provider):
-                logger.info("AI provider %s cooling down — skipping to next provider", provider)
-                continue
             tried.add(key)
-            started = time.monotonic()
             try:
                 answer = await _call_provider(provider, user_id, prompt, model)
-                _record_provider(provider, ok=True, latency=time.monotonic() - started)
-                record_metric("ai_provider", provider, ok=True, latency=time.monotonic() - started, model=model)
                 _save_turn(user_id, original_prompt, answer)
-                # انتخاب خودکار را در DB ذخیره نکن؛ وگرنه اولین Provider موفق
-                # عملاً Routing تطبیقی درخواست‌های بعدی را قفل می‌کرد.
-                # انتخاب دستی کاربر همچنان در _USER_SELECTION/DB حفظ می‌شود.
+                # اگر هنوز provider انتخاب نشده، همین را ذخیره کن (با *)
+                if not selected:
+                    set_selected_model(user_id, provider, "*")
                 return answer, f"{provider} / {model}"
             except Exception as exc:
-                _record_provider(provider, ok=False, latency=time.monotonic() - started)
-                record_metric("ai_provider", provider, ok=False, latency=time.monotonic() - started, model=model)
                 msg = str(exc).replace("\n", " ")[:500]
                 errors.append(f"{provider}/{model}: {msg}")
                 logger.warning("AI provider/model failed: %s", msg)
                 # تأخیر خیلی کم بین تلاش‌ها برای سرعت بیشتر
                 await asyncio.sleep(0.05)
 
-    logger.error("AI request failed across all providers: %s", " | ".join(errors[:8]))
-    if shopping_hint and live_shopping:
-        direct = _shopping_direct_result(live_shopping)
-        if direct:
-            return direct, "shopping-direct"
-    if any("INVALID_API_KEY" in e for e in errors):
-        raise RuntimeError("INVALID_API_KEY: " + next(e for e in errors if "INVALID_API_KEY" in e)[:240])
-    detail = errors[0] if errors else "unknown"
-    raise RuntimeError(f"AI_UNAVAILABLE: {detail[:240]}")
+    if live_shopping and "نتیجه قابل‌تأییدی پیدا نشد" not in live_shopping and "نتیجه قابل‌تأیید از منابع زنده برنگشت" not in live_shopping:
+        logger.warning("all AI providers failed; returning live shopping result directly")
+        return live_shopping, "Live Shopping"
+
+    raise RuntimeError(
+        "فعلاً هیچ‌کدام از مدل‌های AI پاسخ ندادند.\n\n" + "\n".join(errors[:8])
+    )
+
+
+
+
+def _looks_like_shopping_request(text: str) -> bool:
+    t = str(text or '').lower()
+    return bool(__import__('re').search(r"گوشی|موبایل|لپ.?تاپ|لپتاپ|کفش|لباس|هدفون|هندزفری|تلویزیون|لوازم|محصول|خرید|قیمت|بودجه|تا\s*\d+\s*(?:میلیون|م)|amazon|آمازون|ترب|دیجی.?کالا|فروشگاه", t, __import__('re').I))
+
+
+async def _live_shopping_prefetch(prompt: str) -> str:
+    """Shopping is independent of AI; return verified live shopping data when possible."""
+    if not _looks_like_shopping_request(prompt):
+        return ''
+    try:
+        from bot.features.market.shopping_parts.part_016_search_shopping_live import search_shopping
+        return await asyncio.wait_for(
+            search_shopping(query=prompt, max_results=10),
+            timeout=float(os.getenv('SHOPPING_PREFETCH_TIMEOUT', '25')),
+        )
+    except Exception as exc:
+        logger.warning('live shopping prefetch failed: %s', exc)
+        return ''
 
 
 # ── استریم واقعی از API (SSE) ───────────────────────────────────────────────
@@ -832,7 +2172,6 @@ async def _stream_gemini(user_id: int, prompt: str, model: str):
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": contents,
         "generationConfig": {"maxOutputTokens": MAX_OUTPUT},
-        "safetySettings": GEMINI_SAFETY_SETTINGS,
     }
     last_err = None
     for key in keys:
@@ -893,36 +2232,23 @@ async def ask_ai_stream(user_id: int, prompt: str):
     original = prompt
     try:
         _extract_and_store_memory(user_id, original)
-    except Exception as _exc:
-        logger.debug("%s: %s", __name__, _exc)
+    except Exception:
+        pass
+
+    live_shopping = await _live_shopping_prefetch(original)
+    provider_prompt = original
+    if live_shopping:
+        provider_prompt = (
+            original
+            + "\n\n[SHOPPING_LIVE_RESULT]\n"
+            + live_shopping[:12000]
+            + "\n[/SHOPPING_LIVE_RESULT]\n"
+            + "برای اطلاعات خرید فقط از داده زنده بالا استفاده کن و قیمت/موجودی جدید از خودت نساز."
+        )
 
     options = available_model_options()
     if not options:
         raise RuntimeError("هیچ سرویس AI تنظیم نشده")
-
-    shopping_hint = _shopping_prompt_hint(original)
-    live_shopping = await _live_shopping_prefetch(user_id, original) if shopping_hint else ""
-    if shopping_hint:
-        prompt = original + shopping_hint
-    else:
-        prompt = original
-    if live_shopping:
-        prompt += (
-            "\n\n[VERIFIED LIVE SHOPPING RESULT]\n"
-            "این خروجی همین الان از جستجوی زنده گرفته شده است. فقط از همین داده برای پاسخ خرید استفاده کن. "
-            "قیمت، موجودی، فروشنده یا مدل جدید از حافظه اضافه نکن.\n"
-            + live_shopping
-        )
-
-    try:
-        from bot.services.ai_providers import _looks_simple_prompt
-        from bot.services.ai_runtime import reset_provider_circuits
-        if _looks_simple_prompt(prompt):
-            reset_provider_circuits()
-            rank = {"gemini": 0, "openrouter": 1, "groq": 2, "cerebras": 3, "cloudflare": 4}
-            options = sorted(options, key=lambda x: (rank.get(x[0], 9), options.index(x)))
-    except Exception as exc:
-        logger.debug("non-fatal exception: %s", exc)
 
     async with _LOCKS[user_id]:
         selected = get_selected_model(user_id)
@@ -941,18 +2267,13 @@ async def ask_ai_stream(user_id: int, prompt: str):
 
         errors = []
         for provider, model in ordered:
-            if not selected and not _provider_available(provider):
-                logger.info("AI stream provider %s cooling down — skipping", provider)
-                continue
             try:
-                answer = await _call_provider(provider, user_id, prompt, model)
+                answer = await _call_provider(provider, user_id, original, model)
                 if not answer:
                     raise RuntimeError("empty answer")
                 _save_turn(user_id, original, answer)
-                # Automatic routing must remain automatic. Persisting the first
-                # successful provider here could lock the user to a provider
-                # that later becomes unavailable. Manual selections are already
-                # persisted by set_selected_model().
+                if not selected:
+                    set_selected_model(user_id, provider, "*")
 
                 # Emit bounded chunks so Telegram still appears to stream.
                 chunk_size = max(80, int(os.getenv("AI_STREAM_CHUNK", "180")))
@@ -967,53 +2288,14 @@ async def ask_ai_stream(user_id: int, prompt: str):
                 logger.warning("stream facade provider failed: %s", msg)
                 await asyncio.sleep(0.05)
 
-    logger.error("AI streaming facade failed across all providers: %s", " | ".join(errors[:8]))
-    if shopping_hint and live_shopping:
-        direct = _shopping_direct_result(live_shopping)
-        if direct:
-            chunk_size = max(80, int(os.getenv("AI_STREAM_CHUNK", "180")))
-            for i in range(0, len(direct), chunk_size):
-                yield direct[i:i + chunk_size], None
-                await asyncio.sleep(0)
-            yield None, "shopping-direct"
-            return
-    if any("INVALID_API_KEY" in e for e in errors):
-        raise RuntimeError("INVALID_API_KEY: " + next(e for e in errors if "INVALID_API_KEY" in e)[:240])
-    detail = errors[0] if errors else "unknown"
-    raise RuntimeError(f"AI_UNAVAILABLE: {detail[:240]}")
+    if live_shopping and "نتیجه قابل‌تأییدی پیدا نشد" not in live_shopping and "نتیجه قابل‌تأیید از منابع زنده برنگشت" not in live_shopping:
+        logger.warning("all AI providers failed; streaming live shopping result directly")
+        chunk_size = max(80, int(os.getenv("AI_STREAM_CHUNK", "180")))
+        for i in range(0, len(live_shopping), chunk_size):
+            yield live_shopping[i:i + chunk_size], None
+            await asyncio.sleep(0)
+        yield None, "Live Shopping"
+        return
 
+    raise RuntimeError("استریم ناموفق:\n" + "\n".join(errors[:8]))
 
-
-async def diagnose_ai_keys() -> str:
-    """Admin diagnostic: probe each configured provider with a tiny plain request."""
-    from bot.services.ai_runtime import available_model_options, _provider_keys
-    from bot.services.ai_providers import _emergency_plain_completion
-    lines = []
-    seen = set()
-    for provider, _label, model in available_model_options():
-        if provider in seen:
-            continue
-        seen.add(provider)
-        nkeys = len(_provider_keys(provider))
-        if nkeys == 0:
-            lines.append(f"• {provider}: no keys")
-            continue
-        try:
-            text = await _emergency_plain_completion(provider, "بگو فقط: سلام", model)
-            lines.append(f"• {provider}/{model}: OK — {text[:60]!r} ({nkeys} key)")
-        except Exception as exc:
-            lines.append(f"• {provider}/{model}: FAIL — {str(exc)[:120]} ({nkeys} key)")
-    return "🔍 AI diagnose\n" + ("\n".join(lines) if lines else "هیچ providerی نیست")
-
-
-# Compatibility exports for the stable ai_service facade.
-
-# These names are part of the public ai_service contract and are sourced from
-# ai_runtime so callbacks/messages keep working even when the legacy fragment
-# itself does not define them.
-from bot.services.ai_runtime import (
-    clear_history,
-    available_providers,
-    set_selected_provider,
-    get_selected_model,
-)
