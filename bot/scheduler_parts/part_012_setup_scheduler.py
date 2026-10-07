@@ -45,6 +45,12 @@ def setup_scheduler(app):
         name="economic_calendar_alerts",
     )
     job_queue.run_repeating(check_v65_price_alerts, interval=60, first=40, name="v65_price_alerts")
+    # Shopping price alerts: low-frequency by design to protect Render/network limits.
+    try:
+        from bot.features.market.shopping import check_shopping_price_alerts
+        job_queue.run_repeating(check_shopping_price_alerts, interval=900, first=180, name="shopping_price_alerts")
+    except Exception as exc:
+        logger.warning("shopping price alerts scheduler disabled: %s", exc)
     job_queue.run_repeating(v71_due_jobs, interval=30, first=45, name="v71_scheduled_ai")
     # بکاپ پرتکرار: local + Cloudflare R2 (+ GitHub fallback). فاصله از env قابل تنظیم است (پیش‌فرض ۳۰ دقیقه).
     job_queue.run_repeating(
