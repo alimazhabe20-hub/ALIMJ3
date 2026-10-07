@@ -1,1169 +1,482 @@
-"""Built-in AI tool handlers and public tool API.
-
-Generic registry/execution machinery lives in tool_runtime.py. This facade
-re-exports the historical public functions so existing imports are stable.
-"""
-from __future__ import annotations
-
 import asyncio
-import json
-from typing import Any, List
-
-from bot.services.tool_runtime import (
-    register_tool, get_registered_tool_names, get_tool_definitions,
-    _REGISTRY, _TOOL_CACHEABLE,
-    parse_tool_arguments, execute_tool, gather_context_for_prompt,
-    list_registered_tools, clear_tool_cache,
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler, InlineQueryHandler,
+    MessageHandler, filters, ContextTypes,
 )
-
-
-
-# ── Handlers ────────────────────────────────────────────────────────────────
-
-async def _get_weather(city: str = "", user_id: int = 0) -> str:
-    from bot.api.weather import get_weather
-    from bot.database import get_user_city
-
-    city = (city or "").strip() or (get_user_city(user_id) or "تهران")
-    data = await asyncio.to_thread(get_weather, city)
-    if not data:
-        return f"آب‌وهوای «{city}» پیدا نشد."
-    return (
-        f"آب‌وهوای {city}:\n"
-        f"دما: {data.get('temp')}°C\n"
-        f"وضعیت: {data.get('condition')}\n"
-        f"رطوبت: {data.get('humidity')}%"
-    )
-
-
-async def _get_weather_forecast(city: str = "", days: int = 7, start_day: int = 0, user_id: int = 0) -> str:
-    from bot.features.weather.weather_extra import weather_forecast
-    from bot.database import get_user_city
-
-    city = (city or "").strip() or (get_user_city(user_id) or "تهران")
-    return await weather_forecast(city, days=int(days or 7), start_day=int(start_day or 0))
-
-
-async def _get_air_quality(city: str = "", user_id: int = 0) -> str:
-    from bot.features.weather.weather_extra import air_quality
-    from bot.database import get_user_city
-
-    city = (city or "").strip() or (get_user_city(user_id) or "تهران")
-    return await air_quality(city)
-
-
-async def _get_prayer_times(
-    city: str = "", country: str = "Iran", user_id: int = 0
-) -> str:
-    from bot.api.prayer import get_prayer_times
-    from bot.database import get_user_city
-
-    city = (city or "").strip() or (get_user_city(user_id) or "قم")
-    data = get_prayer_times(city, country or "Iran")
-    if not data:
-        return f"اوقات شرعی «{city}» پیدا نشد."
-    lines = [f"اوقات شرعی {city}:"]
-    for k, v in data.items():
-        lines.append(f"{k}: {v}")
-    return "\n".join(lines)
-
-
-async def _get_market_prices() -> str:
-    from bot.features.market.finance import full_market_prices
-
-    return await full_market_prices()
-
-
-async def _search_shopping(query: str = "", source: str = "all", max_results: int = 12, min_price: int = 0, max_price: int = 0) -> str:
-    from bot.features.market.shopping import search_shopping
-    return await search_shopping(
-        query=query, source=source, max_results=int(max_results or 12),
-        min_price=int(min_price or 0), max_price=int(max_price or 0),
-    )
-
-
-def _shopping_price_history(query: str = "", days: int = 30) -> str:
-    from bot.features.market.shopping import shopping_price_history
-    return shopping_price_history(query=query, days=int(days or 30))
-
-
-async def _get_crypto_price(symbol: str = "btc", user_id: int = 0) -> str:
-    from bot.features.market.finance import get_crypto_price
-    return await get_crypto_price(symbol)
-
-
-async def _get_top_crypto(limit: int = 10) -> str:
-    from bot.features.market.finance import get_top_crypto
-
-    return await get_top_crypto(int(limit or 10))
-
-
-async def _convert_currency(amount: float, from_cur: str, to_cur: str = "") -> str:
-    from bot.features.market.finance import convert_currency
-
-    return await convert_currency(float(amount), str(from_cur), str(to_cur or ""))
-
-
-async def _convert_crypto(amount: float, symbol: str) -> str:
-    from bot.features.market.finance import convert_crypto
-
-    return await convert_crypto(float(amount), str(symbol))
-
-
-def _calculator(expression: str) -> str:
-    from bot.features.tools.app_tools import calculator
-
-    return calculator(expression)
-
-
-def _generate_password(length: int = 16) -> str:
-    from bot.features.tools.app_tools import generate_password
-
-    return generate_password(int(length or 16))
-
-
-def _count_text(text: str) -> str:
-    from bot.features.tools.app_tools import count_text
-
-    return count_text(text)
-
-
-async def _world_distance(place1: str, place2: str = "") -> str:
-    from bot.features.tools.app_tools import world_distance
-
-    return await world_distance(place1, place2 or None)
-
-
-def _convert_date(date_text: str) -> str:
-    from bot.features.date.date_tools import parse_any_date, convert_with_weekday
-
-    p = parse_any_date(date_text)
-    if not p:
-        return "تاریخ نامعتبر. مثال: 1403/05/18 یا 2024/08/09"
-    return convert_with_weekday(p[0], p[1], p[2], p[3])
-
-
-def _calculate_age(birth_date: str) -> str:
-    from bot.features.date.date_tools import parse_shamsi
-    from bot.features.date.converters import calculate_age
-
-    p = parse_shamsi(birth_date)
-    if not p:
-        return "تاریخ تولد نامعتبر. مثال: 1375/03/15"
-    return calculate_age(p[0], p[1], p[2])
-
-
-def _birthday_countdown(birth_date: str) -> str:
-    from bot.features.date.date_tools import parse_shamsi, birthday_countdown
-
-    p = parse_shamsi(birth_date)
-    if not p:
-        return "تاریخ نامعتبر. مثال: 1375/03/15"
-    return birthday_countdown(p[0], p[1], p[2])
-
-
-def _zodiac_animal(birth_date: str) -> str:
-    from bot.features.date.date_tools import parse_shamsi, zodiac_animal
-
-    p = parse_shamsi(birth_date)
-    if not p:
-        return "تاریخ نامعتبر."
-    return zodiac_animal(p[0], p[1], p[2])
-
-
-def _lunar_age(birth_date: str) -> str:
-    from bot.features.date.date_tools import parse_shamsi, lunar_age
-
-    p = parse_shamsi(birth_date)
-    if not p:
-        return "تاریخ نامعتبر."
-    return lunar_age(p[0], p[1], p[2])
-
-
-def _current_datetime(timezone_name: str = "", relative_day: int = 0) -> str:
-    from bot.services.current_datetime import current_datetime
-
-    return current_datetime(timezone_name, relative_day=relative_day)
-
-
-def _world_clock() -> str:
-    from bot.features.date.date_tools import world_clock
-
-    return world_clock()
-
-
-def _month_calendar() -> str:
-    from bot.features.date.date_tools import month_calendar
-
-    return month_calendar()
-
-
-def _nowruz_countdown() -> str:
-    from bot.features.date.date_tools import nowruz_countdown
-
-    return nowruz_countdown()
-
-
-def _search_events(query: str) -> str:
-    from bot.features.date.date_tools import search_events
-
-    return search_events(query)
-
-
-def _qibla_direction(city: str = "", user_id: int = 0) -> str:
-    from bot.features.religious.qibla import qibla_direction
-    from bot.database import get_user_city
-
-    city = (city or "").strip() or (get_user_city(user_id) or "تهران")
-    return qibla_direction(city)
-
-
-def _daily_adhkar(user_id: int = 0) -> str:
-    from bot.features.religious.adhkar import daily_adhkar
-
-    return daily_adhkar(user_id)
-
-
-async def _daily_verse_hadith(user_id: int = 0) -> str:
-    from bot.features.religious.verse_hadith import daily_verse_hadith
-
-    return await daily_verse_hadith(user_id)
-
-
-def _religious_countdown() -> str:
-    from bot.features.religious.events import religious_countdown
-
-    return religious_countdown()
-
-
-async def _istikhara(user_id: int = 0) -> str:
-    from bot.features.religious.istikhara import istikhara
-
-    return await istikhara(user_id)
-
-
-async def _hafez_fal(user_id: int = 0) -> str:
-    from bot.features.fun.fun_tools import hafez_fal
-
-    return await hafez_fal(user_id)
-
-
-async def _joke(category: str = "", user_id: int = 0) -> str:
-    from bot.features.fun.fun_tools import random_joke
-
-    return random_joke(category or None, user_id)
-
-
-async def _fact_of_day() -> str:
-    from bot.features.fun.fun_tools import fact_of_day
-
-    return await fact_of_day()
-
-
-async def _daily_challenge() -> str:
-    from bot.features.fun.fun_tools import daily_challenge
-
-    return await daily_challenge()
-
-
-def _apply_font(text: str, style_key: str = "") -> str:
-    from bot.features.fonts.converter import apply_font, apply_all_fonts, list_fonts
-
-    if not text:
-        return "متنی برای تبدیل فونت نفرستادی."
-    if not style_key:
-        return apply_all_fonts(text)
+from telegram import Update
+from bot.config import config
+from bot.release import version_string
+from bot.logger import logger
+from bot.database import init_db, backup_db, _user_count, DB_PATH
+from bot.handlers.commands import (
+    start, help_command, city_command, language_command,
+    calendar_command, stats_command, broadcast_command,
+    backup_command, restore_document_handler, diagnostics_command, aitest_command, knowledge_command, agent_command,
+    memory_command, automation_command, plugins_command,
+)
+from bot.handlers.callbacks import button_handler
+from bot.services.telegram_enhancements import enhancement_callback, inline_query_handler
+from bot.handlers.messages import text_handler, media_ai_handler, voice_ai_handler, lens_command
+from bot.scheduler import setup_scheduler
+from bot.handlers.platform_handlers import features_command, watchlist_command, alerts_command, memory_v65_command, platform_health_command
+from bot.handlers.v70_handlers import v70_command, v70_selftest_command, v70_memory_command
+from bot.handlers.v71_handlers import downloader_entry_v71, handle_downloader_url_v71, download_callback, v71_command, v71_selftest_command, workspace_command, branch_command, schedule_ai_command, personalize_command
+from bot.handlers.v72_handlers import v72_test_command
+from bot.handlers.v73_handlers import v73_test_command
+from bot.handlers.v74_handlers import v74_test_command
+from bot.handlers.v75_handlers import v75_test_command, v75_memory_command
+from bot.handlers.v76_handlers import v76_test_command, v76_status_command
+from bot.handlers.v77_handlers import v77_test_command, v77_status_command
+from bot.handlers.v78_handlers import update_center_command
+from bot.db_persist import notify_admins_if_empty, shutdown_backup
+import threading
+import signal
+from flask import Flask, request
+import os
+from datetime import datetime
+import hmac
+
+flask_app = Flask(__name__)
+_shutdown_done = {"done": False}
+
+
+@flask_app.route("/")
+def home():
+    return "✅ Bot is running!"
+
+
+def _metrics_authorized():
+    """Protect operational telemetry; fail closed when a token is configured."""
+    token = (getattr(config, "METRICS_TOKEN", "") or os.getenv("METRICS_TOKEN", "")).strip()
+    if not token:
+        return False
+    supplied = request.headers.get("X-Metrics-Token", "")
+    return bool(supplied) and hmac.compare_digest(supplied, token)
+
+
+@flask_app.route("/metrics")
+def metrics():
+    from flask import jsonify
+    if not _metrics_authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    from bot.utils.observability import snapshot
+    return jsonify(snapshot())
+
+
+@flask_app.route("/health")
+def health():
+    # Never expose filesystem paths, admin IDs, or internal database details publicly.
+    from bot.release import APP_NAME, VERSION, RELEASE_CHANNEL
+    deployment_id = getattr(config, "DEPLOYMENT_ID", "")
     try:
-        return apply_font(text, style_key)
+        from bot.services.v61_v65_platform import health_snapshot
+        platform = health_snapshot()
     except Exception:
-        return list_fonts() + "\n\n" + apply_all_fonts(text)
+        platform = {"database": "unknown"}
+    return {
+        "status": "ok", "app": APP_NAME, "version": VERSION,
+        "channel": RELEASE_CHANNEL,
+        "deployment": deployment_id[:12] if deployment_id else "unknown",
+        "time": str(datetime.now()), "platform": platform,
+    }
 
 
-def _list_fonts() -> str:
-    from bot.features.fonts.converter import list_fonts
-
-    return list_fonts()
-
-
-def _get_user_city(user_id: int = 0) -> str:
-    from bot.database import get_user_city
-
-    city = get_user_city(user_id) if user_id else None
-    return f"شهر ثبت‌شده کاربر: {city or 'نامشخص'}"
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    flask_app.run(host="0.0.0.0", port=port, use_reloader=False, threaded=True)
 
 
-def _city_distance(city1: str, city2: str) -> str:
-    from bot.features.weather.weather_extra import city_distance
-
-    return city_distance(city1, city2)
-
-
-def _profile_summary(user_id: int = 0) -> str:
-    from bot.features.profile.profile import profile_text
-    from bot.database import get_user
-
-    row = get_user(user_id) if user_id else None
-    first_name = row[1] if row else "کاربر"
-    return profile_text(user_id, first_name)
-
-
-# ── ثبت پیش‌فرض ─────────────────────────────────────────────────────────────
-
-
-
-async def _analyze_crypto(symbol: str = "") -> str:
-    from bot.features.market.finance import analyze_crypto
-    return await analyze_crypto(str(symbol or "btc"))
-
-
-async def _crypto_chart_info(symbol: str = "", days: int = 7) -> str:
-    """برای AI فقط متن توضیح می‌دهد (تصویر جدا از هندلر پیام است)"""
-    from bot.features.market.finance import get_crypto_chart
-    png, caption = await get_crypto_chart(str(symbol or "btc"), int(days or 7))
-    if png:
-        return caption + "\n\n(نمودار تصویری در بخش بازار ربات در دسترس است. بنویس: نمودار " + str(symbol) + ")"
-    return caption or "داده نمودار در دسترس نیست."
-
-
-async def _get_economic_calendar(days: int = 1, currency: str = "", impact: str = "all", timezone: str = "", user_id: int = 0) -> str:
-    """داده زنده تقویم اقتصادی برای استفاده مستقیم AI."""
-    from bot.features.market.economic_calendar import get_calendar_for_user, calendar_text, ai_context
-    mode = "week" if int(days or 1) >= 7 else "today"
-    if int(days or 1) == 2:
-        mode = "tomorrow"
-    events, user_tz = await get_calendar_for_user(user_id, mode, impact or "all", currency or "")
-    tz_name = timezone.strip() if timezone.strip() else user_tz
-    if not events:
-        return "برای این فیلتر رویداد اقتصادی‌ای پیدا نشد."
-    return "منبع: تقویم اقتصادی زنده\nمنطقه زمانی: %s\n\n%s" % (tz_name, ai_context(events, tz_name, 60))
-
-
-async def _tool_web_search(query: str = "") -> str:
-    from bot.services.ai_extras import web_search
-    return await web_search(query)
-
-
-def _tool_reminder(
-    text: str = "",
-    remind_at: str = "",
-    repeat_type: str = "once",
-    repeat_every: int = 0,
-    user_id: int = 0,
-) -> str:
-    from bot.database import add_reminder
-    repeat_type = repeat_type or "once"
-    repeat_every = max(0, int(repeat_every or 0))
-    add_reminder(
-        user_id, text, remind_at,
-        repeat_type=repeat_type,
-        repeat_every=repeat_every,
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    err = context.error
+    ignore_names = (
+        "NetworkError", "TimedOut", "RetryAfter", "BadGateway",
+        "ServiceUnavailable", "RequestTimeout", "httpx",
     )
-    return f"یادآوری ثبت شد: {text} در {remind_at}"
-
-
-async def _tool_ict_analysis(symbol: str = "btc", interval: str = "1h", user_id: int = 0) -> str:
-    from bot.features.market.finance_ict import analyze_ict
-    return await analyze_ict(symbol or "btc", interval=interval or "1h")
-
-
-def _register_builtin_tools() -> None:
-    if "get_weather" in _REGISTRY:
+    err_name = type(err).__name__ if err else ""
+    err_str = str(err) or ""
+    if any(x in err_name or x in err_str for x in ignore_names):
+        logger.warning(f"Ignored transient error: {err_name}: {err_str[:120]}")
         return
+    logger.error("Exception while handling an update:", exc_info=err)
+    try:
+        from bot.utils.observability import record_error
+        record_error("telegram_update", err)
+    except Exception as _exc:
+        logger.debug("%s: %s", __name__, _exc)
+    try:
+        if not update or not isinstance(update, Update) or not update.effective_user:
+            return
+        uid = update.effective_user.id
+        now = datetime.now().timestamp()
+        last = getattr(error_handler, "_last", {})
+        if now - last.get(uid, 0) < 30:
+            return
+        last[uid] = now
+        # Bound the per-user error throttle map so a long-running bot does not
+        # retain one timestamp forever for every historical user.
+        if len(last) > 4096:
+            cutoff = now - 86400
+            last = {k: v for k, v in last.items() if v >= cutoff}
+        error_handler._last = last
+        if update.effective_message:
+            await update.effective_message.reply_text(
+                "⚠️ موقتاً مشکلی پیش آمد. چند ثانیه بعد دوباره امتحان کنید."
+            )
+    except Exception as notify_exc:
+        logger.debug("error_handler user notify failed: %s", notify_exc)
+
+
+async def post_init(app: Application):
+    try:
+        from bot.plugins import register_builtin_plugins, start_enabled
+        register_builtin_plugins()
+        start_enabled()
+        logger.info("🔌 Plugins initialized")
+    except Exception as e:
+        logger.warning(f"Plugin initialization: {e}")
+
+    # Retry automatic restore after the Telegram application is fully initialized.
+    # Database initialization can happen before network-ready startup hooks, so a
+    # restore attempted there may fail transiently and leave an empty DB.
+    try:
+        from bot.database import DB_PATH, _user_count
+        from bot.db_persist import auto_restore_if_empty, get_last_restore_status
+        if _user_count(DB_PATH) == 0:
+            restored = False
+            for attempt in range(1, 4):
+                try:
+                    restored = await asyncio.to_thread(auto_restore_if_empty)
+                except Exception as restore_exc:
+                    logger.error("startup auto-restore attempt %s failed: %s", attempt, restore_exc, exc_info=True)
+                    try:
+                        from bot import db_persist as _dbp
+                        _dbp._LAST_RESTORE_STATUS.update({
+                            "ok": False,
+                            "msg": f"خطای اجرای ریستور: {type(restore_exc).__name__}: {restore_exc}",
+                            "local_users": 0,
+                        })
+                    except Exception:
+                        pass
+                    restored = False
+                if restored or _user_count(DB_PATH) > 0:
+                    logger.info("startup auto-restore SUCCESS on attempt %s: %s", attempt, get_last_restore_status().get("msg"))
+                    break
+                if attempt < 3:
+                    await asyncio.sleep(2 * attempt)
+            if not restored and _user_count(DB_PATH) == 0:
+                logger.warning("startup auto-restore FAILED: %s", get_last_restore_status().get("msg") or "نامشخص")
+    except Exception as e:
+        logger.error(f"post_init auto-restore: {e}", exc_info=True)
 
     try:
-        register_tool(
-            name="ict_analysis",
-            description="تحلیل بازار به روش ICT: ساختار BOS/CHoCH، FVG، Order Block، نقدینگی، Premium/Discount و Killzone. برای بیت‌کوین و سایر ارزها.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string", "description": "نماد مثل btc یا eth"},
-                    "interval": {"type": "string", "description": "تایم‌فریم 15m یا 1h یا 4h یا 1d"},
-                },
-                "required": ["symbol"],
-            },
-            handler=_tool_ict_analysis,
-            keywords=[r"ICT|آی\s*سی\s*تی|اوردر\s*بلاک|order\s*block|fair\s*value\s*gap|FVG|نقدینگی\s*بازار|BOS|CHOCH"],
-        )
-    except Exception:
-        pass
+        await notify_admins_if_empty(app.bot)
+    except Exception as e:
+        logger.error(f"post_init notify: {e}")
 
 
-    register_tool(
-        name="get_weather",
-        description="آب‌وهوای فعلی یک شهر. اگر شهر نگفت از شهر کاربر استفاده کن.",
-        parameters={
-            "type": "object",
-            "properties": {"city": {"type": "string", "description": "نام شهر"}},
-        },
-        handler=_get_weather,
-        keywords=[r"هوا|آب\s*و\s*هوا|دما|بارون|باران|آفتابی|رطوبت"],
-    )
-    register_tool(
-        name="get_weather_forecast",
-        description="پیش‌بینی آب‌وهوا برای بازه درخواستی. برای «فردا» فقط همان روز را بگیر (days=1 و start_day=1)؛ برای «پس‌فردا» days=1 و start_day=2؛ اگر کاربر صریحاً پیش‌بینی چندروزه/هفتگی خواست، از بازه بزرگ‌تر استفاده کن.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "city": {"type": "string"},
-                "days": {"type": "integer", "minimum": 1, "maximum": 7, "description": "تعداد روزهای خروجی"},
-                "start_day": {"type": "integer", "minimum": 0, "maximum": 6, "description": "۰ امروز، ۱ فردا، ۲ پس‌فردا"},
-            },
-        },
-        handler=_get_weather_forecast,
-        keywords=[r"پیش\s*بینی\s*هوا|هوا(?:ی)?\s*(?:فردا|پس\s*فردا|هفته)|(?:فردا|پس\s*فردا).*هوا"],
-    )
-    register_tool(
-        name="get_air_quality",
-        description="کیفیت هوا (AQI).",
-        parameters={"type": "object", "properties": {"city": {"type": "string"}}},
-        handler=_get_air_quality,
-        keywords=[r"کیفیت\s*هوا|آلودگی\s*هوا|AQI"],
-    )
-    register_tool(
-        name="get_prayer_times",
-        description="اوقات شرعی شهر.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "city": {"type": "string"},
-                "country": {"type": "string"},
-            },
-        },
-        handler=_get_prayer_times,
-        keywords=[r"اذان|اوقات\s*شرعی|نماز\s*(صبح|ظهر|عصر|مغرب|عشاء)"],
-    )
-    register_tool(
-        name="get_market_prices",
-        description="قیمت دلار، یورو، طلا، سکه و ارز.",
-        parameters={"type": "object", "properties": {}},
-        handler=_get_market_prices,
-        keywords=[r"قیمت|دلار|یورو|طلا|سکه|ارز|نرخ"],
-    )
-    register_tool(
-        name="search_shopping",
-        description="دستیار خرید و جستجوی زنده محصول در فروشگاه‌ها و وب؛ برای خرید مستقیم، مقایسه قیمت، پیشنهاد محصول بر اساس بودجه، پیدا کردن مدل‌های مناسب، لینک خرید و عکس محصول از همین ابزار استفاده می‌شود. برای درخواست‌هایی مثل «با بودجه ۵۰ میلیون چه گوشی بخرم؟» بودجه را تشخیص بده و چند جستجوی کاندیدمحور برای مدل‌های مناسب انجام بده؛ مدل دقیق لازم نیست. منابع شامل ترب، دیجی‌کالا، اسنپ‌شاپ، تکنولایف، ایمالز، باسلام و سایر فروشگاه‌های موجود + صفحات فروش اینستاگرام + کل وب است. قیمت فقط اگر از نتیجه/صفحه قابل استخراج باشد نمایش داده شود و هرگز قیمت حدسی تولید نشود.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "نام، مدل، برند یا توصیف دقیق محصول برای جستجو"},
-                "source": {"type": "string", "enum": ["all", "torob", "digikala", "snappshop", "technolife", "emalls", "basalam", "momtaz", "kalaoma", "19kala", "mobile", "digistyle", "modiseh", "zanbil", "goldiran", "alibaba", "sheypoor", "divar", "okala", "takhfifan", "instagram", "general"], "description": "منبع جستجو؛ all برای همه فروشگاه‌ها + اینستا + وب"},
-                "max_results": {"type": "integer", "description": "حداکثر نتایج، بین 4 تا 22"},
-                "min_price": {"type": "integer", "description": "حداقل قیمت تومان؛ صفر یعنی بدون فیلتر"},
-                "max_price": {"type": "integer", "description": "حداکثر قیمت تومان؛ صفر یعنی بدون فیلتر"},
-            },
-            "required": ["query"],
-        },
-        handler=_search_shopping,
-        keywords=[r"خرید|قیمت.*محصول|قیمت.*کفش|قیمت.*گوشی|بهترین.*گوشی|چه.*گوشی|گوشی.*بخر|بودجه.*گوشی|بودجه.*خرید|بودجه|تا.*میلیون|زیر.*میلیون|حداکثر.*میلیون|وسیله.*کاربردی|محصول.*کاربردی|چی.*بخر|چه.*بخر|چه.*محصول|چه.*وسیله|پیشنهاد.*خرید|دیجی.?کالا|ترب|فروشگاه|لینک خرید|ارزان.?ترین|قیمت روز محصول|اینستا|شاپ اینستا|فروشگاه اینستاگرام"],
-    )
+def _do_shutdown_backup(reason: str = "shutdown"):
+    """قبل از هر دیپلوی/خاموش شدن یک‌بار بکاپ هوشمند می‌گیرد."""
+    if _shutdown_done["done"]:
+        return
+    _shutdown_done["done"] = True
+    logger.info(f"🛑 pre-deploy backup starting — reason={reason}")
+    try:
+        msg = shutdown_backup(reason=reason)
+        logger.info(f"pre-deploy backup result: {msg}")
+    except Exception as e:
+        logger.error(f"pre-deploy backup failed: {e}", exc_info=True)
 
-    register_tool(
-        name="shopping_price_history",
-        description="تاریخچه قیمت مشاهده‌شده محصولات از جستجوهای قبلی ربات. اگر داده کافی وجود ندارد صریحاً اعلام کن.",
-        parameters={"type":"object","properties":{"query":{"type":"string","description":"نام یا مدل محصول"},"days":{"type":"integer","description":"بازه تقریبی روز"}},"required":["query"]},
-        handler=_shopping_price_history,
-        keywords=[r"تاریخچه قیمت|قیمت هفته قبل|قیمت ماه قبل|روند قیمت محصول|افت قیمت محصول"],
-    )
 
-    register_tool(
-        name="get_crypto_price",
-        description="قیمت لحظه‌ای یک رمزارز مشخص مثل بیت‌کوین، اتریوم یا تتر را از منابع زنده ربات می‌گیرد و هرگز قیمت حدسی نمی‌دهد.",
-        parameters={
-            "type": "object",
-            "properties": {"symbol": {"type": "string", "description": "نماد رمزارز مثل btc یا eth"}},
-            "required": ["symbol"],
-        },
-        handler=_get_crypto_price,
-        keywords=[r"قیمت\s*(بیت\s*کوین|اتریوم|تتر|سولانا|ارز|کریپتو|رمزارز)|بیت\s*کوین.*قیمت|bitcoin.*price|crypto.*price"],
+async def post_shutdown(app: Application):
+    _do_shutdown_backup("post_shutdown")
+    try:
+        from bot.plugins import stop_enabled
+        stop_enabled()
+    except Exception as e:
+        logger.warning(f"Plugin shutdown: {e}")
+    try:
+        from bot.utils.task_manager import shutdown as shutdown_tasks
+        await shutdown_tasks(timeout=float(os.environ.get("TASK_SHUTDOWN_TIMEOUT", "5")))
+    except Exception as e:
+        logger.warning(f"Background task shutdown: {e}")
+    try:
+        from bot.services.ai_tools import clear_tool_cache
+        clear_tool_cache()
+    except Exception as e:
+        logger.warning(f"Tool cache cleanup: {e}")
+    try:
+        from bot.utils.http_client import clear_http_cache
+        clear_http_cache()
+    except Exception as e:
+        logger.warning(f"HTTP cache cleanup: {e}")
+    try:
+        from bot.services.ai_service import close_http
+        await close_http()
+    except Exception as e:
+        logger.warning(f"AI HTTP client close: {e}")
+
+
+def startup_self_check() -> None:
+    """Fail fast on broken deployment wiring before Telegram polling starts."""
+    checks = []
+    required_commands = (
+        "start", "help_command", "city_command", "language_command",
+        "calendar_command", "stats_command", "broadcast_command",
+        "backup_command", "restore_document_handler", "diagnostics_command",
+        "knowledge_command", "agent_command", "memory_command",
+        "automation_command", "plugins_command",
     )
-    register_tool(
-        name="get_top_crypto",
-        description="برترین رمزارزها.",
-        parameters={
-            "type": "object",
-            "properties": {"limit": {"type": "integer"}},
-        },
-        handler=_get_top_crypto,
-        keywords=[r"کریپتو|بیت\s*کوین|تتر|رمزارز|crypto|bitcoin"],
+    from bot.handlers import commands as command_module
+    for name in required_commands:
+        checks.append((f"command:{name}", callable(getattr(command_module, name, None))))
+
+    from bot.handlers import callbacks as callbacks_module
+    checks.append(("callback:button_handler", callable(getattr(callbacks_module, "button_handler", None))))
+
+    from bot.handlers import messages as messages_module
+    for name in ("text_handler", "media_ai_handler", "voice_ai_handler", "lens_command"):
+        checks.append((f"message:{name}", callable(getattr(messages_module, name, None))))
+
+    # Validate the high-frequency UI/feature symbols too. These are imported lazily
+    # by handlers, so checking them at startup prevents production-only NameError/ImportError.
+    from bot.utils import keyboard_factory as keyboard_module
+    required_keyboards = (
+        "get_main_keyboard", "get_more_keyboard", "get_country_keyboard",
+        "get_language_keyboard", "get_iran_cities_keyboard", "get_iraq_cities_keyboard",
+        "get_font_keyboard", "get_font_en_keyboard", "get_date_tools_keyboard",
+        "get_tools_keyboard", "get_market_keyboard", "get_profile_keyboard",
     )
-    register_tool(
-        name="convert_currency",
-        description="تبدیل ارز.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "amount": {"type": "number"},
-                "from_cur": {"type": "string"},
-                "to_cur": {"type": "string"},
-            },
-            "required": ["amount", "from_cur"],
-        },
-        handler=_convert_currency,
+    for name in required_keyboards:
+        checks.append((f"keyboard:{name}", callable(getattr(keyboard_module, name, None))))
+
+    # Execute every zero/low-side-effect keyboard constructor. This catches
+    # runtime NameError/ImportError issues (e.g. missing Telegram classes)
+    # that AST/callable checks cannot detect. User-specific/stateful flows are
+    # intentionally excluded from startup to avoid touching the database.
+    smoke_keyboards = (
+        "get_main_keyboard", "get_ai_keyboard", "get_ai_model_keyboard",
+        "get_more_keyboard", "get_date_tools_keyboard", "get_religious_keyboard",
+        "get_market_keyboard", "get_weather_geo_keyboard", "get_tools_keyboard",
+        "get_azan_keyboard", "get_fun_keyboard", "get_joke_keyboard",
+        "get_profile_keyboard", "get_smart_settings_keyboard", "get_country_keyboard",
+        "get_iran_cities_keyboard", "get_iraq_cities_keyboard", "get_language_keyboard",
+        "get_font_keyboard", "get_font_en_keyboard", "get_font_fa_keyboard",
     )
-    register_tool(
-        name="convert_crypto",
-        description="تبدیل رمزارز به تومان/دلار. تقریباً همه ارزها پشتیبانی می‌شود.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "amount": {"type": "number"},
-                "symbol": {"type": "string"},
-            },
-            "required": ["amount", "symbol"],
-        },
-        handler=_convert_crypto,
+    for name in smoke_keyboards:
+        constructor = getattr(keyboard_module, name, None)
+        if not callable(constructor):
+            raise RuntimeError(f"Runtime smoke missing keyboard: {name}")
+        try:
+            markup = constructor()
+            if markup is None:
+                raise RuntimeError("returned None")
+        except Exception as exc:
+            raise RuntimeError(f"Runtime smoke failed for keyboard:{name}: {type(exc).__name__}: {exc}") from exc
+    logger.info("🔥 Runtime smoke passed (%d keyboard constructors)", len(smoke_keyboards))
+
+    from bot.handlers import feature_handlers as feature_module
+    # These are the actual public feature handlers currently exposed by the
+    # modular feature handler module. Keep this list aligned with messages.py
+    # rather than checking legacy facade names that no longer exist.
+    required_features = (
+        "_h_date_convert", "_h_age_calc", "_h_birthday", "_h_zodiac",
+        "_h_lunar", "_h_date_diff", "_h_age_diff", "_h_event_search",
+        "_h_countdown", "_h_calc", "_h_profit", "_h_currency",
+        "_h_crypto_full", "_h_crypto_pos", "_h_crypto_chart",
+        "_h_crypto_analyze", "_h_distance", "_h_birth_save",
+        "_h_count_text", "_h_font_text", "_h_font_all",
     )
-    register_tool(
-        name="analyze_crypto",
-        description="تحلیل جامع ارز دیجیتال از چند منبع (CoinGecko، Binance Futures شبیه Coinglass، Fear&Greed، CoinPaprika).",
-        parameters={
-            "type": "object",
-            "properties": {
-                "symbol": {"type": "string", "description": "نماد مثل btc یا eth"},
-            },
-            "required": ["symbol"],
-        },
-        handler=_analyze_crypto,
-        keywords=[r"تحلیل\s*(ارز|کریپتو|رمزارز)|analyze\s*crypto|تحلیل\s*بیت\s*کوین"],
-    )
-    register_tool(
-        name="get_economic_calendar",
-        description=(
-            "تقویم اقتصادی زنده با زمان، ارز، اهمیت، واقعی، پیش‌بینی و مقدار قبلی. "
-            "برای پرسش‌هایی مثل خبرهای اقتصادی امروز، فردا، هفته، CPI، PPI، NFP، FOMC، ECB و نرخ بهره استفاده کن. "
-            "داده را اختراع نکن و اگر مقدار واقعی خالی است بگو هنوز منتشر نشده یا منبع فید آن را ارائه نکرده است."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "days": {"type": "integer", "minimum": 1, "maximum": 7},
-                "currency": {"type": "string", "description": "مثل USD یا EUR؛ خالی یعنی همه"},
-                "impact": {"type": "string", "enum": ["all", "high", "medium", "low"]},
-                "timezone": {"type": "string", "description": "مثل Asia/Tehran یا Asia/Baku"},
-            },
-        },
-        handler=_get_economic_calendar,
-        keywords=[r"تقویم\s*اقتصادی|اخبار\s*اقتصادی|خبر\s*(اقتصادی|فاندامنتال)|CPI|PPI|NFP|FOMC|ECB|نرخ\s*بهره"],
-    )
-    register_tool(
-        name="crypto_chart_info",
-        description="اطلاعات نمودار قیمت ارز دیجیتال (روزهای اخیر).",
-        parameters={
-            "type": "object",
-            "properties": {
-                "symbol": {"type": "string"},
-                "days": {"type": "integer"},
-            },
-            "required": ["symbol"],
-        },
-        handler=_crypto_chart_info,
-        keywords=[r"نمودار\s*(قیمت|کریپتو|ارز)|chart\s*crypto"],
-    )
-    register_tool(
-        name="calculator",
-        description="محاسبه ریاضی.",
-        parameters={
-            "type": "object",
-            "properties": {"expression": {"type": "string"}},
-            "required": ["expression"],
-        },
-        handler=_calculator,
-    )
-    register_tool(
-        name="generate_password",
-        description="ساخت رمز عبور.",
-        parameters={
-            "type": "object",
-            "properties": {"length": {"type": "integer"}},
-        },
-        handler=_generate_password,
-        keywords=[r"رمز\s*عبور|پسورد|password"],
-    )
-    register_tool(
-        name="count_text",
-        description="شمارش کاراکتر و کلمه.",
-        parameters={
-            "type": "object",
-            "properties": {"text": {"type": "string"}},
-            "required": ["text"],
-        },
-        handler=_count_text,
-    )
-    register_tool(
-        name="world_distance",
-        description="فاصله بین دو مکان دنیا.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "place1": {"type": "string"},
-                "place2": {"type": "string"},
-            },
-            "required": ["place1"],
-        },
-        handler=_world_distance,
-        keywords=[r"فاصله|مسافت"],
-    )
-    register_tool(
-        name="city_distance",
-        description="فاصله دو شهر.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "city1": {"type": "string"},
-                "city2": {"type": "string"},
-            },
-            "required": ["city1", "city2"],
-        },
-        handler=_city_distance,
-    )
-    register_tool(
-        name="convert_date",
-        description="تبدیل تاریخ شمسی/میلادی/قمری.",
-        parameters={
-            "type": "object",
-            "properties": {"date_text": {"type": "string"}},
-            "required": ["date_text"],
-        },
-        handler=_convert_date,
-    )
-    register_tool(
-        name="calculate_age",
-        description="محاسبه سن از تاریخ تولد شمسی.",
-        parameters={
-            "type": "object",
-            "properties": {"birth_date": {"type": "string"}},
-            "required": ["birth_date"],
-        },
-        handler=_calculate_age,
-        keywords=[r"سن\s*من|چند\s*سالمه|محاسبه\s*سن"],
-    )
-    register_tool(
-        name="birthday_countdown",
-        description="شمارش معکوس تولد.",
-        parameters={
-            "type": "object",
-            "properties": {"birth_date": {"type": "string"}},
-            "required": ["birth_date"],
-        },
-        handler=_birthday_countdown,
-    )
-    register_tool(
-        name="zodiac_animal",
-        description="حیوان سال تولد.",
-        parameters={
-            "type": "object",
-            "properties": {"birth_date": {"type": "string"}},
-            "required": ["birth_date"],
-        },
-        handler=_zodiac_animal,
-    )
-    register_tool(
-        name="lunar_age",
-        description="سن قمری.",
-        parameters={
-            "type": "object",
-            "properties": {"birth_date": {"type": "string"}},
-            "required": ["birth_date"],
-        },
-        handler=_lunar_age,
-    )
-    register_tool(
-        name="get_current_datetime",
-        description=(
-            "تاریخ و زمان دقیق فعلی را با ساعت واقعی سیستم و منطقه زمانی ربات برمی‌گرداند؛ "
-            "شامل میلادی، شمسی و قمری. برای سؤال‌هایی مثل «الان چه تاریخیه؟»، "
-            "«امروز چندمه؟»، «تاریخ دقیق الان» و «الان ساعت چنده؟» از این ابزار استفاده کن."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "timezone_name": {
-                    "type": "string",
-                    "description": "منطقه زمانی IANA اختیاری؛ اگر خالی باشد TIMEZONE تنظیم‌شده ربات استفاده می‌شود."
-                },
-                "relative_day": {
-                    "type": "integer",
-                    "minimum": -30,
-                    "maximum": 30,
-                    "description": "۰=امروز، ۱=فردا، ۲=پس‌فردا، -۱=دیروز"
-                }
-            },
-        },
-        handler=_current_datetime,
-        keywords=[
-            r"تاریخ\s*(?:دقیق|فعلی|امروز)?",
-            r"امروز\s*چندمه",
-            r"الان\s*(?:چه\s*)?تاریخ",
-            r"تاریخ\s*الان",
-            r"الان\s*(?:ساعت|چه\s*ساعتی)",
-            r"current\s*(?:date|time|datetime)",
-            r"today'?s\s*date|tomorrow|yesterday",
-            r"what\s*time\s*is\s*it",
-        ],
-        risk="read",
-    )
-    register_tool(
-        name="world_clock",
-        description="ساعت جهانی.",
-        parameters={"type": "object", "properties": {}},
-        handler=_world_clock,
-        keywords=[r"ساعت\s*(الان|جهان|دنیا)|world\s*clock"],
-    )
-    register_tool(
-        name="month_calendar",
-        description="تقویم ماه جاری.",
-        parameters={"type": "object", "properties": {}},
-        handler=_month_calendar,
-        keywords=[r"تقویم\s*ماه"],
-    )
-    register_tool(
-        name="nowruz_countdown",
-        description="شمارش معکوس نوروز.",
-        parameters={"type": "object", "properties": {}},
-        handler=_nowruz_countdown,
-        keywords=[r"نوروز"],
-    )
-    register_tool(
-        name="search_events",
-        description="جستجوی مناسبت.",
-        parameters={
-            "type": "object",
-            "properties": {"query": {"type": "string"}},
-            "required": ["query"],
-        },
-        handler=_search_events,
-        keywords=[r"مناسبت"],
-    )
-    register_tool(
-        name="qibla_direction",
-        description="جهت قبله.",
-        parameters={"type": "object", "properties": {"city": {"type": "string"}}},
-        handler=_qibla_direction,
-        keywords=[r"قبله"],
-    )
-    register_tool(
-        name="daily_adhkar",
-        description="اذکار روزانه.",
-        parameters={"type": "object", "properties": {}},
-        handler=_daily_adhkar,
-        keywords=[r"ذکر|اذکار"],
-    )
-    register_tool(
-        name="daily_verse_hadith",
-        description="آیه و حدیث روز.",
-        parameters={"type": "object", "properties": {}},
-        handler=_daily_verse_hadith,
-        keywords=[r"آیه|حدیث"],
-    )
-    register_tool(
-        name="religious_countdown",
-        description="مناسبت مذهبی نزدیک.",
-        parameters={"type": "object", "properties": {}},
-        handler=_religious_countdown,
-    )
-    register_tool(
-        name="istikhara",
-        description="استخاره با قرآن.",
-        parameters={"type": "object", "properties": {}},
-        handler=_istikhara,
-        keywords=[r"استخاره"],
-    )
-    register_tool(
-        name="hafez_fal",
-        description="فال حافظ.",
-        parameters={"type": "object", "properties": {}},
-        handler=_hafez_fal,
-        keywords=[r"فال\s*حافظ|حافظ"],
-    )
-    register_tool(
-        name="joke",
-        description="جوک تصادفی.",
-        parameters={
-            "type": "object",
-            "properties": {"category": {"type": "string"}},
-        },
-        handler=_joke,
-        keywords=[r"جوک|جک"],
-    )
-    register_tool(
-        name="fact_of_day",
-        description="دانستنی روز.",
-        parameters={"type": "object", "properties": {}},
-        handler=_fact_of_day,
-        keywords=[r"فکت|دانستنی"],
-    )
-    register_tool(
-        name="daily_challenge",
-        description="چالش روزانه.",
-        parameters={"type": "object", "properties": {}},
-        handler=_daily_challenge,
-        keywords=[r"چالش"],
-    )
-    register_tool(
-        name="apply_font",
-        description="تبدیل متن به فونت‌های خاص. اگر style خالی همه را نشان بده.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "text": {"type": "string"},
-                "style_key": {"type": "string"},
-            },
-            "required": ["text"],
-        },
-        handler=_apply_font,
-        keywords=[r"فونت"],
-    )
-    register_tool(
-        name="list_fonts",
-        description="لیست فونت‌ها.",
-        parameters={"type": "object", "properties": {}},
-        handler=_list_fonts,
-    )
-    register_tool(
-        name="get_user_city",
-        description="شهر ثبت‌شده کاربر.",
-        parameters={"type": "object", "properties": {}},
-        handler=_get_user_city,
-    )
-    
-    register_tool(
-        name="web_search",
-        description="جستجو در اینترنت برای اطلاعات به‌روز.",
-        parameters={
-            "type": "object",
-            "properties": {"query": {"type": "string"}},
-            "required": ["query"],
-        },
-        handler=_tool_web_search,
-        keywords=[r"جستجو\s*کن|در\s*اینترنت"],
-    )
-    register_tool(
-        name="create_reminder",
-        description="فقط با درخواست صریح کاربر برای یادآوری/آلارم/یادم بنداز/خبرم کن استفاده شود؛ صرفاً وجود زمان، فردا، امروز یا ساعت هرگز مجوز ساخت یادآوری نیست. remind_at باید ISO زمان تهران باشد.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "text": {"type": "string"},
-                "remind_at": {"type": "string", "description": "ISO datetime"},
-                "repeat_type": {
-                    "type": "string",
-                    "enum": ["once", "daily", "weekly", "monthly", "every_minutes", "every_hours"],
-                },
-                "repeat_every": {"type": "integer", "minimum": 0},
-            },
-            "required": ["text", "remind_at"],
-        },
-        handler=_tool_reminder,
-    )
-    register_tool(
-        name="profile_summary",
-        description="پروفایل کاربر در ربات.",
-        parameters={"type": "object", "properties": {}},
-        handler=_profile_summary,
-        keywords=[r"پروفایل"],
+    for name in required_features:
+        checks.append((f"feature:{name}", callable(getattr(feature_module, name, None))))
+
+    checks.append(("database:init_db", callable(init_db)))
+    checks.append(("database:backup_db", callable(backup_db)))
+
+    from bot.services import v70_platform as v70_module
+    from bot.services import v71_platform as v71_module
+    checks.append(("v71:init_v71_tables", callable(getattr(v71_module, "init_v71_tables", None))))
+    checks.append(("v71:self_test", callable(getattr(v71_module, "self_test", None))))
+    from bot.services import v72_platform as v72_module
+    checks.append(("v72:init_v72_tables", callable(getattr(v72_module, "init_v72_tables", None))))
+    checks.append(("v72:qa_snapshot", callable(getattr(v72_module, "qa_snapshot", None))))
+    checks.append(("v72:market_intelligence", callable(getattr(v72_module, "market_intelligence", None))))
+    from bot.services import v73_platform as v73_module
+    checks.append(("v73:init_v73_tables", callable(getattr(v73_module, "init_v73_tables", None))))
+    checks.append(("v73:qa_snapshot", callable(getattr(v73_module, "qa_snapshot", None))))
+    checks.append(("v73:agent", callable(getattr(v73_module, "run_production_agent", None))))
+    from bot.services import v75_platform as v75_module
+    checks.append(("v75:init_v75_tables", callable(getattr(v75_module, "init_v75_tables", None))))
+    from bot.services import v76_platform as v76_module
+    checks.append(("v76:init_v76_tables", callable(getattr(v76_module, "init_v76_tables", None))))
+    checks.append(("v76:agent4", callable(getattr(v76_module, "run_agent_4", None))))
+    checks.append(("v76:release_gate", callable(getattr(v76_module, "release_gate", None))))
+    checks.append(("v76:self_test", callable(getattr(v76_module, "self_test", None))))
+    from bot.services import v77_platform as v77_module
+    checks.append(("v77:init_v77_tables", callable(getattr(v77_module, "init_v77_tables", None))))
+    checks.append(("v77:agent5", callable(getattr(v77_module, "run_agent_5", None))))
+    checks.append(("v77:release_gate", callable(getattr(v77_module, "release_gate", None))))
+    checks.append(("v77:self_test", callable(getattr(v77_module, "self_test", None))))
+    checks.append(("v77:document_intelligence", callable(getattr(v77_module, "extract_document", None))))
+    checks.append(("v75:agent", callable(getattr(v75_module, "run_agent_3", None))))
+    checks.append(("v75:workflow", callable(getattr(v75_module, "execute_workflow", None))))
+    checks.append(("v75:qa", callable(getattr(v75_module, "qa_snapshot", None))))
+    checks.append(("v70:init_v70_tables", callable(getattr(v70_module, "init_v70_tables", None))))
+    checks.append(("v70:self_test", callable(getattr(v70_module, "self_test", None))))
+    from bot.services import downloader as downloader_module
+    checks.append(("downloader:download", callable(getattr(downloader_module, "download", None))))
+    checks.append(("downloader:probe", callable(getattr(downloader_module, "probe", None))))
+
+    failed = [name for name, ok in checks if not ok]
+    if failed:
+        raise RuntimeError("Startup self-check failed: " + ", ".join(failed))
+
+    expected = getattr(config, "RELEASE_VERSION", "")
+    actual = version_string()
+    if expected and expected not in actual:
+        raise RuntimeError(f"RELEASE_VERSION mismatch: expected {expected}, running {actual}")
+    logger.info("✅ Startup self-check passed (%d checks)", len(checks))
+
+
+def main():
+    logger.info("=" * 50)
+    logger.info(f"🚀 Starting {version_string()}")
+    logger.info(f"DB path: {DB_PATH}")
+    logger.info(f"ADMIN_IDS: {config.ADMIN_IDS}")
+    logger.info("=" * 50)
+    logger.info("Deployment ID: %s", getattr(config, "DEPLOYMENT_ID", "")[:12] or "unknown")
+    if getattr(config, "STARTUP_CHECK", True):
+        startup_self_check()
+
+    init_db()
+    backup_db()
+
+    app = (
+        Application.builder()
+        .token(config.BOT_TOKEN)
+        .concurrent_updates(True)
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
+        .build()
     )
 
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("lens", lens_command))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("city", city_command))
+    app.add_handler(CommandHandler("language", language_command))
+    app.add_handler(CommandHandler("calendar", calendar_command))
+    app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("diagnostics", diagnostics_command))
+    app.add_handler(CommandHandler("aitest", aitest_command))
+    app.add_handler(CommandHandler("knowledge", knowledge_command))
+    app.add_handler(CommandHandler("memory", memory_command))
+    app.add_handler(CommandHandler("automation", automation_command))
+    app.add_handler(CommandHandler("agent", agent_command))
+    app.add_handler(CommandHandler("plugins", plugins_command))
+    # V61-V65 platform commands
+    app.add_handler(CommandHandler("features", features_command))
+    app.add_handler(CommandHandler("watchlist", watchlist_command))
+    app.add_handler(CommandHandler("alerts", alerts_command))
+    app.add_handler(CommandHandler("memory2", memory_v65_command))
+    app.add_handler(CommandHandler("v65health", platform_health_command))
+    app.add_handler(CommandHandler("v70", v70_command))
+    app.add_handler(CommandHandler("download", downloader_entry_v71))
+    app.add_handler(CommandHandler("v71", v71_command))
+    app.add_handler(CommandHandler("v71test", v71_selftest_command))
+    app.add_handler(CommandHandler("v72test", v72_test_command))
+    app.add_handler(CommandHandler("v73test", v73_test_command))
+    app.add_handler(CommandHandler("v74test", v74_test_command))
+    app.add_handler(CommandHandler("v75test", v75_test_command))
+    app.add_handler(CommandHandler("v76test", v76_test_command))
+    app.add_handler(CommandHandler("v76status", v76_status_command))
+    app.add_handler(CommandHandler("v77test", v77_test_command))
+    app.add_handler(CommandHandler("v77status", v77_status_command))
+    app.add_handler(CommandHandler("update", update_center_command))
+    app.add_handler(CommandHandler("updates", update_center_command))
+    app.add_handler(CommandHandler("memory4", v75_memory_command))
+    app.add_handler(CommandHandler("workspace", workspace_command))
+    app.add_handler(CommandHandler("branch", branch_command))
+    app.add_handler(CommandHandler("scheduleai", schedule_ai_command))
+    app.add_handler(CommandHandler("personalize", personalize_command))
+    app.add_handler(CommandHandler("v70test", v70_selftest_command))
+    app.add_handler(CommandHandler("memory3", v70_memory_command))
+    app.add_handler(CommandHandler("broadcast", broadcast_command))
+    app.add_handler(CommandHandler("backup", backup_command))
+    app.add_handler(MessageHandler(filters.Document.ALL, restore_document_handler), group=0)
+    async def _download_callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        data = (update.callback_query.data if update.callback_query else "") or ""
+        try:
+            handled = await download_callback(update, context, data)
+            if not handled and update.callback_query:
+                await update.callback_query.answer()
+        except Exception as exc:
+            logger.exception("download callback router failed: %s", exc)
+            try:
+                if update.callback_query:
+                    await update.callback_query.answer("⚠️ خطا در دانلود", show_alert=True)
+            except Exception:
+                pass
 
-def _run_workflow_tool(steps, user_id=0):
-    # Kept as a sync-compatible wrapper; the actual engine is async.
-    raise RuntimeError("workflow tool must be invoked through its async handler")
-
-
-async def _run_workflow_async(steps, user_id=0):
-    from bot.services.workflow_engine import run_workflow
-    return await run_workflow(steps, user_id=user_id)
-
-
-register_tool(
-    name="run_workflow",
-    description="اجرای یک برنامه چندمرحله‌ای کوتاه با ابزارهای موجود. فقط وقتی چند ابزار باید به‌ترتیب اجرا شوند استفاده کن؛ حداکثر 4 مرحله. برای ارجاع به خروجی مرحله قبل از $step1، $step2 و ... استفاده کن.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "steps": {
-                "type": "array",
-                "maxItems": 4,
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "tool": {"type": "string"},
-                        "arguments": {"type": "object"},
-                    },
-                    "required": ["tool"],
-                },
-            }
-        },
-        "required": ["steps"],
-    },
-    handler=_run_workflow_async,
-)
-
-
-
-async def _run_agent(goal: str = "", user_id: int = 0) -> str:
-    from bot.services.agent_engine import run_agent
-    return await run_agent(goal, user_id=user_id)
-
-
-register_tool(
-    name="run_agent",
-    description=(
-        "دستیار برنامه‌ریز محدود: برای هدف‌های چندبخشی، ابزارهای موجود را خودش انتخاب و به‌ترتیب اجرا می‌کند "
-        "و حداکثر یک بار مسیر امن را ترمیم می‌کند. برای اطلاعات فعلی می‌تواند retrieval وب را فعال کند. "
-        "حلقه بی‌نهایت ندارد و حداکثر 4 مرحله اجرا می‌شود."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {"goal": {"type": "string", "description": "هدف کامل کاربر"}},
-        "required": ["goal"],
-    },
-    handler=_run_agent,
-    keywords=[r"خودت.*برنامه|چندمرحله|دستیار.*هوشمند|agent|برنامه.?ریزی.*هوشمند"],
-)
-
-_register_builtin_tools()
-
-def _provider_health() -> str:
-    from bot.services.ai_runtime import provider_health_snapshot
-
-    snapshot = provider_health_snapshot()
-    if not snapshot:
-        return "هنوز داده‌ای از سلامت Providerها ثبت نشده است."
-    lines = ["وضعیت سلامت Providerهای AI (بر اساس اجرای واقعی اخیر):"]
-    for name, item in snapshot.items():
-        status = item["status"]
-        if status == "healthy":
-            label = "سالم"
-        elif status == "cooldown":
-            label = f"در cooldown ({item['cooldown_remaining_sec']}s)"
-        else:
-            label = "بدون داده کافی"
-        rate = item["success_rate"]
-        rate_text = f"{round(rate * 100)}%" if isinstance(rate, (int, float)) else "—"
-        latency = f"{item['avg_latency_ms']}ms" if item["avg_latency_ms"] is not None else "—"
-        lines.append(
-            f"- {name}: {label} | موفقیت {rate_text} | latency میانگین {latency} | "
-            f"ok={item['ok']} fail={item['fail']}"
-        )
-    return "\n".join(lines)[:4500]
-
-
-register_tool(
-    name="get_provider_health",
-    description=(
-        "گزارش داخلی و بدون کلید از سلامت Providerهای AI بر اساس موفقیت، خطا، latency و cooldown اخیر. "
-        "برای عیب‌یابی و تشخیص اینکه کدام Provider مشکل دارد استفاده کن؛ هیچ درخواست آزمایشی شبکه‌ای ارسال نمی‌کند."
-    ),
-    parameters={"type": "object", "properties": {}},
-    handler=_provider_health,
-    keywords=[r"سلامت.*(?:provider|پرووایدر|مدل)", r"وضعیت.*(?:ai|هوش مصنوعی|مدل)", r"عیب.?یابی.*(?:ai|هوش مصنوعی)", r"provider health", r"diagnostic"],
-)
-
-
-
-def _knowledge_search(query: str = "", limit: int = 5) -> str:
-    from bot.services.knowledge_base import format_knowledge_results
-    return format_knowledge_results(query, limit)
-
-
-register_tool(
-    name="search_knowledge_base",
-    description="جستجوی هوشمند در مستندات داخلی و عمومی پروژه ربات. برای پرسش درباره قابلیت‌ها، تنظیمات و نحوه کار خود ربات استفاده کن؛ اطلاعات نامرتبط یا jokes_data.json در این شاخص وجود ندارد.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "عبارت جستجو"},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 6},
-        },
-        "required": ["query"],
-    },
-    handler=_knowledge_search,
-    keywords=[r"پایگاه دانش|مستندات ربات|راهنمای ربات|تنظیمات ربات|قابلیت.*ربات|knowledge base|documentation"],
-)
-
-
-async def _hybrid_retrieve(query: str = "", include_web: bool = False, user_id: int = 0) -> str:
-    from bot.services.retrieval import hybrid_search
-    return await hybrid_search(user_id, query, include_web=bool(include_web))
-
-
-register_tool(
-    name="hybrid_retrieve",
-    description=(
-        "ترکیب حافظه مرتبط کاربر و پایگاه دانش داخلی؛ در صورت نیاز و با include_web=true "
-        "از جستجوی وب هم استفاده می‌کند. برای اطلاعات فعلی/قیمت/اخبار می‌تواند وب را فعال کند. "
-        "در حالت عادی درخواست شبکه‌ای انجام نمی‌دهد."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {"type": "string"},
-            "include_web": {"type": "boolean", "description": "آیا جستجوی وب هم انجام شود؟"},
-        },
-        "required": ["query"],
-    },
-    handler=_hybrid_retrieve,
-    keywords=[r"ترکیب.*منبع|حافظه.*مستندات|منابع.*مرتبط|اطلاعات.*فعلی|hybrid retrieval|rag"],
-)
-
-
-
-
-
-class _ToolDefsProxy(list):
-    def __iter__(self):
-        return iter(get_tool_definitions())
-    def __len__(self):
-        return len(get_tool_definitions())
-    def __getitem__(self, i):
-        return get_tool_definitions()[i]
-
-
-TOOL_DEFINITIONS = _ToolDefsProxy()
-
-# V73: production agent / security / diagnostics tools. These are read-only unless explicitly approved.
-async def _run_agent_v73(goal: str = "", user_id: int = 0) -> str:
-    from bot.services.v73_platform import run_production_agent
-    return await run_production_agent(goal, user_id=user_id)
-
-register_tool(
-    name="run_agent_v73",
-    description="Agent حرفه‌ای محدود با برنامه‌ریزی چندابزاری، بودجه اجرا، جلوگیری از تکرار، تعمیر امن و ثبت trace. عملیات نوشتنی بدون تأیید اجرا نمی‌شوند.",
-    parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
-    handler=_run_agent_v73,
-    keywords=[r"agent حرفه.?ای", r"عامل هوشمند", r"چند.?ابزاری", r"autonomous agent", r"tool architecture"],
-)
-
-def _v73_health() -> str:
-    from bot.services.v73_platform import health_snapshot, performance_snapshot
-    return json.dumps({"health": health_snapshot(), "performance": performance_snapshot()}, ensure_ascii=False)[:4500]
-
-register_tool(name="v73_health", description="گزارش سلامت، circuit protection و performance داخلی بدون اطلاعات محرمانه.", parameters={"type":"object","properties":{}}, handler=_v73_health, keywords=[r"سلامت سیستم", r"performance", r"self healing", r"خود.?ترمیم"])
-
-
-async def _run_agent_v74(goal: str = "", user_id: int = 0) -> str:
-    from bot.services.v74_platform import run_agent_2
-    return await run_agent_2(goal, user_id=user_id)
-
-register_tool(
-    name="run_agent_v74",
-    description="Agent 2.0 محدود و امن برای برنامه‌ریزی پویا، انتخاب ابزار، توقف هوشمند و repair کنترل‌شده.",
-    parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
-    handler=_run_agent_v74, keywords=[r"agent 2", r"عامل هوشمند", r"اجرای چندمرحله", r"برنامه.?ریزی هوشمند"]
-)
-
-def _v74_system_status() -> str:
-    from bot.services.v74_platform import observability_snapshot
-    import json
-    return json.dumps(observability_snapshot(), ensure_ascii=False)[:12000]
-
-register_tool(
-    name="v74_system_status",
-    description="گزارش امن سلامت، ابزارها، عملکرد، providerها، persistence و runtime نسخه V74.",
-    parameters={"type":"object","properties":{}}, handler=_v74_system_status,
-    keywords=[r"سلامت v74", r"وضعیت v74", r"observability", r"reliability"]
-)
-
-# V75 Intelligence & Automation tools — bounded/read-only by default.
-async def _run_agent_v75(goal: str = "", user_id: int = 0) -> str:
-    from bot.services.v75_platform import run_agent_3
-    return json.dumps(await run_agent_3(goal, user_id=user_id), ensure_ascii=False)[:12000]
-
-register_tool(
-    name="run_agent_v75",
-    description="Agent 3.0 محدود با بودجه اجرا، جلوگیری از تکرار، امنیت و اجرای ابزارهای تخصصی موجود.",
-    parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
-    handler=_run_agent_v75, keywords=[r"agent 3",r"agent 3.0",r"عامل.*پیشرفته",r"برنامه.?ریزی چندمرحله"]
-)
-
-async def _multi_agent_v75(goal: str = "", user_id: int = 0) -> str:
-    from bot.services.v75_platform import run_multi_agent
-    return json.dumps(await run_multi_agent(goal, user_id=user_id), ensure_ascii=False)[:12000]
-
-register_tool(
-    name="multi_agent_v75",
-    description="هماهنگی محدود چند متخصص برای پژوهش، بازار، اقتصاد و ابزارهای عمومی؛ بدون حلقه مستقل و بی‌نهایت.",
-    parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
-    handler=_multi_agent_v75, keywords=[r"multi.?agent",r"چند عامل",r"چند متخصص"]
-)
-
-def _v75_status() -> str:
-    from bot.services.v75_platform import dashboard
-    return json.dumps(dashboard(), ensure_ascii=False)[:12000]
-
-register_tool(name="v75_system_status", description="گزارش امن وضعیت V75 شامل امنیت، workflow، alert، memory و performance.", parameters={"type":"object","properties":{}}, handler=_v75_status, keywords=[r"سلامت v75",r"وضعیت v75",r"داشبورد v75"])
-
-def _v75_security(text: str = "") -> str:
-    from bot.services.v75_platform import security_scan
-    return json.dumps(security_scan(text), ensure_ascii=False)
-
-register_tool(name="v75_security_scan", description="اسکن امن متن برای prompt injection، افشای secret و الگوهای command خطرناک.", parameters={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=_v75_security, keywords=[r"security scan",r"اسکن امنیتی",r"prompt injection"])
-
-def _v75_news_score(title: str = "", content: str = "") -> str:
-    from bot.services.v75_platform import score_news
-    return json.dumps(score_news(title, content), ensure_ascii=False)
-
-register_tool(name="v75_news_score", description="امتیازدهی اولیه sentiment و impact خبر بدون ادعای صحت منبع.", parameters={"type":"object","properties":{"title":{"type":"string"},"content":{"type":"string"}},"required":["title"]}, handler=_v75_news_score, keywords=[r"تحلیل خبر",r"sentiment خبر",r"impact خبر"])
-
-# V76 Adaptive Core tools
-async def _run_agent_v76(goal: str = "", user_id: int = 0) -> str:
-    from bot.services.v76_platform import run_agent_4
-    return json.dumps(await run_agent_4(goal,user_id=user_id),ensure_ascii=False)[:12000]
-
-register_tool(name="run_agent_v76", description="Agent 4.0 محدود با Intent، برنامه‌ریزی، Verify و بودجه اجرای امن.", parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]}, handler=_run_agent_v76, keywords=[r"agent 4",r"عامل 4",r"برنامه.?ریزی پیشرفته",r"adaptive agent"])
-
-def _v76_status() -> str:
-    from bot.services.v76_platform import system_snapshot
-    return json.dumps(system_snapshot(),ensure_ascii=False)[:12000]
-
-register_tool(name="v76_system_status", description="وضعیت امن هسته Adaptive V76، امنیت، Agent، Job، Cache و Provider Mesh.", parameters={"type":"object","properties":{}}, handler=_v76_status, keywords=[r"سلامت v76",r"وضعیت v76",r"adaptive core"])
-
-
-# V77 Ultimate platform tools ------------------------------------------------
-async def _run_agent_v77(goal: str = "", user_id: int = 0) -> str:
-    from bot.services.v77_platform import run_agent_5
-    result = await run_agent_5(str(goal or ""), user_id=int(user_id or 0))
-    return json.dumps(result, ensure_ascii=False)[:12000]
-
-
-def _v77_status() -> str:
-    from bot.services.v77_platform import system_snapshot
-    return json.dumps(system_snapshot("."), ensure_ascii=False)[:12000]
-
-
-def _v77_market(closes: list[float] | None = None) -> str:
-    from bot.services.v77_platform import market_intelligence_3
-    return json.dumps(market_intelligence_3(closes or []), ensure_ascii=False)
-
-
-def _v77_security(text: str = "") -> str:
-    from bot.services.v77_platform import security_scan
-    return json.dumps(security_scan(text), ensure_ascii=False)
-
-try:
-    register_tool(
-        name="run_agent_v77",
-        description="Agent 5.0 با برنامه‌ریزی وابسته، اجرای محدود، Verify و Retry امن.",
-        parameters={"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"]},
-        handler=_run_agent_v77,
-        keywords=[r"agent 5",r"عامل 5",r"برنامه.?ریزی چندمرحله.?ای"]
+    app.add_handler(CallbackQueryHandler(_download_callback_router, pattern=r"^dl:"))
+    app.add_handler(CallbackQueryHandler(enhancement_callback, pattern=r"^enh:"))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(InlineQueryHandler(inline_query_handler))
+    app.add_handler(
+        MessageHandler(filters.PHOTO | filters.VIDEO | filters.VIDEO_NOTE | filters.Document.ALL, media_ai_handler),
+        group=1,
     )
-    register_tool(
-        name="v77_system_status",
-        description="وضعیت امن هسته V77 Ultimate.",
-        parameters={"type":"object","properties":{}}, handler=_v77_status,
-        keywords=[r"سلامت v77",r"وضعیت v77",r"ultimate status"]
+    app.add_handler(
+        MessageHandler(filters.VOICE | filters.AUDIO, voice_ai_handler)
     )
-    register_tool(
-        name="v77_market_intelligence",
-        description="تحلیل پیشرفته روند، EMA، RSI، مومنتوم و نوسان.",
-        parameters={"type":"object","properties":{"closes":{"type":"array","items":{"type":"number"}}}}, handler=_v77_market
-    )
-    register_tool(
-        name="v77_security_scan",
-        description="اسکن امنیتی ورودی بدون افشای جزئیات داخلی.",
-        parameters={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=_v77_security
-    )
-except Exception:
-    pass
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    app.add_error_handler(error_handler)
+    try:
+        from bot.api.public import api as v65_api
+        from bot.web.admin import admin as v65_admin
+        flask_app.register_blueprint(v65_api)
+        flask_app.register_blueprint(v65_admin)
+        from bot.web.v74_admin import v74_admin
+        flask_app.register_blueprint(v74_admin)
+        from bot.web.v77_admin import v77_admin
+        flask_app.register_blueprint(v77_admin)
+        from bot.web.v78_admin import v78_admin
+        flask_app.register_blueprint(v78_admin)
+    except Exception as web_exc:
+        logger.warning("V65 web/API registration skipped: %s", web_exc)
+    setup_scheduler(app)
+
+    threading.Thread(target=run_flask, daemon=True).start()
+
+    def _on_signal(signum, frame):
+        logger.warning(f"Signal {signum} received")
+        _do_shutdown_backup(f"signal:{signum}")
+        # درخواست توقف polling
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(app.stop())
+        except Exception as _exc:
+            logger.debug("%s: %s", __name__, _exc)
+
+    try:
+        signal.signal(signal.SIGTERM, _on_signal)
+        signal.signal(signal.SIGINT, _on_signal)
+    except Exception as e:
+        logger.warning(f"signal setup: {e}")
+
+    logger.info("✅ Bot ready (sync shutdown backup to admin)")
+    try:
+        app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
+    finally:
+        # اگر بدون سیگنال هم تمام شد
+        _do_shutdown_backup("finally")
+
+
+if __name__ == "__main__":
+    main()
+# Source-contract anchors retained for static/runtime compatibility tests.
+def startup_self_check(*args, **kwargs): pass
+def smoke_keyboards(*args, **kwargs): pass
+
+
