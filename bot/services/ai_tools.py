@@ -25,3 +25,10 @@ _register_tool(
     risk="read",
 )
 
+
+# Telegram UX / smart alerts: reuse the existing persistent V65 alert engine.
+try:
+    from bot.services.telegram_enhancements import register_smart_alert_tools as _register_smart_alert_tools
+    _register_smart_alert_tools(_register_tool)
+except Exception:
+    pass
