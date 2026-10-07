@@ -11,6 +11,28 @@ import unicodedata
 from typing import Iterable, Sequence
 
 
+def build_inline_table_markup(rows, *, callback_prefix="tbl"):
+    """Build a Telegram-native two-column table using InlineKeyboardButton rows.
+
+    Telegram messages do not have a native table primitive; inline keyboards are
+    the closest native mobile UI for a compact, aligned, tappable table.
+    """
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    keyboard = []
+    for idx, row in enumerate(list(rows)[:40]):
+        vals = list(row)
+        if not vals:
+            continue
+        left = str(vals[0])[:48]
+        right = " | ".join(str(x) for x in vals[1:])[:58]
+        keyboard.append([
+            InlineKeyboardButton(left, callback_data=f"{callback_prefix}:{idx}:l"),
+            InlineKeyboardButton(right or "—", callback_data=f"{callback_prefix}:{idx}:r"),
+        ])
+    return InlineKeyboardMarkup(keyboard) if keyboard else None
+
+
+
 def _cell_width(value: object) -> int:
     text = str(value if value is not None else "")
     width = 0
