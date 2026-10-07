@@ -1975,19 +1975,26 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
     if len(prompt) > MAX_INPUT:
         prompt = prompt[:MAX_INPUT]
 
-    options = available_model_options()
-    if not options:
-        raise RuntimeError(
-            "هیچ سرویس AI تنظیم نشده است. حداقل یک API Key در Render قرار بده."
-        )
-
     original_prompt = prompt
     try:
         _extract_and_store_memory(user_id, original_prompt)
     except Exception:
         pass
 
+    # Shopping is an authoritative live-data path. Never let an LLM replace
+    # a failed/real-time shopping lookup with remembered products or prices.
     live_shopping = await _live_shopping_prefetch(original_prompt)
+    if _looks_like_shopping_request(original_prompt) and live_shopping:
+        logger.info("shopping request served by live engine; AI providers skipped")
+        _save_turn(user_id, original_prompt, live_shopping)
+        return live_shopping, "Live Shopping"
+
+    options = available_model_options()
+    if not options:
+        raise RuntimeError(
+            "هیچ سرویس AI تنظیم نشده است. حداقل یک API Key در Render قرار بده."
+        )
+
     provider_prompt = original_prompt
     if live_shopping:
         provider_prompt = (
@@ -2034,7 +2041,7 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
                 continue
             tried.add(key)
             try:
-                answer = await _call_provider(provider, user_id, prompt, model)
+                answer = await _call_provider(provider, user_id, provider_prompt, model)
                 _save_turn(user_id, original_prompt, answer)
                 # اگر هنوز provider انتخاب نشده، همین را ذخیره کن (با *)
                 if not selected:
@@ -2059,8 +2066,24 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
 
 
 def _looks_like_shopping_request(text: str) -> bool:
-    t = str(text or '').lower()
-    return bool(__import__('re').search(r"گوشی|موبایل|لپ.?تاپ|لپتاپ|کفش|لباس|هدفون|هندزفری|تلویزیون|لوازم|محصول|خرید|قیمت|بودجه|تا\s*\d+\s*(?:میلیون|م)|amazon|آمازون|ترب|دیجی.?کالا|فروشگاه", t, __import__('re').I))
+    t = str(text or "").lower()
+    # Do not treat every "قیمت ..." question as shopping (e.g. دلار/طلا/crypto).
+    product = (
+        r"گوشی|موبایل|اسمارت\s*فون|iphone|آیفون|سامسونگ|شیائومی|پوکو|"
+        r"pixel|پیکسل|oneplus|honor|لپ.?تاپ|لپتاپ|کامپیوتر|تبلت|تلویزیون|"
+        r"مانیتور|هدفون|هندزفری|کفش|لباس|کتانی|ساعت|لوازم\s*(?:خانه|آشپزخانه|دیجیتال)?|"
+        r"محصول|کالا|وسیله"
+    )
+    shopping_action = (
+        r"خرید|بخر|پیدا کن|پیدا برام|فروشگاه|فروشنده|لینک خرید|"
+        r"ترب|دیجی.?کالا|تکنولایف|ایمالز|اسنپ.?شاپ|باسلام|"
+        r"amazon|آمازون|ebay|ایبی|aliexpress|علی.?اکسپرس|walmart|"
+        r"best\s*buy|etsy|newegg|noon|temu|shein"
+    )
+    return bool(
+        __import__("re").search(product, t, __import__("re").I)
+        or __import__("re").search(shopping_action, t, __import__("re").I)
+    )
 
 
 async def _live_shopping_prefetch(prompt: str) -> str:
@@ -2236,6 +2259,16 @@ async def ask_ai_stream(user_id: int, prompt: str):
         pass
 
     live_shopping = await _live_shopping_prefetch(original)
+    if _looks_like_shopping_request(original) and live_shopping:
+        logger.info("shopping stream served by live engine; AI providers skipped")
+        _save_turn(user_id, original, live_shopping)
+        chunk_size = max(80, int(os.getenv("AI_STREAM_CHUNK", "180")))
+        for i in range(0, len(live_shopping), chunk_size):
+            yield live_shopping[i:i + chunk_size], None
+            await asyncio.sleep(0)
+        yield None, "Live Shopping"
+        return
+
     provider_prompt = original
     if live_shopping:
         provider_prompt = (
@@ -2268,7 +2301,7 @@ async def ask_ai_stream(user_id: int, prompt: str):
         errors = []
         for provider, model in ordered:
             try:
-                answer = await _call_provider(provider, user_id, original, model)
+                answer = await _call_provider(provider, user_id, provider_prompt, model)
                 if not answer:
                     raise RuntimeError("empty answer")
                 _save_turn(user_id, original, answer)
