@@ -26,6 +26,7 @@ _TOOL_CACHE_MAX = max(64, int(os.getenv("AI_TOOL_CACHE_MAX", "1024")))
 _TOOL_CACHEABLE = {
     "get_weather", "get_weather_forecast", "get_air_quality",
     "get_market_prices", "get_top_crypto", "get_user_city", "get_economic_calendar",
+    "analyze_gold", "get_current_datetime", "get_crypto_price",
 }
 
 
@@ -57,3 +58,32 @@ load_modular_part(__file__, 'tool_runtime_parts/part_009_list_registered_tools.p
 
 
 load_modular_part(__file__, 'tool_runtime_parts/part_010_clear_tool_cache.py')
+
+
+# ── Auto-connect: ensure full capability set is visible to the model ─────────
+def _ensure_caps() -> None:
+    try:
+        from bot.services.capability_autoload import ensure_all_capabilities_registered
+        ensure_all_capabilities_registered()
+    except Exception as exc:
+        logger.debug("tool_runtime ensure caps: %s", exc)
+
+
+_orig_get_tool_definitions = get_tool_definitions  # noqa: F821 — loaded above
+_orig_execute_tool = execute_tool  # noqa: F821
+_orig_get_registered_tool_names = get_registered_tool_names  # noqa: F821
+
+
+def get_tool_definitions(*args, **kwargs):
+    _ensure_caps()
+    return _orig_get_tool_definitions(*args, **kwargs)
+
+
+async def execute_tool(*args, **kwargs):
+    _ensure_caps()
+    return await _orig_execute_tool(*args, **kwargs)
+
+
+def get_registered_tool_names(*args, **kwargs):
+    _ensure_caps()
+    return _orig_get_registered_tool_names(*args, **kwargs)
