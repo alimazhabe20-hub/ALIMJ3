@@ -35,6 +35,13 @@ _PRODUCT_OBJECT_RE = re.compile(
     re.I,
 )
 
+_GENERIC_PRODUCT_RE = re.compile(
+    r"(?:جوراب|کفش|کتانی|صندل|لباس|پیراهن|شلوار|مانتو|کت|کاپشن|هودی|سویشرت|"
+    r"کیف|کوله|کیف پول|کمربند|عینک|ساعت|گردنبند|دستبند|انگشتر|عطر|ادکلن|"
+    r"کتاب|دفتر|خودکار|لوازم تحریر|اسباب بازی|هدیه|ظرف|لیوان|ماگ|قاب|چراغ|"
+    r"مبل|صندلی|میز|فرش|پتو|بالش|ملحفه|لوازم آشپزخانه|ظرفشویی|جارو|"
+    r"لوازم آرایشی|کرم|شامپو|محصول|product)", re.I)
+
 _PRODUCT_ACTION_RE = re.compile(
     r"(?:قیمت|نرخ|چنده|چقدر|چند(?:ه|ه؟)|ارزان(?:ترین)?|اقتصادی|"
     r"خرید|بخرم|بخریم|فروشگاه|فروشنده|لینک|موجود|موجودی|مقایسه|"
@@ -70,7 +77,16 @@ def is_live_product_request(text: str) -> bool:
         return True
 
     # Recommendation-style shopping without the word «قیمت».
-    if _PRODUCT_OBJECT_RE.search(s) and _PRODUCT_ACTION_RE.search(s):
+    if _PRODUCT_OBJECT_RE.search(s) and (_PRODUCT_ACTION_RE.search(s) or re.search(r"(?:تا|زیر|حداکثر|بودجه)\s*[0-9۰-۹]+\s*(?:میلیون|م|تومان|تومن)?", s, re.I)):
+        return True
+
+    # Generic catalog requests such as «یه جوراب مردانه پیدا کن برام» do not
+    # contain the word «خرید» and therefore must bypass generic AI.
+    generic_request = re.search(
+        r"(?:یه|یک|چند|یه\s*دونه)?\s*(?:.*)\s*(?:پیدا\s*کن|برام\s*پیدا|بگرد|جستجو\s*کن)",
+        s, re.I,
+    )
+    if generic_request and _GENERIC_PRODUCT_RE.search(s):
         return True
 
     return False
@@ -95,6 +111,24 @@ def _shopping_query(text: str) -> str:
 
 async def run_live_product_search(update, user_id: int, text: str) -> bool:
     """Run the real shopping engine and always consume the request."""
+    # Natural-language price alert: «اگر جوراب زیر ۱۰۰ هزار شد خبرم کن».
+    alert_match = re.search(r"(?:اگر|وقتی|هر وقت)\s+(.+?)\s+(?:زیر|کمتر از|به کمتر از)\s*([0-9۰-۹.,]+)\s*(میلیون|م|هزار|تومان|تومن)?", _normalize(text), re.I)
+    if alert_match and re.search(r"خبرم|اطلاع|هشدار|بگو", _normalize(text), re.I):
+        raw_target = alert_match.group(2).replace(',', '').replace('٬', '')
+        try:
+            target = float(raw_target)
+            unit = (alert_match.group(3) or '').lower()
+            if 'میلیون' in unit or unit == 'م': target *= 1_000_000
+            elif 'هزار' in unit: target *= 1_000
+            target = int(target)
+            q = _shopping_query(alert_match.group(1))
+            from bot.features.market.shopping import create_shopping_price_alert
+            msg = create_shopping_price_alert(user_id, q, target)
+            await update.message.reply_text(msg)
+            return True
+        except Exception:
+            pass
+
     query = _shopping_query(text)
     if len(query) < 2:
         await update.message.reply_text(
