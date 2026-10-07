@@ -1,8 +1,6 @@
 # Auto-split part 13: full_market_prices
-async def full_market_prices() -> str:
+async def full_market_prices_data():
     """قیمت بازار بدون کریپتو — خروجی جدولی و بدون عدد حدسی."""
-    from bot.utils.table_renderer import render_table
-
     bulk = await _fetch_tgju_bulk()
     data = {}
     for key, slug in TGJU_SLUGS.items():
@@ -31,7 +29,16 @@ async def full_market_prices() -> str:
         v = data.get(key)
         rows.append((label, pn(f"{v / 10:,.0f}") + " تومان" if v is not None else "—"))
 
-    return (
-        render_table(("بازار", "قیمت"), rows, title="💰 قیمت بازار")
-        + "\n\n💡 کریپتو: از «۲۰ ارز برتر» یا تبدیل / نمودار / تحلیل استفاده کنید."
-    )
+    return rows
+
+
+async def full_market_prices() -> str:
+    """Legacy text facade; keeps AI/tool callers backward compatible."""
+    rows = await full_market_prices_data()
+    from bot.utils.table_renderer import render_table
+    return render_table(("بازار", "قیمت"), rows, title="💰 قیمت بازار") + "\n\n💡 کریپتو: از «۲۰ ارز برتر» یا تبدیل / نمودار / تحلیل استفاده کنید."
+
+
+def market_prices_inline_markup(rows):
+    from bot.utils.table_renderer import build_inline_table_markup
+    return build_inline_table_markup(rows, callback_prefix="mkt")
