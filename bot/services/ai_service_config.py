@@ -3,6 +3,14 @@ from .ai_service_common import *  # noqa: F401,F403
 from . import ai_service_common as _common
 globals().update({k:v for k,v in _common.__dict__.items() if not k.startswith('__')})
 
+try:
+    from .ai_service_registration import _PROVIDER_PRETTY
+except Exception:
+    _PROVIDER_PRETTY = {
+        "gemini": "Gemini", "groq": "Groq", "cerebras": "Cerebras",
+        "cloudflare": "Cloudflare", "openrouter": "OpenRouter",
+    }
+
 
 def _get_http() -> httpx.AsyncClient:
     global _HTTP
