@@ -9,6 +9,28 @@ def _ff_html_text(node) -> str:
         return ""
     return re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip()
 
+def _ff_impact(row) -> str:
+    """Extract Forex Factory impact from icon/class across HTML layouts."""
+    node = (
+        row.select_one(".calendar__impact")
+        or row.select_one("td.calendar__cell.calendar__impact")
+        or row.select_one("[class*='impact']")
+    )
+    if node is None:
+        return ""
+    classes = " ".join(node.get("class") or [])
+    title = str(node.get("title") or node.get("data-impact") or "")
+    raw = f"{classes} {title} {_ff_html_text(node)}".lower()
+    if "high" in raw or "red" in raw:
+        return "High"
+    if "medium" in raw or "orange" in raw or "yellow" in raw:
+        return "Medium"
+    if "low" in raw:
+        return "Low"
+    if "holiday" in raw:
+        return "Holiday"
+    return ""
+
 def _ff_cell_text(row, field: str) -> str:
     """Extract a calendar cell across old/new FF HTML layouts."""
     selectors = (
@@ -26,7 +48,7 @@ def _ff_cell_text(row, field: str) -> str:
     return ""
 
 def _parse_ff_html(url: str) -> list[dict[str, Any]]:
-    r = requests.get(url, timeout=18, headers={
+    r = requests.get(url, timeout=(5, 15), headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
@@ -49,20 +71,100 @@ def _parse_ff_html(url: str) -> list[dict[str, Any]]:
         if not currency or not title or not current_date:
             continue
 
-        actual = _ff_cell_text(row, "actual")
-        forecast = _ff_cell_text(row, "forecast")
-        previous = _ff_cell_text(row, "previous")
-
         out.append({
             "date_text": current_date,
             "time_text": time_text,
             "country": currency.upper(),
             "title": title,
-            "actual": actual,
-            "forecast": forecast,
-            "previous": previous,
+            "actual": _ff_cell_text(row, "actual"),
+            "forecast": _ff_cell_text(row, "forecast"),
+            "previous": _ff_cell_text(row, "previous"),
+            "impact": _ff_impact(row),
         })
     return out
+
+def _parse_ff_html_events(url: str) -> list[dict[str, Any]]:
+    """Turn a live Forex Factory HTML week page into the internal event schema."""
+    rows = _parse_ff_html(url)
+    if not rows:
+        return []
+
+    tz = pytz.timezone("Europe/London")
+    now_local = datetime.now(tz)
+    out: list[dict[str, Any]] = []
+    current_year = now_local.year
+
+    for row in rows:
+        date_text = str(row.get("date_text") or "").strip()
+        time_text = str(row.get("time_text") or "").strip()
+        # Typical FF date: "Mon Oct 8"; time: "8:30am".
+        dm = re.search(r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+([A-Za-z]{3})\s+(\d{1,2})", date_text)
+        if not dm:
+            dm = re.search(r"([A-Za-z]{3})\s+(\d{1,2})", date_text)
+        if not dm:
+            continue
+        month, day = dm.group(1), int(dm.group(2))
+        year = current_year
+        try:
+            if datetime(year, datetime.strptime(month, "%b").month, day).date() < (now_local.date() - timedelta(days=330)):
+                year += 1
+        except Exception:
+            continue
+
+        hour, minute = 0, 0
+        tm = re.search(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", time_text, re.I)
+        if tm:
+            hour = int(tm.group(1))
+            minute = int(tm.group(2) or 0)
+            ap = (tm.group(3) or "").lower()
+            if ap == "pm" and hour < 12:
+                hour += 12
+            elif ap == "am" and hour == 12:
+                hour = 0
+
+        try:
+            naive = datetime(year, datetime.strptime(month, "%b").month, day, hour, minute)
+            local_dt = tz.localize(naive, is_dst=None)
+            dt = local_dt.astimezone(timezone.utc)
+        except Exception:
+            continue
+
+        cur = str(row.get("country") or "").upper().strip()
+        title = str(row.get("title") or "رویداد اقتصادی").strip()
+        impact = str(row.get("impact") or "").strip().title()
+        if impact not in IMPACT_FA:
+            impact = "Low"
+
+        out.append({
+            "id": _stable_event_id(dt, cur, title),
+            "utc": dt,
+            "country": cur,
+            "currency_name": CURRENCY_NAMES.get(cur, cur or "نامشخص"),
+            "impact": impact,
+            "title": title,
+            "title_fa": _fa_title(title),
+            "actual": row.get("actual") or "",
+            "forecast": row.get("forecast") or "",
+            "previous": row.get("previous") or "",
+            "source": "Forex Factory HTML",
+        })
+    return out
+
+def _load_ff_html_events() -> list[dict[str, Any]]:
+    """Live fallback independent of the faireconomy CDN/JSON endpoints."""
+    errors: list[str] = []
+    for url in FF_HTML_URLS:
+        try:
+            events = _parse_ff_html_events(url)
+            if events:
+                return events
+        except Exception as exc:
+            errors.append(str(exc))
+            logger.debug("economic calendar live HTML fallback failed for %s: %s", url, exc)
+    if errors:
+        logger.warning("economic calendar all live HTML fallbacks failed: %s", " | ".join(errors[:2]))
+    return []
+
 
 def _ff_daily_urls(day: datetime) -> list[str]:
     """Build daily FF calendar URLs for a specific date."""
@@ -408,6 +510,28 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
                     errors.append(f"ff:{exc2}")
 
         ff_norm = [e for e in (_normalize(x) for x in ff_rows) if e]
+        # 2b) LIVE FALLBACK: direct Forex Factory HTML. This does not depend on
+        # nfs/cdn-nfs.faireconomy.media and can still provide Actual/Forecast/Previous.
+        if not normalized and not ff_norm:
+            html_norm = await asyncio.to_thread(_load_ff_html_events)
+            if html_norm:
+                normalized = html_norm
+                logger.info("economic calendar live fallback source=forexfactory_html events=%s", len(normalized))
+        elif normalized and not ff_norm:
+            html_norm = await asyncio.to_thread(_load_ff_html_events)
+            if html_norm:
+                by_id = {e["id"]: e for e in normalized}
+                for he in html_norm:
+                    existing = by_id.get(he["id"])
+                    if existing:
+                        for field in ("actual", "forecast", "previous"):
+                            if not str(existing.get(field) or "").strip() and str(he.get(field) or "").strip():
+                                existing[field] = he[field]
+                        if he.get("impact"):
+                            existing["impact"] = he["impact"]
+                    else:
+                        by_id[he["id"]] = he
+                normalized = sorted(by_id.values(), key=lambda e: e["utc"])[:_MAX_EVENTS]
         if ff_norm:
             if not normalized:
                 normalized = ff_norm
@@ -455,7 +579,6 @@ async def refresh_calendar(force: bool = False) -> list[dict[str, Any]]:
             logger.warning("economic calendar refresh failed; using stale cache: %s", " | ".join(errors[:4]))
             return list(_cache)
 
-        raise RuntimeError(
-            "تقویم اقتصادی فعلاً از منبع زنده دریافت نشد."
-            + ((" جزئیات: " + " | ".join(errors[:2])) if errors else "")
-        )
+        # Never expose provider/DNS/network internals to Telegram users.
+        logger.warning("economic calendar live refresh unavailable: %s", " | ".join(errors[:4]))
+        raise RuntimeError("تقویم اقتصادی فعلاً در دسترس نیست.")

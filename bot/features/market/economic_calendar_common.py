@@ -184,3 +184,20 @@ TERM_MAP = {
     "Output": "خروجی",
     "GDP": "تولید ناخالص داخلی",
 }
+
+
+# Live provider endpoints. Kept in the shared module because split provider
+# modules resolve their globals in their own namespace.
+FF_HTML_URLS = (
+    "https://calendar.forexfactory.com/calendar?week=this",
+    "https://www.forexfactory.com/calendar?week=this",
+    "https://mds-wss.forexfactory.com/calendar?week=this",
+    "https://calendar.forexfactory.com/calendar?week=next",
+    "https://www.forexfactory.com/calendar?week=next",
+)
+FF_DAILY_HTML_HOSTS = (
+    "https://calendar.forexfactory.com/calendar",
+    "https://www.forexfactory.com/calendar",
+    "https://mds-wss.forexfactory.com/calendar",
+)
+BIQUOTE_URL = "https://biquote.io/api/calendar"
