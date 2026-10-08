@@ -181,8 +181,8 @@ IRAN_ALIASES = {
 }
 
 TRUST = {
-    "ترب": 100,
-    "دیجی‌کالا": 98,
+    "دیجی‌کالا": 100,
+    "ترب": 96,
     "تکنولایف": 94,
     "ایمالز": 92,
     "اسنپ‌شاپ": 91,
@@ -933,7 +933,8 @@ async def _direct_torob(query: str, max_price: int, limit: int) -> list[dict]:
                         "q": query,
                         "page": 0,
                         "size": min(max(12, limit * 2), 40),
-                        "sort": "price",
+                        # برای بودجه بالا sort=price فقط مدل‌های خیلی ارزان می‌آورد
+                        **({"sort": "price"} if (max_price and max_price < 8_000_000) else {}),
                         "source": "torob_search",
                     },
                 )
@@ -1110,8 +1111,36 @@ async def _direct_site_search(query: str, domain: str, limit: int) -> list[dict]
 def _query_variants(query: str, budget: int) -> list[str]:
     q = _clean_query(query)
     variants = [q]
+    intent = _shopping_intent(query)
     if budget:
         variants += [f"{q} تا {budget:,} تومان", f"{q} قیمت خرید", f"{q} فروشگاه"]
+        # برای بودجه متوسط/بالا مدل‌های میان‌رده و بالارده را هم جستجو کن
+        # تا API فقط ارزان‌ترین‌ها را برنگرداند.
+        if intent.get("phone") and budget >= 8_000_000:
+            brand = (intent.get("brand") or "").lower()
+            if brand in ("شیائومی", "xiaomi", "پوکو", "poco") or "شیائومی" in q or "xiaomi" in q.lower():
+                if budget >= 30_000_000:
+                    variants += [
+                        "شیائومی 13T Pro",
+                        "Xiaomi 14",
+                        "Poco F6 Pro",
+                        "Redmi Note 13 Pro",
+                    ]
+                elif budget >= 15_000_000:
+                    variants += [
+                        "Redmi Note 13",
+                        "Poco X6",
+                        "شیائومی 13T",
+                    ]
+                else:
+                    variants += ["Redmi Note 12", "Poco X5"]
+            elif brand in ("سامسونگ", "samsung") or "سامسونگ" in q:
+                if budget >= 30_000_000:
+                    variants += ["Galaxy A55", "Galaxy S23 FE", "Galaxy A35"]
+                else:
+                    variants += ["Galaxy A25", "Galaxy A15"]
+            elif brand in ("اپل", "apple", "آیفون") or "آیفون" in q or "iphone" in q.lower():
+                variants += ["iPhone 13", "iPhone 14", "آیفون ۱۳"]
     else:
         variants += [f"{q} قیمت", f"{q} خرید", f"{q} فروشگاه"]
     out: list[str] = []
@@ -1121,7 +1150,7 @@ def _query_variants(query: str, budget: int) -> list[str]:
         if x and x not in seen:
             seen.add(x)
             out.append(x)
-    return out[:4]
+    return out[:6]
 
 
 def _rank(rows: list[dict], query: str, max_price: int) -> list[dict]:
@@ -1166,6 +1195,22 @@ def _rank(rows: list[dict], query: str, max_price: int) -> list[dict]:
             score += 8
         if avail == "موجود":
             score += 4
+        # برای بودجه بالا: ترجیح بازه معقول (نه فقط ارزان‌ترین)
+        # اگر کاربر سقف ۵۰ میلیون گذاشته، مدل ۳ میلیونی «بهترین» نیست.
+        if price and max_price and max_price >= 8_000_000:
+            ratio = float(price) / float(max_price)
+            if 0.25 <= ratio <= 0.95:
+                score += 22  # بازه هدف
+            elif 0.12 <= ratio < 0.25:
+                score += 8
+            elif ratio < 0.08:
+                score -= 12  # خیلی ارزان نسبت به بودجه → احتمالاً نامرتبط/کهنه
+            # جریمه قیمت مشکوک خیلی پایین برای مدل‌های شناخته‌شده پرچمدار
+            low = title.lower()
+            if price < 6_000_000 and any(
+                k in low for k in ("13t pro", "14 pro", "14 ultra", "s23", "s24", "iphone 14", "iphone 15")
+            ):
+                score -= 25
         x["_score"] = score
         x["_model_key"] = model
         if model:
@@ -1184,19 +1229,38 @@ def _rank(rows: list[dict], query: str, max_price: int) -> list[dict]:
         else:
             out.append(x)
     out.extend(best_by_model_source.values())
-    out.sort(key=lambda x: (-float(x.get("_score", 0)), x.get("price") or 10**30))
+    # با بودجه بالا اول امتیاز، بعد نزدیکی به میانه بودجه؛ وگرنه ارزان‌تر
+    if max_price and max_price >= 8_000_000:
+        target = max_price * 0.55
+
+        def _sort_key(x):
+            p = x.get("price") or 0
+            return (-float(x.get("_score", 0)), abs(p - target), p)
+
+        out.sort(key=_sort_key)
+    else:
+        out.sort(key=lambda x: (-float(x.get("_score", 0)), x.get("price") or 10**30))
     return out
 
 
 def _diversify_shopping_rows(
     rows: list[dict], max_results: int = 10, max_per_source: int = 2
 ) -> list[dict]:
+    """نتایج را با اولویت دیجی‌کالا، سپس ترب، سپس بقیه پخش می‌کند."""
     if not rows:
         return []
+    priority = {"دیجی‌کالا": 0, "ترب": 1}
+
+    def _src_rank(row: dict) -> tuple:
+        src = str(row.get("source") or "وب")
+        return (priority.get(src, 50), -float(row.get("_score", 0)))
+
+    ordered = sorted(rows, key=_src_rank)
     result: list[dict] = []
     counts: dict[str, int] = {}
     used_urls: set[str] = set()
-    for row in rows:
+    # دور اول: حداقل یکی از هر منبع (با اولویت دیجی‌کالا)
+    for row in ordered:
         url = str(row.get("url") or "").strip()
         src = str(row.get("source") or "وب")
         if not url or url in used_urls or counts.get(src, 0) >= 1:
@@ -1206,7 +1270,8 @@ def _diversify_shopping_rows(
         result.append(row)
         if len(result) >= max_results:
             return result
-    for row in rows:
+    # دور دوم: پر کردن ظرفیت با اولویت همان ترتیب
+    for row in ordered:
         url = str(row.get("url") or "").strip()
         src = str(row.get("source") or "وب")
         if not url or url in used_urls or counts.get(src, 0) >= max_per_source:
@@ -1548,12 +1613,12 @@ async def search_shopping(
             ]
             if not domains:
                 domains = [
-                    "torob.com", "digikala.com", "technolife.ir",
+                    "digikala.com", "torob.com", "technolife.ir",
                     "snappshop.ir", "emalls.ir",
                 ]
         else:
             domains = [
-                "torob.com", "digikala.com", "technolife.ir", "snappshop.ir",
+                "digikala.com", "torob.com", "technolife.ir", "snappshop.ir",
                 "emalls.ir", "meghdadit.com", "kalaoma.com", "19kala.com", "mobile.ir",
             ]
 
@@ -1564,8 +1629,8 @@ async def search_shopping(
             direct_tasks = []
             for v in variants[:2]:
                 direct_tasks += [
-                    _direct_torob(v, max_price, max(8, max_results)),
                     _direct_digikala(v, max_price, max(8, max_results)),
+                    _direct_torob(v, max_price, max(8, max_results)),
                 ]
             direct_batches = await asyncio.gather(*direct_tasks, return_exceptions=True)
             for b in direct_batches:
@@ -1811,10 +1876,19 @@ async def search_shopping(
     if candidates:
         for x in candidates:
             src = x.get("source") or "وب"
+            band = 0.0
+            p = x.get("price")
+            if p and max_price and max_price >= 8_000_000:
+                ratio = float(p) / float(max_price)
+                if 0.25 <= ratio <= 0.95:
+                    band = 20.0
+                elif ratio < 0.08:
+                    band = -15.0
             x["_final_score"] = (
                 float(x.get("_score", 0))
                 + TRUST.get(src, 60) * 0.12
                 + (8 if x.get("_verified_direct") else 0)
+                + band
             )
         best = max(candidates, key=lambda x: x["_final_score"])
         model_key = _shopping_model_key(best.get("title"))
