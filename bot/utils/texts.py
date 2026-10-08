@@ -102,13 +102,10 @@ SUPPORTED_LANGUAGES = tuple(TEXTS.keys())
 DEFAULT_LANGUAGE = "fa"
 
 
-load_modular_part(__file__, 'texts_parts/part_001_normalize_language.py')
 
 
-load_modular_part(__file__, 'texts_parts/part_002_get_text_for_language.py')
 
 
-load_modular_part(__file__, 'texts_parts/part_003_get_text.py')
 
 
 # UI labels are translated at render-time so ReplyKeyboard buttons follow the
@@ -229,15 +226,82 @@ UI_LABELS.update({
     "العربية 🇸🇦":{"fa":"العربية 🇸🇦","en":"Arabic 🇸🇦","ar":"العربية 🇸🇦"},
 })
 
+
+
+
+
+# END MERGED LEGACY PART:
+
 from contextvars import ContextVar
+
 _CURRENT_LANGUAGE = ContextVar("alimj3_current_language", default="fa")
 
-load_modular_part(__file__, 'texts_parts/part_004_set_current_language.py')
 
-load_modular_part(__file__, 'texts_parts/part_005_current_language.py')
+def normalize_language(language: str | None) -> str:
+    """Return a supported language code, falling back to Persian."""
+    value = str(language or "").strip().lower()
+    return value if value in TEXTS else DEFAULT_LANGUAGE
 
-load_modular_part(__file__, 'texts_parts/part_006_ui.py')
 
-load_modular_part(__file__, 'texts_parts/part_007_canonical_ui_text.py')
+def get_text_for_language(language: str | None, key: str, **kwargs: object) -> str:
+    """Resolve a translated string without requiring a database lookup."""
+    lang = normalize_language(language)
+    text = TEXTS[lang].get(key, TEXTS[DEFAULT_LANGUAGE].get(key, key))
+    if not kwargs:
+        return text
+    safe_kwargs: dict[str, object] = {}
+    for name, value in kwargs.items():
+        safe_kwargs[name] = (
+            value.replace("{", "(").replace("}", ")")
+            if isinstance(value, str) else value
+        )
+    try:
+        return text.format(**safe_kwargs)
+    except (KeyError, IndexError, ValueError):
+        return text
 
-# END MERGED LEGACY PART: 
+
+def get_text(user_id, key: str, **kwargs: object) -> str:
+    from bot.database import get_user_language
+    try:
+        lang = get_user_language(user_id) or DEFAULT_LANGUAGE
+    except Exception:
+        lang = DEFAULT_LANGUAGE
+    text = TEXTS.get(lang, TEXTS[DEFAULT_LANGUAGE]).get(key, key)
+    if not kwargs:
+        return text
+    safe_kwargs: dict[str, object] = {}
+    for k, v in kwargs.items():
+        safe_kwargs[k] = (
+            v.replace("{", "(").replace("}", ")")
+            if isinstance(v, str) else v
+        )
+    try:
+        return text.format(**safe_kwargs)
+    except Exception:
+        return text
+
+
+def set_current_language(language: str | None) -> str:
+    lang = normalize_language(language)
+    _CURRENT_LANGUAGE.set(lang)
+    return lang
+
+
+def current_language() -> str:
+    return normalize_language(_CURRENT_LANGUAGE.get())
+
+
+def ui(label: str, language: str | None = None) -> str:
+    lang = normalize_language(language or current_language())
+    return UI_LABELS.get(label, {}).get(lang, label)
+
+
+def canonical_ui_text(text: str) -> str:
+    value = str(text or "").strip()
+    for canonical, variants in UI_LABELS.items():
+        if value == canonical or value in variants.values():
+            return canonical
+    return value
+
+# END MERGED LEGACY PART
