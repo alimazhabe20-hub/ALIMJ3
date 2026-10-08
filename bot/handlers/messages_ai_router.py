@@ -1,6 +1,10 @@
 """Semantic message-routing handlers. Extracted from the legacy text handler without removing behavior."""
 from .messages_common import *  # noqa: F401,F403
 from . import messages_common as _common
+from .messages_ai import (
+    _apply_voice_chat_flags, _ask_ai_with_typing, _handle_special_ai_intents,
+    _send_ai_answer, _send_ai_voice,
+)
 globals().update({k:v for k,v in _common.__dict__.items() if not k.startswith('__')})
 
 def _is_back(text):
