@@ -217,4 +217,3 @@ def get_motivation(messages: Sequence[str] | None = None) -> str:
     return pool[index]
 
 # END MERGED LEGACY PART: 
-motivation_parts/part_999_core_legacy.py

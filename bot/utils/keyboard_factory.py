@@ -353,4 +353,3 @@ def get_keyboard_builders():
 # def get_smart_settings_keyboard():
 # 🔄 بررسی بروزرسانی
 # def get_country_keyboard():
-keyboard_factory_parts/part_999_core_legacy.py

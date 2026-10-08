@@ -1003,28 +1003,3 @@ _LAST_RESTORE_STATUS: dict[str, str | bool | int] = {
 }
 
 
-db_persist_parts/part_001__telegram_backup_chat_ids.py
-db_persist_parts/part_002_telegram_backup_enabled.py
-db_persist_parts/part_003__telegram_api.py
-db_persist_parts/part_004__telegram_get.py
-db_persist_parts/part_005_telegram_upload_db.py
-db_persist_parts/part_006_telegram_download_pinned_db.py
-db_persist_parts/part_007__gh_headers.py
-db_persist_parts/part_008__validate_sqlite_backup.py
-db_persist_parts/part_009__normalized_repo.py
-db_persist_parts/part_010_github_enabled.py
-db_persist_parts/part_011__github_request.py
-db_persist_parts/part_012__github_repo_check.py
-db_persist_parts/part_013__github_get_sha.py
-db_persist_parts/part_014__sqlite_snapshot_to_temp.py
-db_persist_parts/part_015_github_upload_db.py
-db_persist_parts/part_016_github_remote_user_count.py
-db_persist_parts/part_017_github_download_db.py
-db_persist_parts/part_018_get_last_restore_status.py
-db_persist_parts/part_019_auto_restore_if_empty.py
-db_persist_parts/part_020_auto_backup.py
-db_persist_parts/part_021_send_db_to_admins_sync.py
-db_persist_parts/part_022_shutdown_backup.py
-db_persist_parts/part_023_send_db_to_admins.py
-db_persist_parts/part_024_restore_db_from_file.py
-db_persist_parts/part_025_notify_admins_if_empty.py

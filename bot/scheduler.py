@@ -426,15 +426,3 @@ PRAYER_FLAGS = {
 }
 
 
-scheduler_parts/part_001_send_daily_messages.py
-scheduler_parts/part_002_check_azan_notifications.py
-scheduler_parts/part_003__next_occurrence.py
-scheduler_parts/part_004_check_user_reminders.py
-scheduler_parts/part_005_check_economic_calendar_alerts.py
-scheduler_parts/part_006_periodic_backup.py
-scheduler_parts/part_007_periodic_telegram_backup.py
-scheduler_parts/part_008_check_v65_price_alerts.py
-scheduler_parts/part_009_v70_due_jobs.py
-scheduler_parts/part_010_v71_due_jobs.py
-scheduler_parts/part_011_check_update_center.py
-scheduler_parts/part_012_setup_scheduler.py

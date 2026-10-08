@@ -438,8 +438,3 @@ __all__ = [
     "get_iraq_cities_keyboard", "get_language_keyboard", "get_font_keyboard",
     "get_font_en_keyboard", "get_font_fa_keyboard",
 ]
-helpers_parts/part_001_to_persian_num.py
-helpers_parts/part_002_build_message.py
-helpers_parts/part_003__build_message_inner.py
-helpers_parts/part_004_get_calendar_buttons.py
-helpers_parts/part_005_get_calendar_text.py
