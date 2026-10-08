@@ -2,7 +2,7 @@
 from __future__ import annotations
 from bot.database import set_birth_date
 from bot.utils.helpers import get_profile_keyboard
-from bot.features.date.date_tools import parse_shamsi
+from bot.features.date.features_date_date_tools import parse_shamsi
 
 async def _h_birth_save(u, c, t, uid):
     c.user_data.pop("waiting_for", None)

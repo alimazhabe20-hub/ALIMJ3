@@ -166,18 +166,24 @@ def classify(text: str) -> FreshnessDecision:
     q = _norm((text or "").strip())
     if not is_live_required(q):
         return FreshnessDecision(False, None, "static_or_general")
+    # Specific live domains must win over generic words such as «امروز» / today.
+    # Otherwise «هوای تهران امروز» is incorrectly routed to the clock.
+    if _PRODUCT_MARKERS.search(q):
+        return FreshnessDecision(True, "search_shopping", "product/shopping data can change")
+    if _MARKET_MARKERS.search(q):
+        return FreshnessDecision(True, None, "market data can change")
+    if _WEATHER_MARKERS.search(q):
+        return FreshnessDecision(True, "get_weather", "weather data can change")
+    if _NEWS_MARKERS.search(q):
+        return FreshnessDecision(True, "web_search", "news is time-sensitive")
+    if _MOVIE_MARKERS.search(q):
+        return FreshnessDecision(True, "web_search", "movie/series releases and availability change")
     if _DATETIME_MARKERS.search(q):
         return FreshnessDecision(
             True,
             "get_current_datetime",
             "current date/time must come from the real system clock",
         )
-    if _PRODUCT_MARKERS.search(q):
-        return FreshnessDecision(True, "search_shopping", "product/shopping data can change")
-    if _MARKET_MARKERS.search(q):
-        return FreshnessDecision(True, None, "market data can change")
-    if _WEATHER_MARKERS.search(q):
-        return FreshnessDecision(True, None, "weather data can change")
     if _MOVIE_MARKERS.search(q):
         return FreshnessDecision(
             True,

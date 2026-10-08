@@ -1,7 +1,7 @@
 """Domain-specific Telegram handlers. Compatibility-preserving extraction from feature_handlers."""
 from __future__ import annotations
 from bot.utils.helpers import get_tools_keyboard
-from bot.features.tools.app_tools import calculator, world_distance, count_text, parse_two_places
+from bot.features.tools.features_tools_app_tools import calculator, world_distance, count_text, parse_two_places
 
 async def _h_calc(u, c, t, uid):
     c.user_data.pop("waiting_for", None)
@@ -9,7 +9,7 @@ async def _h_calc(u, c, t, uid):
 
 async def _h_distance(u, c, t, uid):
     c.user_data.pop("waiting_for", None)
-    from bot.features.tools.app_tools import parse_two_places
+    from bot.features.tools.features_tools_app_tools import parse_two_places
     parsed = parse_two_places(t)
     if not parsed:
         await u.message.reply_text(
