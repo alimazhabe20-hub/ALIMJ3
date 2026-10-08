@@ -214,6 +214,11 @@ def _clean_html(text: str) -> str:
 
 # END MERGED LEGACY PART: 
 # BEGIN MERGED LEGACY PART: visual_search_parts/part_013__ddg_search.py
+# The merged legacy part is defined before the runtime configuration block below.
+# Define the default here as well so Python can evaluate the function signature.
+import os
+MAX_RESULTS_PER_QUERY = max(3, int(os.getenv("VISION_MAX_RESULTS", "6")))
+
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from bot.services.visual_search import MAX_RESULTS_PER_QUERY
