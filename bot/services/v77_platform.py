@@ -10,6 +10,45 @@ Design goals: deterministic helpers, bounded work, fail-closed security, no
 untrusted code execution, no hidden network calls, and compatibility with the
 existing V61-V76 services.
 """
+import ast
+import asyncio
+import csv
+import hashlib
+import io
+import ipaddress
+import json
+import os
+import re
+import shutil
+import sqlite3
+import statistics
+import time
+import uuid
+from collections import Counter, defaultdict, OrderedDict, deque
+from dataclasses import dataclass, asdict
+from pathlib import Path
+from typing import Any, Callable, Iterable
+from urllib.parse import urlparse
+
+VERSION = "77.0.0"
+MAX_STEPS = max(2, min(24, int(os.getenv("V77_MAX_STEPS", "12"))))
+MAX_CALLS = max(2, min(48, int(os.getenv("V77_MAX_CALLS", "24"))))
+MAX_STATE_TURNS = max(4, min(50, int(os.getenv("V77_MAX_STATE_TURNS", "20"))))
+CACHE_MAX = max(64, min(20000, int(os.getenv("V77_CACHE_MAX", "4096"))))
+
+_SECRET = re.compile(r"(?i)(token|api[_-]?key|secret|password|authorization|cookie)\s*[:=]\s*([^\s,;]+)")
+_INJECTION = re.compile(r"(?i)(ignore\s+(all|any|previous|prior)\s+instructions|system\s+prompt|developer\s+message|reveal\s+.*prompt|نادیده\s+بگیر|دستورهای?\s+سیستم)")
+_DANGEROUS = re.compile(r"(?i)(rm\s+-rf|powershell|cmd\.exe|os\.system|subprocess|eval\s*\(|exec\s*\(|curl\s+[^\n]*\|)")
+_PRIVATE_HOSTS = {"localhost", "localhost.localdomain", "metadata.google.internal", "metadata.google.internal."}
+_CACHE: OrderedDict[str, tuple[float, Any]] = OrderedDict()
+_RATE: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=100))
+_FAILURES: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=20))
+_CIRCUITS: dict[str, dict[str, Any]] = {}
+_EVENTS: defaultdict[str, list[Callable[[dict[str, Any]], Any]]] = defaultdict(list)
+_PLUGINS: dict[str, dict[str, Any]] = {}
+_PROVIDERS: dict[str, dict[str, Any]] = {}
+
+
 
 # BEGIN MERGED LEGACY PART: v77_platform_parts/part_001__db.py
 # Auto-split part 1: _db
@@ -879,44 +918,6 @@ def self_test(root: str|Path=".") -> dict[str,Any]:
     return {"ok":all(checks.values()),"checks":checks,"system":system_snapshot(root)}
 
 # END MERGED LEGACY PART: 
-import ast
-import asyncio
-import csv
-import hashlib
-import io
-import ipaddress
-import json
-import os
-import re
-import shutil
-import sqlite3
-import statistics
-import time
-import uuid
-from collections import Counter, defaultdict, OrderedDict, deque
-from dataclasses import dataclass, asdict
-from pathlib import Path
-from typing import Any, Callable, Iterable
-from urllib.parse import urlparse
-
-VERSION = "77.0.0"
-MAX_STEPS = max(2, min(24, int(os.getenv("V77_MAX_STEPS", "12"))))
-MAX_CALLS = max(2, min(48, int(os.getenv("V77_MAX_CALLS", "24"))))
-MAX_STATE_TURNS = max(4, min(50, int(os.getenv("V77_MAX_STATE_TURNS", "20"))))
-CACHE_MAX = max(64, min(20000, int(os.getenv("V77_CACHE_MAX", "4096"))))
-
-_SECRET = re.compile(r"(?i)(token|api[_-]?key|secret|password|authorization|cookie)\s*[:=]\s*([^\s,;]+)")
-_INJECTION = re.compile(r"(?i)(ignore\s+(all|any|previous|prior)\s+instructions|system\s+prompt|developer\s+message|reveal\s+.*prompt|نادیده\s+بگیر|دستورهای?\s+سیستم)")
-_DANGEROUS = re.compile(r"(?i)(rm\s+-rf|powershell|cmd\.exe|os\.system|subprocess|eval\s*\(|exec\s*\(|curl\s+[^\n]*\|)")
-_PRIVATE_HOSTS = {"localhost", "localhost.localdomain", "metadata.google.internal", "metadata.google.internal."}
-_CACHE: OrderedDict[str, tuple[float, Any]] = OrderedDict()
-_RATE: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=100))
-_FAILURES: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=20))
-_CIRCUITS: dict[str, dict[str, Any]] = {}
-_EVENTS: defaultdict[str, list[Callable[[dict[str, Any]], Any]]] = defaultdict(list)
-_PLUGINS: dict[str, dict[str, Any]] = {}
-_PROVIDERS: dict[str, dict[str, Any]] = {}
-
 
 # ---------------------------------------------------------------------------
 # 1. Agent 5.0: dependency-aware plan, verification, bounded repair.
