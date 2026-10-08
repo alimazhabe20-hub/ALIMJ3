@@ -231,23 +231,3 @@ from bot.logger import logger
 SUPPORTED_LANGS = ("fa", "en", "ar")
 
 
-v71_platform_parts/part_001_init_v71_tables.py
-v71_platform_parts/part_002_set_workspace.py
-v71_platform_parts/part_003_get_workspace.py
-v71_platform_parts/part_004_save_branch.py
-v71_platform_parts/part_005_list_branches.py
-v71_platform_parts/part_006_schedule_ai.py
-v71_platform_parts/part_007_due_ai_jobs.py
-v71_platform_parts/part_008_complete_ai_job.py
-v71_platform_parts/part_009_notification_claim.py
-v71_platform_parts/part_010_detect_language.py
-v71_platform_parts/part_011_personalize.py
-v71_platform_parts/part_012_code_agent_review.py
-v71_platform_parts/part_013_verify_facts_with_sources.py
-v71_platform_parts/part_014_source_intelligence.py
-v71_platform_parts/part_015_security_check_url.py
-v71_platform_parts/part_016_ai_route_hint.py
-v71_platform_parts/part_017_auto_recovery_policy.py
-v71_platform_parts/part_018_run_self_test_suite.py
-v71_platform_parts/part_019_health_snapshot.py
-v71_platform_parts/part_020_self_test.py

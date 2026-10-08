@@ -687,18 +687,3 @@ RECEIPT_OCR_PROMPT = (
 
 # ── کیبورد اینلاین زیر جواب AI ───────────────────────────────────────────────
 
-ai_extras_parts/part_001_parse_natural_weather.py
-ai_extras_parts/part_002_parse_natural_crypto_price.py
-ai_extras_parts/part_003_store_answer.py
-ai_extras_parts/part_004_get_stored_answer.py
-ai_extras_parts/part_005_get_stored_prompt.py
-ai_extras_parts/part_006_get_last_answer.py
-ai_extras_parts/part_007_get_last_prompt.py
-ai_extras_parts/part_008_get_last_answer_id.py
-ai_extras_parts/part_009_make_chart_image.py
-ai_extras_parts/part_010_parse_chart_request.py
-ai_extras_parts/part_011_web_search.py
-ai_extras_parts/part_012_parse_natural_reminder.py
-ai_extras_parts/part_013_enhance_ocr_prompt.py
-ai_extras_parts/part_014_get_ai_result_keyboard.py
-ai_extras_parts/part_015_build_continue_prompt.py

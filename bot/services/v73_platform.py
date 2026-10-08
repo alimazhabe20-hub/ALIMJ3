@@ -351,19 +351,3 @@ _COOLDOWN_UNTIL: dict[str, float] = {}
 _PERF: dict[str, dict[str, float]] = defaultdict(lambda: {"calls": 0, "errors": 0, "total_ms": 0.0, "max_ms": 0.0})
 
 
-v73_platform_parts/part_001_redact_secrets.py
-v73_platform_parts/part_002_safe_public_url.py
-v73_platform_parts/part_003_safe_path.py
-v73_platform_parts/part_004_safe_archive_member.py
-v73_platform_parts/part_005_sanitize_tool_arguments.py
-v73_platform_parts/part_006_AgentRun.py
-v73_platform_parts/part_007__intent_candidates.py
-v73_platform_parts/part_008_run_production_agent.py
-v73_platform_parts/part_009_note_failure.py
-v73_platform_parts/part_010_component_available.py
-v73_platform_parts/part_011_recover_component.py
-v73_platform_parts/part_012_health_snapshot.py
-v73_platform_parts/part_013_record_performance.py
-v73_platform_parts/part_014_performance_snapshot.py
-v73_platform_parts/part_015_qa_snapshot.py
-v73_platform_parts/part_016_init_v73_tables.py

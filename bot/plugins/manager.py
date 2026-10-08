@@ -292,19 +292,3 @@ _STATE: Dict[str, PluginState] = {}
 _HOOKS: Dict[str, object] = {}
 
 
-manager_parts/part_001_PluginSpec.py
-manager_parts/part_002_PluginState.py
-manager_parts/part_003__disabled_names.py
-manager_parts/part_004_register.py
-manager_parts/part_005_register_builtin_plugins.py
-manager_parts/part_006_is_enabled.py
-manager_parts/part_007__dependency_error.py
-manager_parts/part_008_list_plugins.py
-manager_parts/part_009_plugin_health.py
-manager_parts/part_010__load_order.py
-manager_parts/part_011_load_plugin.py
-manager_parts/part_012_load_enabled.py
-manager_parts/part_013__call_hook.py
-manager_parts/part_014_start_enabled.py
-manager_parts/part_015_stop_enabled.py
-manager_parts/part_016_reset_registry_for_tests.py

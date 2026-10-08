@@ -1097,4 +1097,3 @@ def user_message(code: str) -> str:
 # "extractor_args": {"instagram": {"app_id": "web"}}
 # Never treat an Instagram HTML/login/challenge page
 # STATIC CONTRACT: _normalize_media_url | login page | "extractor_args"
-downloader_parts/part_999_core_legacy.py

@@ -144,7 +144,3 @@ import os
 MAX_REPAIRS = max(0, min(2, int(os.getenv("AI_AGENT_MAX_REPAIRS", "1"))))
 
 
-agent_engine_parts/part_001__current.py
-agent_engine_parts/part_002__city_from_query.py
-agent_engine_parts/part_003_build_plan.py
-agent_engine_parts/part_004_run_agent.py

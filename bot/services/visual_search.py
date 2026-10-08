@@ -451,21 +451,3 @@ _VISION_STATE: dict[str, Any] = {"ready": False, "failed": False, "processor": N
 
 
 __all__ = ["visual_search", "looks_like_visual_search"]
-visual_search_parts/part_001_SearchResult.py
-visual_search_parts/part_002__normalize.py
-visual_search_parts/part_003__tokens.py
-visual_search_parts/part_004__unique.py
-visual_search_parts/part_005__extract_keywords.py
-visual_search_parts/part_006__image_info.py
-visual_search_parts/part_007__ocr.py
-visual_search_parts/part_008__vision_model_source.py
-visual_search_parts/part_009__load_vision_model.py
-visual_search_parts/part_010__vision_caption.py
-visual_search_parts/part_011__strip_ddg_url.py
-visual_search_parts/part_012__clean_html.py
-visual_search_parts/part_013__ddg_search.py
-visual_search_parts/part_014__query_variants.py
-visual_search_parts/part_015__score_result.py
-visual_search_parts/part_016__dedupe_and_rank.py
-visual_search_parts/part_017_looks_like_visual_search.py
-visual_search_parts/part_018_visual_search.py

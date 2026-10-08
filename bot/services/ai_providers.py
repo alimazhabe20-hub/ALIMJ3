@@ -753,4 +753,3 @@ async def _call_provider(
 def _legacy_ai_context():
     from bot.services import ai_service
     return ai_service.SYSTEM_PROMPT, ai_service._messages
-ai_providers_parts/part_999_core_legacy.py

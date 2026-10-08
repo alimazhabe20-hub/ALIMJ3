@@ -1266,4 +1266,3 @@ except Exception as _cap_exc:  # never break AI import path
         _lg.warning("capability autoload failed: %s", _cap_exc)
     except Exception:
         pass
-ai_tools_parts/part_999_core_legacy.py

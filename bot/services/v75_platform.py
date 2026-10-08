@@ -581,34 +581,3 @@ _PERF=defaultdict(lambda: deque(maxlen=100))
 # ---------------------------------------------------------------------------
 # Dashboard + self test
 # ---------------------------------------------------------------------------
-v75_platform_parts/part_001_redact.py
-v75_platform_parts/part_002_security_scan.py
-v75_platform_parts/part_003_stable_hash.py
-v75_platform_parts/part_004__db.py
-v75_platform_parts/part_005_init_v75_tables.py
-v75_platform_parts/part_006_AgentTask.py
-v75_platform_parts/part_007_plan_agent.py
-v75_platform_parts/part_008_run_agent_3.py
-v75_platform_parts/part_009_run_multi_agent.py
-v75_platform_parts/part_010__specialist_for.py
-v75_platform_parts/part_011_security_center_snapshot.py
-v75_platform_parts/part_012_rank_sources.py
-v75_platform_parts/part_013_rag_chunk.py
-v75_platform_parts/part_014_rag_rank.py
-v75_platform_parts/part_015_market_intelligence_2.py
-v75_platform_parts/part_016_score_news.py
-v75_platform_parts/part_017_economic_surprise.py
-v75_platform_parts/part_018_backup_integrity.py
-v75_platform_parts/part_019_record_perf.py
-v75_platform_parts/part_020_performance_snapshot.py
-v75_platform_parts/part_021_qa_snapshot.py
-v75_platform_parts/part_022_validate_workflow.py
-v75_platform_parts/part_023_execute_workflow.py
-v75_platform_parts/part_024_create_alert.py
-v75_platform_parts/part_025_evaluate_alert.py
-v75_platform_parts/part_026_remember.py
-v75_platform_parts/part_027_recall.py
-v75_platform_parts/part_028_create_workspace.py
-v75_platform_parts/part_029_generate_report.py
-v75_platform_parts/part_030_dashboard.py
-v75_platform_parts/part_031_self_test.py

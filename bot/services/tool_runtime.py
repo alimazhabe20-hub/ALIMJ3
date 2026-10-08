@@ -435,13 +435,3 @@ async def execute_tool(*args, **kwargs):
 def get_registered_tool_names(*args, **kwargs):
     _ensure_caps()
     return _orig_get_registered_tool_names(*args, **kwargs)
-tool_runtime_parts/part_001_register_tool.py
-tool_runtime_parts/part_002_get_registered_tool_names.py
-tool_runtime_parts/part_003_get_tool_definitions.py
-tool_runtime_parts/part_004_parse_tool_arguments.py
-tool_runtime_parts/part_005_execute_tool.py
-tool_runtime_parts/part_006_select_capability_tool.py
-tool_runtime_parts/part_007__normalize_capability_text.py
-tool_runtime_parts/part_008_gather_context_for_prompt.py
-tool_runtime_parts/part_009_list_registered_tools.py
-tool_runtime_parts/part_010_clear_tool_cache.py

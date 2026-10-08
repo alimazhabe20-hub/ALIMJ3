@@ -362,20 +362,3 @@ MAX_MANIFEST_BYTES = 512 * 1024
 _VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 
 
-update_center_parts/part_001__version_tuple.py
-update_center_parts/part_002__is_public_ip.py
-update_center_parts/part_003__valid_manifest_url.py
-update_center_parts/part_004__manifest_url.py
-update_center_parts/part_005__cache_path.py
-update_center_parts/part_006__load_cache.py
-update_center_parts/part_007__save_cache.py
-update_center_parts/part_008__read_manifest.py
-update_center_parts/part_009__dependency_check.py
-update_center_parts/part_010__schema_check.py
-update_center_parts/part_011__local_checks.py
-update_center_parts/part_012__status_for.py
-update_center_parts/part_013__safe_manifest_view.py
-update_center_parts/part_014_check_for_updates.py
-update_center_parts/part_015_update_summary.py
-update_center_parts/part_016_maybe_notify_admins.py
-update_center_parts/part_017_self_test.py

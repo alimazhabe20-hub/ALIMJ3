@@ -275,16 +275,3 @@ _worker_task: Optional[asyncio.Task] = None
 _client: Optional[httpx.AsyncClient] = None
 
 
-auto_reactions_parts/part_001__enabled.py
-auto_reactions_parts/part_002__normalize.py
-auto_reactions_parts/part_003_classify_reaction.py
-auto_reactions_parts/part_004__scope_allows.py
-auto_reactions_parts/part_005__mark_seen.py
-auto_reactions_parts/part_006__get_client.py
-auto_reactions_parts/part_007__api.py
-auto_reactions_parts/part_008__available_reactions.py
-auto_reactions_parts/part_009__set_reaction.py
-auto_reactions_parts/part_010__worker.py
-auto_reactions_parts/part_011__ensure_worker.py
-auto_reactions_parts/part_012_enqueue_auto_reaction.py
-auto_reactions_parts/part_013_maybe_auto_react.py

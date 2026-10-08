@@ -349,11 +349,3 @@ from bot.logger import logger
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
 
 
-insta_downloader_parts/part_001_is_instagram_url.py
-insta_downloader_parts/part_002_is_social_url.py
-insta_downloader_parts/part_003__normalize_instagram_url.py
-insta_downloader_parts/part_004_download_from_gallery.py
-insta_downloader_parts/part_005_download_from_ytdlp.py
-insta_downloader_parts/part_006_download.py
-insta_downloader_parts/part_007_is_video_path.py
-insta_downloader_parts/part_008_cleanup_path.py

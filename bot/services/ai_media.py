@@ -994,4 +994,3 @@ async def translate_voice(
 # END MERGED LEGACY PART: 
 from bot.services import ai_service as _ai
 TTS_VOICE = _ai.TTS_VOICE
-ai_media_parts/part_999_core_legacy.py

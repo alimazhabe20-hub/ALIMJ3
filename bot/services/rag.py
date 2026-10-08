@@ -210,13 +210,3 @@ MAX_CONTEXT_CHARS = 4_000
 _TOKEN_RE = re.compile(r"[\w\u0600-\u06ff]{2,}")
 
 
-rag_parts/part_001_Chunk.py
-rag_parts/part_002_ScoredChunk.py
-rag_parts/part_003__normalize.py
-rag_parts/part_004__tokens.py
-rag_parts/part_005__chunk_text.py
-rag_parts/part_006__index.py
-rag_parts/part_007_refresh_index.py
-rag_parts/part_008_index_stats.py
-rag_parts/part_009_search.py
-rag_parts/part_010_build_context.py

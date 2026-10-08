@@ -260,4 +260,3 @@ def auto_capture_memory(user_id:int,text:str) -> None:
             return
 
 # END MERGED LEGACY PART: 
-v61_v65_platform_parts/part_999_core_legacy.py
