@@ -29,7 +29,7 @@ def _is_back_more(text):
     return "بازگشت به بیشتر" in text
 
 async def text_handler(*args, **kwargs):
-    return await _legacy_text_handler(*args, **kwargs)
+    return await _text_handler_inner(*args, **kwargs)
 
 async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -49,7 +49,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     if await handle_ai_text(update, context, text, user_id, city, first_name):
         return
-    if await handle_waiting_dispatch(update, context, text, user_id, city, first_name, _is_back, _is_back_more):
+    if await handle_waiting_dispatch(update, context, text, user_id, city, first_name):
         return
 
     handlers = (
