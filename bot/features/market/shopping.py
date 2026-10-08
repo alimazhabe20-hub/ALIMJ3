@@ -346,6 +346,81 @@ def _parse_price(value: Any) -> int | None:
         return None
 
 
+
+# کف/سقف معقول قیمت (تومان) برای فیلتر خطاهای واحد و آگهی‌های خراب
+_PRICE_ABS_MIN = 50_000          # زیر این تقریباً همیشه خطاست
+_PRICE_ABS_MAX = 2_000_000_000   # بالای این معمولاً ریال خام یا داده خراب است
+_PHONE_FLOOR = 8_000_000         # کف معقول گوشی هوشمند نو در بازار ۱۴۰۵
+_PHONE_KEYWORDS = (
+    "گوشی", "موبایل", "smartphone", "iphone", "آیفون", "galaxy", "redmi",
+    "poco", "پوکو", "شیائومی", "xiaomi", "سامسونگ", "samsung", "honor", "آنر",
+)
+
+
+def _looks_like_phone(title: str) -> bool:
+    t = str(title or "").lower()
+    return any(k in t for k in _PHONE_KEYWORDS)
+
+
+def _normalize_market_price(raw: Any, title: str = "") -> int | None:
+    """نرمال‌سازی قیمت به تومان + رد قیمت‌های غیرواقعی.
+
+    - اگر عدد خیلی بزرگ باشد (احتمال ریال) ÷۱۰ می‌شود.
+    - اگر برای گوشی خیلی پایین باشد، رد می‌شود.
+    """
+    p = _parse_price(raw)
+    if p is None:
+        return None
+
+    # احتمال قیمت به ریال: اعداد خیلی بزرگ برای کالای معمول
+    if p >= 500_000_000:
+        p = p // 10
+    elif p >= 200_000_000 and _looks_like_phone(title):
+        p = p // 10
+
+    if p < _PRICE_ABS_MIN or p > _PRICE_ABS_MAX:
+        return None
+
+    # گوشی هوشمند: قیمت‌های خیلی پایین در بازار ۱۴۰۵ معتبر نیستند
+    # (مگر مدل‌های خیلی قدیمی/استوک که هنوز هم معمولاً بالای این کف‌اند)
+    if _looks_like_phone(title) and p < _PHONE_FLOOR:
+        # استثنا: اگر صریحاً لوازم جانبی باشد نه خود گوشی
+        low = str(title or "").lower()
+        accessory = any(
+            x in low
+            for x in (
+                "قاب", "کاور", "گلس", "محافظ", "شارژر", "کابل", "هندزفری",
+                "هدفون", "باتری", "جایگزین", "لوازم", "case", "cover", "glass",
+            )
+        )
+        if not accessory:
+            return None
+
+    return int(p)
+
+
+def _filter_price_outliers(rows: list[dict]) -> list[dict]:
+    """حذف قیمت‌های پرت نسبت به میانهٔ نتایج هم‌دسته (مثلاً ÷۱۰ اشتباه)."""
+    priced = [r for r in rows if r.get("price")]
+    if len(priced) < 4:
+        return rows
+    prices = sorted(int(r["price"]) for r in priced)
+    mid = prices[len(prices) // 2]
+    if mid <= 0:
+        return rows
+    out: list[dict] = []
+    for r in rows:
+        p = r.get("price")
+        if not p:
+            out.append(r)
+            continue
+        # اگر از ۲۰٪ میانه کمتر یا ۵ برابر میانه بیشتر → مشکوک
+        if p < mid * 0.20 or p > mid * 5:
+            continue
+        out.append(r)
+    return out if out else rows
+
+
 def _price_from_text(text: str) -> int | None:
     patterns = (
         r"([0-9۰-۹]{1,3}(?:[,٬][0-9۰-۹]{3}){1,4})\s*(?:تومان|تومن|ت)\b",
@@ -577,10 +652,39 @@ def _shopping_brand_match(text: str, brand: str) -> bool:
     return any(w.lower() in low for w in words)
 
 
+def _wants_used(query: str) -> bool:
+    """کاربر صریحاً استوک/کارکرده خواسته؟"""
+    q = str(query or "").lower()
+    return bool(
+        re.search(
+            r"استوک|کارکرده|دست\s*دوم|دست‌دوم|used|refurbished|بازسازی|"
+            r"در حد نو|درحد نو|آکبند\s*نمو?ده",
+            q,
+            re.I,
+        )
+    )
+
+
+def _is_used_listing(text: str) -> bool:
+    t = str(text or "").lower()
+    return bool(
+        re.search(
+            r"استوک|کارکرده|دست\s*دوم|دست‌دوم|used|refurbished|"
+            r"بازسازی|در حد نو|درحد نو|آکبند\s*نمو?ده|بدون\s*جعبه|"
+            r"جعبه\s*باز|open\s*box|stock",
+            t,
+            re.I,
+        )
+    )
+
+
 def _shopping_product_match(row: dict, query: str, intent: dict) -> bool:
     title = str(row.get("title") or "")
     snippet = str(row.get("snippet") or "")
     text = f"{title} {snippet}".lower()
+    # پیش‌فرض: استوک/کارکرده حذف شود مگر کاربر صریحاً بخواهد
+    if _is_used_listing(text) and not _wants_used(query):
+        return False
     if intent.get("phone"):
         positive = any(x in text for x in _PHONE_POSITIVE)
         if not positive:
@@ -952,7 +1056,11 @@ async def _direct_torob(query: str, max_price: int, limit: int) -> list[dict]:
             title = str(
                 item.get("name1") or item.get("name") or item.get("title") or ""
             ).strip()
-            price = _parse_price(item.get("price")) or _parse_price(item.get("min_price"))
+            # قیمت ترب معمولاً تومان است؛ با اعتبارسنجی واحد و کف بازار
+            price = _normalize_market_price(
+                item.get("price") if item.get("price") not in (None, 0, "0") else item.get("min_price"),
+                title,
+            )
             key = str(item.get("random_key") or item.get("prk") or "").strip()
             link = str(item.get("page_url") or item.get("url") or "").strip() or (
                 f"https://torob.com/p/{key}/" if key else ""
@@ -965,6 +1073,8 @@ async def _direct_torob(query: str, max_price: int, limit: int) -> list[dict]:
                 or link in seen
                 or (max_price and price > max_price)
             ):
+                continue
+            if _is_used_listing(title) and not _wants_used(query):
                 continue
             seen.add(link)
             out.append(
@@ -1002,9 +1112,13 @@ async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]
                     "Accept-Language": "fa-IR,fa;q=0.9",
                 },
             ) as client:
+                params: dict[str, Any] = {"q": query, "page": 1}
+                # دسته موبایل برای نتایج دقیق‌تر
+                if any(k in query.lower() for k in ("گوشی", "موبایل", "شیائومی", "xiaomi", "سامسونگ", "آیفون", "iphone", "poco", "redmi")):
+                    params["has_selling_stock"] = 1
                 r = await client.get(
                     "https://api.digikala.com/v1/search/",
-                    params={"q": query, "page": 1},
+                    params=params,
                 )
         if r.status_code >= 400:
             raise RuntimeError(f"digikala status {r.status_code}")
@@ -1017,17 +1131,46 @@ async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]
             if not isinstance(item, dict):
                 continue
             title = str(item.get("title_fa") or item.get("title") or "").strip()
-            rial = _parse_price(item.get("selling_price")) or _parse_price(item.get("price"))
+            # استخراج قیمت از ساختارهای تو در توی API دیجی‌کالا
+            rial = None
+            for path in (
+                lambda i: i.get("selling_price"),
+                lambda i: i.get("price") if not isinstance(i.get("price"), dict) else None,
+                lambda i: (i.get("price") or {}).get("selling_price") if isinstance(i.get("price"), dict) else None,
+                lambda i: ((i.get("default_variant") or {}).get("price") or {}).get("selling_price"),
+                lambda i: ((i.get("default_variant") or {}).get("price") or {}).get("rrp_price"),
+                lambda i: (i.get("price") or {}).get("rrp_price") if isinstance(i.get("price"), dict) else None,
+            ):
+                try:
+                    val = path(item)
+                except Exception:
+                    val = None
+                rial = _parse_price(val)
+                if rial:
+                    break
+            # API دیجی‌کالا معمولاً ریال می‌دهد
             price = (rial // 10) if rial else None
+            price = _normalize_market_price(price, title) if price else None
             pid = item.get("id") or item.get("product_id")
-            link = str(item.get("url") or "").strip()
-            if link.startswith("/"):
-                link = "https://www.digikala.com" + link
+            link = str(item.get("url") or item.get("url_code") or "").strip()
+            if link and not link.startswith("http"):
+                if link.startswith("/"):
+                    link = "https://www.digikala.com" + link
+                else:
+                    link = f"https://www.digikala.com/product/{link}/"
             if not link and pid:
                 link = f"https://www.digikala.com/product/dkp-{pid}/"
-            status = str(item.get("status") or item.get("availability") or "")
+            status = str(
+                item.get("status")
+                or item.get("availability")
+                or ((item.get("default_variant") or {}).get("status") if isinstance(item.get("default_variant"), dict) else "")
+                or ""
+            )
             avail = _normalize_availability(status)
             if not title or not price or not link or (max_price and price > max_price):
+                continue
+            # رد استوک مگر درخواست صریح
+            if _is_used_listing(title) and not _wants_used(query):
                 continue
             out.append(
                 {
@@ -1045,7 +1188,7 @@ async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]
             _STATS["direct_ok"] += 1
         return out
 
-    result = await _with_retry(_do, source="digikala")
+    result = await _with_retry(_do, source="digikala", max_attempts=4, base_delay=0.8)
     return result if isinstance(result, list) else []
 
 
@@ -1698,6 +1841,8 @@ async def search_shopping(
             seen_urls.add(u)
             filtered.append(x)
 
+        # حذف قیمت‌های پرت (مثلاً ÷۱۰ اشتباه از ترب)
+        filtered = _filter_price_outliers(filtered)
         rows = _rank(filtered, clean, max_price)
 
         # mobo.news boost
