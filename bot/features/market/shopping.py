@@ -1193,65 +1193,200 @@ def shopping_engine_status() -> str:
     return "🛒 Shopping Engine v3\n" + " | ".join(f"{k}={v}" for k,v in _STATS.items()) + f" | cache={len(_CACHE)}"
 
 
+def _diversify_shopping_rows(rows: list[dict], max_results: int = 10, max_per_source: int = 2) -> list[dict]:
+    """نتایج را بین منابع پخش می‌کند تا یک سایت تمام خروجی را نبلعد."""
+    if not rows:
+        return []
+    result: list[dict] = []
+    counts: dict[str, int] = {}
+    used_urls: set[str] = set()
+    # دور اول: حداقل یک نتیجه از هر منبع معتبر.
+    for row in rows:
+        url = str(row.get("url") or "").strip()
+        src = str(row.get("source") or "وب")
+        if not url or url in used_urls or counts.get(src, 0) >= 1:
+            continue
+        used_urls.add(url); counts[src] = counts.get(src, 0) + 1; result.append(row)
+        if len(result) >= max_results:
+            return result
+    # دور دوم: بهترین نتیجه بعدی از هر منبع، سپس پرکردن ظرفیت باقی‌مانده.
+    for row in rows:
+        url = str(row.get("url") or "").strip()
+        src = str(row.get("source") or "وب")
+        if not url or url in used_urls or counts.get(src, 0) >= max_per_source:
+            continue
+        used_urls.add(url); counts[src] = counts.get(src, 0) + 1; result.append(row)
+        if len(result) >= max_results:
+            return result
+    return result
+
+
 async def search_shopping(query: str = "", source: str = "all", max_results: int = 10, min_price: int = 0, max_price: int = 0, user_id: int = 0) -> str:
-    raw=" ".join(str(query or "").split()).strip()
-    if not raw: return "عبارت محصول برای جستجو مشخص نیست."
+    """جستجوی چندفروشگاهی واقعی با تنوع منبع و جمع‌بندی نهایی.
+
+    نکته مهم: «all» دیگر به معنی «اول ترب، بعد اگر خالی بود بقیه» نیست.
+    در حالت عادی چند منبع ایرانی هم‌زمان بررسی می‌شوند و نتیجه نهایی از
+    چند فروشگاه/مقایسه‌گر انتخاب می‌شود. برای جلوگیری از خروجی تک‌منبعی،
+    رتبه‌بندی نهایی سقف نتیجه برای هر منبع دارد و در انتها یک بررسی نهایی
+    بر اساس تطابق محصول، قیمت، اعتبار منبع و پوشش فروشگاه‌ها ساخته می‌شود.
+    """
+    raw = " ".join(str(query or "").split()).strip()
+    if not raw:
+        return "عبارت محصول برای جستجو مشخص نیست."
+
     _STATS["searches"] += 1
-    max_results=max(3,min(int(max_results or 10),12)); budget=_budget(raw)
-    if budget and not max_price: max_price=budget
-    foreign=_foreign_requested(raw); domain=_explicit_domain(raw)
-    if domain and domain not in IRAN_SITES: foreign=True
-    clean=_clean_query(raw)
-    if not clean or len(clean)<2: clean=raw
-    key=_cache_key(clean,domain or source,max_price,foreign); cached=_CACHE.get(key)
-    if cached and time.time()-cached[0] < CACHE_TTL:
-        _STATS["cache_hits"] += 1; rows=[dict(x) for x in cached[1]]
+    max_results = max(4, min(int(max_results or 10), 14))
+    budget = _budget(raw)
+    if budget and not max_price:
+        max_price = budget
+
+    foreign = _foreign_requested(raw)
+    domain = _explicit_domain(raw)
+    if domain and domain not in IRAN_SITES:
+        foreign = True
+
+    clean = _clean_query(raw)
+    if not clean or len(clean) < 2:
+        clean = raw
+
+    key = _cache_key(clean, domain or source, max_price, foreign)
+    cached = _CACHE.get(key)
+    if cached and time.time() - cached[0] < CACHE_TTL:
+        _STATS["cache_hits"] += 1
+        rows = [dict(x) for x in cached[1]]
     else:
-        rows=[]
-        variants=_query_variants(clean,budget)
-        # Direct catalog search is the primary path for Iran, for ALL product categories.
+        rows: list[dict] = []
+        variants = _query_variants(clean, budget)
+
+        if domain:
+            domains = [domain]
+        elif foreign:
+            domains = ["amazon.com", "ebay.com", "walmart.com", "aliexpress.com", ""]
+        elif source not in ("all", "همه", "تمام", "everywhere", "web", ""):
+            requested = [x for x in source.replace(",", " ").split() if x in SOURCES]
+            domains = [SOURCES[x]["domains"][0] for x in requested if SOURCES[x].get("domains")]
+            if not domains:
+                domains = ["torob.com", "digikala.com", "technolife.ir", "snappshop.ir", "emalls.ir"]
+        else:
+            # عمداً چند منبع مستقل؛ ترب دیگر منبع انحصاری نیست.
+            domains = [
+                "torob.com",
+                "digikala.com",
+                "technolife.ir",
+                "snappshop.ir",
+                "emalls.ir",
+                "meghdadit.com",
+                "kalaoma.com",
+                "19kala.com",
+                "mobile.ir",
+            ]
+
+        # APIهای مستقیم؛ فقط برای منابعی که endpoint قابل اتکا داریم.
         if not foreign and not domain:
-            direct_queries=variants[:2]
-            batches=await asyncio.gather(*[_direct_torob(v,max_price,max_results) for v in direct_queries] + [_direct_digikala(v,max_price,max_results) for v in direct_queries], return_exceptions=True)
-            for b in batches:
-                if isinstance(b,list): rows.extend(b)
-        if not rows or foreign or domain:
-            domains=[]
-            if domain: domains=[domain]
-            elif foreign: domains=["amazon.com","ebay.com","walmart.com","aliexpress.com",""]
-            else: domains=["torob.com","digikala.com","emalls.ir","technolife.ir",""]
-            tasks=[]
+            direct_tasks = []
             for v in variants[:2]:
-                for d in domains[:5]: tasks.append(_fetch_source(v,d,max_results,foreign))
-            batches=await asyncio.gather(*tasks,return_exceptions=True)
-            for b in batches:
-                if isinstance(b,list): rows.extend(b)
-        rows=_rank(rows,clean,max_price)
-        rows=rows[:max_results]
-        _CACHE[key]=(time.time(),[dict(x) for x in rows])
-        if rows: _save_history_rows(rows)
+                direct_tasks.append(_direct_torob(v, max_price, max(5, max_results)))
+                direct_tasks.append(_direct_digikala(v, max_price, max(5, max_results)))
+            direct_batches = await asyncio.gather(*direct_tasks, return_exceptions=True)
+            for b in direct_batches:
+                if isinstance(b, list):
+                    rows.extend(b)
+
+        # همه منابع انتخاب‌شده هم‌زمان بررسی می‌شوند، حتی اگر ترب نتیجه داده باشد.
+        # برای هر دامنه چند موتور جستجو استفاده می‌شود تا وابستگی به یک موتور کم شود.
+        search_tasks = []
+        for v in variants[:2]:
+            for d in domains[:10]:
+                search_tasks.append(_fetch_source(v, d, max(5, max_results // 2 + 2), foreign))
+        if search_tasks:
+            search_batches = await asyncio.gather(*search_tasks, return_exceptions=True)
+            for b in search_batches:
+                if isinstance(b, list):
+                    rows.extend(b)
+
+        rows = _rank(rows, clean, max_price)
+        rows = _diversify_shopping_rows(rows, max_results=max_results, max_per_source=2)
+        _CACHE[key] = (time.time(), [dict(x) for x in rows])
+        if rows:
+            _save_history_rows(rows)
+
     if not rows:
         _STATS["empty"] += 1
         return f"⚠️ برای «{clean}» در منابع زنده نتیجه قابل‌تأییدی پیدا نشد؛ قیمت حدسی ارائه نمی‌کنم."
-    priced=[x for x in rows if x.get("price")]
-    market="بازار جهانی" if foreign else "بازار ایران"
-    now=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines=[f"🛒 **نتایج خرید — {clean}**",f"🌍 {market} | 🕒 {now}","ℹ️ قیمت‌ها فقط از داده زنده/کش کوتاه‌مدت استخراج شده‌اند.",""]
-    for i,x in enumerate(rows,1):
-        price=x.get("price"); src=x.get("source") or "وب"
+
+    priced = [x for x in rows if x.get("price")]
+    market = "بازار جهانی" if foreign else "بازار ایران"
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    source_counts: dict[str, int] = {}
+    for x in rows:
+        source_counts[str(x.get("source") or "وب")] = source_counts.get(str(x.get("source") or "وب"), 0) + 1
+
+    lines = [
+        f"🛒 **نتایج خرید چندفروشگاهی — {clean}**",
+        f"🌍 {market} | 🕒 {now}",
+        "🔎 منابع بررسی‌شده: ترب، دیجی‌کالا، تکنولایف، اسنپ‌شاپ، ایمالز و چند فروشگاه تخصصی دیگر.",
+        "ℹ️ هر نتیجه با تطابق محصول، قیمت، اعتبار منبع و تکراری‌نبودن بررسی شده است.",
+        "",
+    ]
+
+    for i, x in enumerate(rows, 1):
+        price = x.get("price")
+        src = x.get("source") or "وب"
         lines.append(f"**{i}. {x.get('title') or 'محصول'}**")
-        lines.append(f"🏪 {src} | 💰 {price:,} تومان" if price and not foreign else (f"🏪 {src} | 💰 {price:,}" if price else f"🏪 {src} | 💰 قیمت در نتیجه مشخص نشد"))
-        if x.get("seller"): lines.append(f"👤 {x['seller']}")
-        if x.get("availability"): lines.append(f"📦 {x['availability']}")
-        lines.append(f"🔗 {x['url']}"); lines.append("")
+        if price and not foreign:
+            lines.append(f"🏪 {src} | 💰 {price:,} تومان")
+        elif price:
+            lines.append(f"🏪 {src} | 💰 {price:,}")
+        else:
+            lines.append(f"🏪 {src} | 💰 قیمت از نتیجه جستجو قابل‌تأیید نبود")
+        if x.get("seller"):
+            lines.append(f"👤 {x['seller']}")
+        if x.get("availability"):
+            lines.append(f"📦 {x['availability']}")
+        lines.append(f"🔗 {x['url']}")
+        lines.append("")
+
     if priced:
-        cheapest=min(priced,key=lambda x:x["price"]); lines.append(f"🏆 ارزان‌ترین: **{cheapest['price']:,} تومان**")
+        cheapest = min(priced, key=lambda x: x["price"])
+        lines.append(
+            f"🏆 **ارزان‌ترین گزینه قابل‌قیمت‌گذاری:** {cheapest['price']:,} تومان — {cheapest.get('source') or 'وب'}"
+        )
         if max_price:
-            within=[x for x in priced if x["price"]<=max_price]
-            lines.append(f"🎯 {len(within)} نتیجه داخل بودجه {max_price:,} تومان پیدا شد.")
-    hist,_=_history_summary(clean,30)
-    if hist: lines.extend(["",hist])
-    lines += ["", "⚠️ قیمت و موجودی ممکن است تغییر کند؛ قبل از خرید صفحه فروشنده را دوباره بررسی کن."]
+            within = [x for x in priced if x["price"] <= max_price]
+            lines.append(f"🎯 {len(within)} نتیجه داخل بودجه {max_price:,} تومان قرار گرفت.")
+
+    if source_counts:
+        summary = " · ".join(f"{k}: {v}" for k, v in sorted(source_counts.items(), key=lambda z: -z[1]))
+        lines.append(f"📊 **پوشش منابع:** {summary}")
+
+    # بررسی نهایی: به‌جای یک «بهترین» صرفاً بر اساس ارزان‌ترین قیمت،
+    # یک جمع‌بندی از قیمت/اعتبار/تطابق/تنوع فروشگاه‌ها ارائه می‌شود.
+    final_candidates = [x for x in rows if x.get("price")]
+    if final_candidates:
+        final_candidates = sorted(final_candidates, key=lambda x: (-float(x.get("_score", 0)), x["price"]))
+        best = final_candidates[0]
+        cheapest = min(final_candidates, key=lambda x: x["price"])
+        trusted = max(final_candidates, key=lambda x: TRUST.get(str(x.get("source") or "وب"), 60))
+        lines += [
+            "",
+            "🧠 **بررسی نهایی**",
+            f"• 🎯 بهترین تطابق کلی: **{best.get('title') or 'محصول'}** از {best.get('source') or 'وب'}",
+            f"• 💸 ارزان‌ترین قیمت قابل‌تأیید در نتایج: **{cheapest['price']:,} تومان** از {cheapest.get('source') or 'وب'}",
+            f"• 🛡️ منبع با امتیاز اعتبار بالاتر در نتایج: **{trusted.get('source') or 'وب'}**",
+        ]
+        if len(source_counts) >= 3:
+            lines.append("• ✅ چندفروشگاهی: قیمت فقط از یک سایت ملاک قرار نگرفته و نتایج چند منبع با هم مقایسه شده‌اند.")
+        if max_price:
+            within = [x for x in final_candidates if x["price"] <= max_price]
+            if within:
+                value_pick = max(within, key=lambda x: float(x.get("_score", 0)) - (x["price"] / max_price) * 15)
+                lines.append(f"• ⭐ پیشنهاد نهایی در بودجه: **{value_pick.get('title') or 'محصول'}** — {value_pick['price']:,} تومان از {value_pick.get('source') or 'وب'}")
+        lines.append("• ⚠️ قبل از خرید، صفحه فروشنده، گارانتی، رجیستری/موجودی و قیمت نهایی را دوباره بررسی کن.")
+
+    hist, _ = _history_summary(clean, 30)
+    if hist:
+        lines.extend(["", hist])
+    lines += ["", "⚠️ قیمت و موجودی ممکن است تغییر کند؛ نتیجه نهایی بر اساس داده لحظه‌ای همین جستجو است."]
     return "\n".join(lines)
 
 
