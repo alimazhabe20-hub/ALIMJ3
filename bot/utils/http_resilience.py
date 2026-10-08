@@ -1,5 +1,4 @@
 """Shared async HTTP resilience: pooled connections, retries and lightweight TTL cache."""
-from __future__ import annotations
 
 import asyncio
 import time

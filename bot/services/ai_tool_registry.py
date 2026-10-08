@@ -1,5 +1,4 @@
 """Built-in AI tool registry implementation."""
-from __future__ import annotations
 import importlib
 _legacy = importlib.import_module('bot.services.ai_tools_parts.services_ai_tools_parts_services_ai_tools_parts_part_999_core_legacy_chunk_03')
 

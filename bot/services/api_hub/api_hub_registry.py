@@ -3,7 +3,6 @@
 URLs are kept here instead of in handlers, making providers easy to replace
 without changing the rest of the bot.
 """
-from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any

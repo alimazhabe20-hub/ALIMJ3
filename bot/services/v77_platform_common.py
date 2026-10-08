@@ -1,6 +1,5 @@
 """Shared imports and module state for the refactored v77_platform."""
 
-from __future__ import annotations
 
 import ast
 

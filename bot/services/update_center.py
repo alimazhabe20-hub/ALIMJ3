@@ -6,37 +6,8 @@ UPDATE_MANIFEST_URL; Update Center validates it, compares semantic versions,
 checks local runtime/dependencies/schema, caches the result, and reports a
 clear green/yellow/red status.
 """
-from bot.utils import load_modular_part
 
-import hashlib
-import importlib.util
-import json
-import os
-import platform
-import re
-import sqlite3
-import time
-import ipaddress
-import socket
-from pathlib import Path
-from typing import Any
-from urllib.parse import urlparse
-
-import requests
-
-from bot.config import config
-from bot.logger import logger
-from bot.release import APP_NAME, RELEASE_CHANNEL, VERSION
-from bot.database import DB_PATH
-
-CACHE_TTL = max(60, int(os.getenv("UPDATE_CHECK_TTL", "1800")))
-TIMEOUT = max(3.0, min(30.0, float(os.getenv("UPDATE_CHECK_TIMEOUT", "10"))))
-MAX_MANIFEST_BYTES = 512 * 1024
-_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
-
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_001__version_tuple.py ---
+# BEGIN MERGED LEGACY PART: update_center_parts/part_001__version_tuple.py
 # Auto-split part 1: _version_tuple
 def _version_tuple(value: str) -> tuple[int, int, int]:
     m = _VERSION_RE.match(str(value or "").strip())
@@ -44,10 +15,8 @@ def _version_tuple(value: str) -> tuple[int, int, int]:
         return (0, 0, 0)
     return tuple(int(x) for x in m.groups())
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_002__is_public_ip.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_002__is_public_ip.py
 # Auto-split part 2: _is_public_ip
 def _is_public_ip(host: str) -> bool:
     try:
@@ -56,10 +25,8 @@ def _is_public_ip(host: str) -> bool:
     except ValueError:
         return True
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_003__valid_manifest_url.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_003__valid_manifest_url.py
 # Auto-split part 3: _valid_manifest_url
 def _valid_manifest_url(url: str) -> bool:
     try:
@@ -75,28 +42,22 @@ def _valid_manifest_url(url: str) -> bool:
     except Exception:
         return False
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_004__manifest_url.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_004__manifest_url.py
 # Auto-split part 4: _manifest_url
 def _manifest_url() -> str:
     return (os.getenv("UPDATE_MANIFEST_URL", "") or "").strip()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_005__cache_path.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_005__cache_path.py
 from pathlib import Path
 
 # Auto-split part 5: _cache_path
 def _cache_path() -> Path:
     return Path(getattr(config, "BACKUP_DIR", "data/backups")) / "update_center.json"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_006__load_cache.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_006__load_cache.py
 from typing import Any
 
 # Auto-split part 6: _load_cache
@@ -110,10 +71,8 @@ def _load_cache() -> dict[str, Any] | None:
     except Exception:
         return None
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_007__save_cache.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_007__save_cache.py
 from typing import Any
 
 # Auto-split part 7: _save_cache
@@ -127,10 +86,8 @@ def _save_cache(data: dict[str, Any]) -> None:
     except Exception as exc:
         logger.debug("update center cache write failed: %s", exc)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_008__read_manifest.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_008__read_manifest.py
 from typing import Any
 
 # Auto-split part 8: _read_manifest
@@ -167,10 +124,8 @@ def _read_manifest() -> tuple[dict[str, Any] | None, str | None]:
     except Exception:
         return None, "manifest_error"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_009__dependency_check.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_009__dependency_check.py
 from typing import Any
 
 # Auto-split part 9: _dependency_check
@@ -189,10 +144,8 @@ def _dependency_check() -> dict[str, Any]:
     missing = [label for module, label in required.items() if importlib.util.find_spec(module) is None]
     return {"ok": not missing, "missing": missing}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_010__schema_check.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_010__schema_check.py
 from typing import Any
 
 # Auto-split part 10: _schema_check
@@ -210,10 +163,8 @@ def _schema_check() -> dict[str, Any]:
     except Exception:
         return {"ok": False, "status": "schema_check_failed"}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_011__local_checks.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_011__local_checks.py
 from typing import Any
 
 # Auto-split part 11: _local_checks
@@ -229,10 +180,8 @@ def _local_checks() -> dict[str, Any]:
         "ok": bool(py_ok and dep["ok"] and schema["ok"]),
     }
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_012__status_for.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_012__status_for.py
 from typing import Any
 
 # Auto-split part 12: _status_for
@@ -245,10 +194,8 @@ def _status_for(current: str, manifest: dict[str, Any] | None, error: str | None
         return "update_required" if str(manifest.get("severity", "")).lower() in {"critical", "required", "security"} else "update_available"
     return "up_to_date"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_013__safe_manifest_view.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_013__safe_manifest_view.py
 from typing import Any
 
 # Auto-split part 13: _safe_manifest_view
@@ -263,10 +210,8 @@ def _safe_manifest_view(manifest: dict[str, Any] | None) -> dict[str, Any] | Non
         out.pop("changelog_url", None)
     return out
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_014_check_for_updates.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_014_check_for_updates.py
 from typing import Any
 
 # Auto-split part 14: check_for_updates
@@ -305,10 +250,8 @@ def check_for_updates(*, force: bool = False) -> dict[str, Any]:
     _save_cache(result)
     return result
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_015_update_summary.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_015_update_summary.py
 from typing import Any
 
 # Auto-split part 15: update_summary
@@ -346,10 +289,8 @@ def update_summary(result: dict[str, Any], lang: str = "fa") -> str:
     if notes: lines.append(f"توضیحات: {notes[:900]}")
     return "\n".join(lines)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_016_maybe_notify_admins.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_016_maybe_notify_admins.py
 from typing import Any
 
 # Auto-split part 16: maybe_notify_admins
@@ -382,10 +323,8 @@ def maybe_notify_admins(result: dict[str, Any], send_message) -> int:
             pass
     return sent
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/update_center_parts/part_017_self_test.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: update_center_parts/part_017_self_test.py
 from typing import Any
 
 # Auto-split part 17: self_test
@@ -395,4 +334,48 @@ def self_test() -> dict[str, Any]:
     url_ok = (not url) or _valid_manifest_url(url)
     return {"ok": bool(local["ok"] and url_ok), "checks": {"local_runtime": local["ok"], "manifest_url": url_ok, "version": bool(_VERSION_RE.match(VERSION))}}
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import hashlib
+import importlib.util
+import json
+import os
+import platform
+import re
+import sqlite3
+import time
+import ipaddress
+import socket
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
+
+import requests
+
+from bot.config import config
+from bot.logger import logger
+from bot.release import APP_NAME, RELEASE_CHANNEL, VERSION
+from bot.database import DB_PATH
+
+CACHE_TTL = max(60, int(os.getenv("UPDATE_CHECK_TTL", "1800")))
+TIMEOUT = max(3.0, min(30.0, float(os.getenv("UPDATE_CHECK_TIMEOUT", "10"))))
+MAX_MANIFEST_BYTES = 512 * 1024
+_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
+
+
+update_center_parts/part_001__version_tuple.py
+update_center_parts/part_002__is_public_ip.py
+update_center_parts/part_003__valid_manifest_url.py
+update_center_parts/part_004__manifest_url.py
+update_center_parts/part_005__cache_path.py
+update_center_parts/part_006__load_cache.py
+update_center_parts/part_007__save_cache.py
+update_center_parts/part_008__read_manifest.py
+update_center_parts/part_009__dependency_check.py
+update_center_parts/part_010__schema_check.py
+update_center_parts/part_011__local_checks.py
+update_center_parts/part_012__status_for.py
+update_center_parts/part_013__safe_manifest_view.py
+update_center_parts/part_014_check_for_updates.py
+update_center_parts/part_015_update_summary.py
+update_center_parts/part_016_maybe_notify_admins.py
+update_center_parts/part_017_self_test.py

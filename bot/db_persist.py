@@ -1,83 +1,33 @@
-# -*- coding: utf-8 -*-
-"""
-بکاپ و ریستور خودکار و رایگان
-  1) GitHub (GITHUB_TOKEN + GITHUB_REPO) → کاملاً خودکار
-  2) تلگرام ادمین (دستی /backup و /restore)
-"""
-from bot.utils import load_modular_part
-import asyncio
-import base64
-import os
-import shutil
-import sqlite3
-import secrets
-import gzip
-import time
-import re
-import uuid
-from datetime import datetime
-from pathlib import Path
 
-import requests
-
-from bot.config import config
-from bot.database import DB_PATH, backup_db, _user_count, get_db_connection
-from bot.database_migrations import SCHEMA_VERSION
-from bot.logger import logger
-
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
-GITHUB_REPO = os.getenv("GITHUB_REPO", "").strip()  # مثال: username/bot-data-backup
-GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main").strip()
-GITHUB_FILE = os.getenv("GITHUB_DB_FILE", "backups/latest.db.gz").strip().lstrip("/")
-API = "https://api.github.com"
-GITHUB_RETRIES = max(1, int(os.getenv("GITHUB_BACKUP_RETRIES", "4")))
-GITHUB_BACKOFF = max(0.5, float(os.getenv("GITHUB_BACKUP_BACKOFF", "1.5")))
-REMOTE_BACKUP_TIMEOUT = max(2.0, float(os.getenv("BACKUP_REMOTE_TIMEOUT", "8")))
-
-
-
-# Telegram private channel backup (off-site, no card / external cloud required)
-TELEGRAM_BACKUP_CHAT_ID = os.getenv("TELEGRAM_BACKUP_CHAT_ID", "").strip()
-TELEGRAM_BACKUP_MAX_DOWNLOAD_BYTES = max(1, int(os.getenv("TELEGRAM_BACKUP_MAX_DOWNLOAD_MB", "20"))) * 1024 * 1024
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_001__telegram_backup_chat_ids.py ---
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_001__telegram_backup_chat_ids.py
 # Auto-split part 1: _telegram_backup_chat_ids
 def _telegram_backup_chat_ids() -> list[str]:
     """Return configured Telegram backup chat IDs, accepting comma/newline separated values."""
     raw = os.getenv("TELEGRAM_BACKUP_CHAT_ID", TELEGRAM_BACKUP_CHAT_ID).strip()
     return [item.strip() for item in re.split(r"[,\n;]+", raw) if item.strip()]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_002_telegram_backup_enabled.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_002_telegram_backup_enabled.py
 # Auto-split part 2: telegram_backup_enabled
 def telegram_backup_enabled() -> bool:
     return bool(config.BOT_TOKEN and _telegram_backup_chat_ids())
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_003__telegram_api.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_003__telegram_api.py
 # Auto-split part 3: _telegram_api
 def _telegram_api(method: str, **kwargs):
     url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/{method}"
     return requests.post(url, timeout=max(REMOTE_BACKUP_TIMEOUT, 30), **kwargs)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_004__telegram_get.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_004__telegram_get.py
 # Auto-split part 4: _telegram_get
 def _telegram_get(method: str, **kwargs):
     url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/{method}"
     return requests.get(url, timeout=max(REMOTE_BACKUP_TIMEOUT, 30), **kwargs)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_005_telegram_upload_db.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_005_telegram_upload_db.py
 # Auto-split part 5: telegram_upload_db
 def telegram_upload_db() -> tuple[bool, str]:
     """Upload a fresh SQLite snapshot to configured Telegram targets and pin it.
@@ -170,10 +120,8 @@ def telegram_upload_db() -> tuple[bool, str]:
         except Exception:
             pass
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_006_telegram_download_pinned_db.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_006_telegram_download_pinned_db.py
 # Auto-split part 6: telegram_download_pinned_db
 def telegram_download_pinned_db() -> tuple[bool, str]:
     """Automatically restore the verified pinned backup from Telegram."""
@@ -266,10 +214,8 @@ def telegram_download_pinned_db() -> tuple[bool, str]:
             diagnostics.append(f"{chat_id}:خطا — {exc}")
     return False, " | ".join(diagnostics) if diagnostics else "هیچ مقصد Telegram قابل بررسی نیست"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_007__gh_headers.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_007__gh_headers.py
 # Auto-split part 7: _gh_headers
 def _gh_headers():
     return {
@@ -278,10 +224,8 @@ def _gh_headers():
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_008__validate_sqlite_backup.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_008__validate_sqlite_backup.py
 from pathlib import Path
 
 # Auto-split part 8: _validate_sqlite_backup
@@ -332,10 +276,8 @@ def _validate_sqlite_backup(path: Path) -> tuple[bool, str]:
     except Exception:
         return False, "فایل SQLite معتبر نیست"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_009__normalized_repo.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_009__normalized_repo.py
 # Auto-split part 9: _normalized_repo
 def _normalized_repo() -> str:
     """Normalize owner/repo and reject accidental URL forms."""
@@ -344,18 +286,14 @@ def _normalized_repo() -> str:
     value = value.removesuffix(".git").strip("/")
     return value
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_010_github_enabled.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_010_github_enabled.py
 # Auto-split part 10: github_enabled
 def github_enabled() -> bool:
     return bool(GITHUB_TOKEN and _normalized_repo()) and _normalized_repo().count("/") == 1
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_011__github_request.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_011__github_request.py
 # Auto-split part 11: _github_request
 def _github_request(method: str, url: str, **kwargs):
     """GitHub request with retry for transient failures and rate limits."""
@@ -382,10 +320,8 @@ def _github_request(method: str, url: str, **kwargs):
         return last
     raise last if isinstance(last, Exception) else RuntimeError("GitHub request failed")
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_012__github_repo_check.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_012__github_repo_check.py
 # Auto-split part 12: _github_repo_check
 def _github_repo_check():
     repo = _normalized_repo()
@@ -409,10 +345,8 @@ def _github_repo_check():
     except Exception as exc:
         return False, f"GitHub connection error: {exc}"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_013__github_get_sha.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_013__github_get_sha.py
 # Auto-split part 13: _github_get_sha
 def _github_get_sha():
     repo = _normalized_repo()
@@ -424,10 +358,8 @@ def _github_get_sha():
         return None
     raise RuntimeError(f"GitHub lookup {r.status_code}: {r.text[:220]}")
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_014__sqlite_snapshot_to_temp.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_014__sqlite_snapshot_to_temp.py
 from pathlib import Path
 
 # Auto-split part 14: _sqlite_snapshot_to_temp
@@ -465,10 +397,8 @@ def _sqlite_snapshot_to_temp() -> Path | None:
             pass
         return None
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_015_github_upload_db.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_015_github_upload_db.py
 # Auto-split part 15: github_upload_db
 def github_upload_db():
     """Upload a compressed, validated SQLite snapshot to a private GitHub repo."""
@@ -531,10 +461,8 @@ def github_upload_db():
             except Exception:
                 pass
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_016_github_remote_user_count.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_016_github_remote_user_count.py
 # Auto-split part 16: github_remote_user_count
 def github_remote_user_count() -> int:
     """تعداد کاربر در بکاپ GitHub بدون جایگزینی DB محلی."""
@@ -572,10 +500,8 @@ def github_remote_user_count() -> int:
         logger.debug("github_remote_user_count failed: %s", exc)
         return 0
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_017_github_download_db.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_017_github_download_db.py
 # Auto-split part 17: github_download_db
 def github_download_db():
     if not github_enabled():
@@ -637,27 +563,14 @@ def github_download_db():
         logger.error(f"github_download: {e}")
         return False, str(e)
 
-# --- END INLINED MODULAR PART ---
-
-# آخرین وضعیت ریستور (برای پیام ادمین)
-_LAST_RESTORE_STATUS: dict[str, str | bool | int] = {
-    "ok": False,
-    "msg": "",
-    "local_users": 0,
-    "remote_users": -1,
-}
-
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_018_get_last_restore_status.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_018_get_last_restore_status.py
 # Auto-split part 18: get_last_restore_status
 def get_last_restore_status() -> dict:
     return dict(_LAST_RESTORE_STATUS)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_019_auto_restore_if_empty.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_019_auto_restore_if_empty.py
 # Auto-split part 19: auto_restore_if_empty
 def auto_restore_if_empty() -> bool:
     """Restore automatically: pinned Telegram backup first, GitHub second.
@@ -730,10 +643,8 @@ def auto_restore_if_empty() -> bool:
     _LAST_RESTORE_STATUS.update({"ok": True, "msg": f"DB OK — local={local_n}", "local_users": local_n})
     return False
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_020_auto_backup.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_020_auto_backup.py
 # Auto-split part 20: auto_backup
 def auto_backup():
     """Local + Telegram private-channel backup + optional GitHub."""
@@ -760,10 +671,8 @@ def auto_backup():
         results.append("github:disabled")
     return bool(local_ok or remote_ok), " | ".join(results)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_021_send_db_to_admins_sync.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_021_send_db_to_admins_sync.py
 # Auto-split part 21: send_db_to_admins_sync
 def send_db_to_admins_sync(caption: str = None):
     """
@@ -827,10 +736,8 @@ def send_db_to_admins_sync(caption: str = None):
         msg += " | " + "; ".join(errors)[:200]
     return ok > 0, msg
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_022_shutdown_backup.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_022_shutdown_backup.py
 # Auto-split part 22: shutdown_backup
 def shutdown_backup(reason: str = "shutdown"):
     """
@@ -915,10 +822,8 @@ def shutdown_backup(reason: str = "shutdown"):
     logger.info("shutdown_backup done: %s", summary)
     return summary
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_023_send_db_to_admins.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_023_send_db_to_admins.py
 # Auto-split part 23: send_db_to_admins
 async def send_db_to_admins(bot, caption: str = None):
     path = Path(DB_PATH)
@@ -962,10 +867,8 @@ async def send_db_to_admins(bot, caption: str = None):
                 pass
     return ok > 0, f"ارسال به {ok}/{len(config.ADMIN_IDS)} ادمین ({users} کاربر)"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_024_restore_db_from_file.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_024_restore_db_from_file.py
 # Auto-split part 24: restore_db_from_file
 async def restore_db_from_file(file_path: str):
     src = Path(file_path)
@@ -1019,10 +922,8 @@ async def restore_db_from_file(file_path: str):
             logger.warning("Post-restore GitHub backup failed", exc_info=True)
     return True, f"✅ بازگردانی موفق — {n} کاربر"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/db_persist_parts/part_025_notify_admins_if_empty.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: db_persist_parts/part_025_notify_admins_if_empty.py
 # Auto-split part 25: notify_admins_if_empty
 async def notify_admins_if_empty(bot):
     n = _user_count(DB_PATH)
@@ -1051,4 +952,79 @@ async def notify_admins_if_empty(bot):
         except Exception as e:
             logger.error(f"notify empty: {e}")
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+# -*- coding: utf-8 -*-
+"""
+بکاپ و ریستور خودکار و رایگان
+  1) GitHub (GITHUB_TOKEN + GITHUB_REPO) → کاملاً خودکار
+  2) تلگرام ادمین (دستی /backup و /restore)
+"""
+import asyncio
+import base64
+import os
+import shutil
+import sqlite3
+import secrets
+import gzip
+import time
+import re
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+import requests
+
+from bot.config import config
+from bot.database import DB_PATH, backup_db, _user_count, get_db_connection
+from bot.database_migrations import SCHEMA_VERSION
+from bot.logger import logger
+
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
+GITHUB_REPO = os.getenv("GITHUB_REPO", "").strip()  # مثال: username/bot-data-backup
+GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main").strip()
+GITHUB_FILE = os.getenv("GITHUB_DB_FILE", "backups/latest.db.gz").strip().lstrip("/")
+API = "https://api.github.com"
+GITHUB_RETRIES = max(1, int(os.getenv("GITHUB_BACKUP_RETRIES", "4")))
+GITHUB_BACKOFF = max(0.5, float(os.getenv("GITHUB_BACKUP_BACKOFF", "1.5")))
+REMOTE_BACKUP_TIMEOUT = max(2.0, float(os.getenv("BACKUP_REMOTE_TIMEOUT", "8")))
+
+
+
+# Telegram private channel backup (off-site, no card / external cloud required)
+TELEGRAM_BACKUP_CHAT_ID = os.getenv("TELEGRAM_BACKUP_CHAT_ID", "").strip()
+TELEGRAM_BACKUP_MAX_DOWNLOAD_BYTES = max(1, int(os.getenv("TELEGRAM_BACKUP_MAX_DOWNLOAD_MB", "20"))) * 1024 * 1024
+
+# آخرین وضعیت ریستور (برای پیام ادمین)
+_LAST_RESTORE_STATUS: dict[str, str | bool | int] = {
+    "ok": False,
+    "msg": "",
+    "local_users": 0,
+    "remote_users": -1,
+}
+
+
+db_persist_parts/part_001__telegram_backup_chat_ids.py
+db_persist_parts/part_002_telegram_backup_enabled.py
+db_persist_parts/part_003__telegram_api.py
+db_persist_parts/part_004__telegram_get.py
+db_persist_parts/part_005_telegram_upload_db.py
+db_persist_parts/part_006_telegram_download_pinned_db.py
+db_persist_parts/part_007__gh_headers.py
+db_persist_parts/part_008__validate_sqlite_backup.py
+db_persist_parts/part_009__normalized_repo.py
+db_persist_parts/part_010_github_enabled.py
+db_persist_parts/part_011__github_request.py
+db_persist_parts/part_012__github_repo_check.py
+db_persist_parts/part_013__github_get_sha.py
+db_persist_parts/part_014__sqlite_snapshot_to_temp.py
+db_persist_parts/part_015_github_upload_db.py
+db_persist_parts/part_016_github_remote_user_count.py
+db_persist_parts/part_017_github_download_db.py
+db_persist_parts/part_018_get_last_restore_status.py
+db_persist_parts/part_019_auto_restore_if_empty.py
+db_persist_parts/part_020_auto_backup.py
+db_persist_parts/part_021_send_db_to_admins_sync.py
+db_persist_parts/part_022_shutdown_backup.py
+db_persist_parts/part_023_send_db_to_admins.py
+db_persist_parts/part_024_restore_db_from_file.py
+db_persist_parts/part_025_notify_admins_if_empty.py

@@ -35,7 +35,6 @@ On bot startup / first tool use, ``ensure_all_capabilities_registered()``
 imports discovery targets and registers every tool into the shared
 ``tool_runtime`` registry so the model sees them automatically.
 """
-from __future__ import annotations
 
 import importlib
 import logging

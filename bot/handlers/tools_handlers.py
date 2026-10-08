@@ -1,5 +1,4 @@
 """Domain-specific Telegram handlers. Compatibility-preserving extraction from feature_handlers."""
-from __future__ import annotations
 from bot.utils.helpers import get_tools_keyboard
 from bot.features.tools.features_tools_app_tools import calculator, world_distance, count_text, parse_two_places
 

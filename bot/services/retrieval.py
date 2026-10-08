@@ -4,7 +4,6 @@ Combines user memory and the local knowledge base, with optional web retrieval.
 The default path is local-only to avoid surprise network calls; web retrieval is
 explicitly enabled by the AI tool when freshness/current information is needed.
 """
-from __future__ import annotations
 
 import re
 from typing import Any

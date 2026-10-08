@@ -1,17 +1,5 @@
-from bot.utils import load_modular_part
-import asyncio, re, secrets
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
-from bot.logger import logger
-from bot.services.downloader import is_url, extract_url, probe, download, cleanup, user_message
-from bot.services.v71_platform import (
-    SUPPORTED_LANGS, detect_language, personalize, self_test, set_workspace,
-    get_workspace, save_branch, list_branches, schedule_ai,
-)
-from bot.services.v72_platform import format_options, record_download, update_download, normalize_download_mode, ux_text
 
-
-# --- INLINED MODULAR PART: bot/handlers/v71_handlers_parts/part_001__dl_lang.py ---
+# BEGIN MERGED LEGACY PART: v71_handlers_parts/part_001__dl_lang.py
 # Auto-split part 1: _dl_lang
 def _dl_lang(update):
     try:
@@ -21,10 +9,8 @@ def _dl_lang(update):
     except Exception:
         return "fa"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/handlers/v71_handlers_parts/part_002_downloader_entry_v71.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_handlers_parts/part_002_downloader_entry_v71.py
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -40,10 +26,8 @@ async def downloader_entry_v71(update: Update, context: ContextTypes.DEFAULT_TYP
     lang = _dl_lang(update)
     await update.message.reply_text(ux_text(lang, "download_title") + "\n\n" + ux_text(lang, "intro"))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/handlers/v71_handlers_parts/part_003__start_probe.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_handlers_parts/part_003__start_probe.py
 # Auto-split part 3: _start_probe
 async def _start_probe(update, context, url: str):
     url = extract_url(url) or ""
@@ -78,10 +62,8 @@ async def _start_probe(update, context, url: str):
     finally:
         context.user_data.pop("waiting_for", None)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/handlers/v71_handlers_parts/part_004_handle_downloader_url_v71.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_handlers_parts/part_004_handle_downloader_url_v71.py
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -119,10 +101,8 @@ async def handle_downloader_url_v71(update: Update, context: ContextTypes.DEFAUL
     await _start_probe(update, context, url)
     return True
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/handlers/v71_handlers_parts/part_005__download_social_direct.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_handlers_parts/part_005__download_social_direct.py
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -183,30 +163,12 @@ async def _download_social_direct(update: Update, context: ContextTypes.DEFAULT_
     finally:
         cleanup_path(path)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/handlers/v71_handlers_parts/part_006_download_callback.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_handlers_parts/part_006_download_callback.py
 from telegram import Update
 from telegram.ext import ContextTypes
 
 # Auto-split part 6: download_callback
-async def _download_callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Safe callback adapter for downloader buttons; never lets a download exception crash the bot."""
-    data = (update.callback_query.data if update.callback_query else "") or ""
-    try:
-        handled = await download_callback(update, context, data)
-        if not handled and update.callback_query:
-            await update.callback_query.answer()
-    except Exception as exc:
-        logger.exception("download callback router failed: %s", exc)
-        try:
-            if update.callback_query:
-                await update.callback_query.answer("⚠️ خطا در دانلود", show_alert=True)
-        except Exception:
-            pass
-
-
 async def download_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str) -> bool:
     q = update.callback_query
     if data.startswith("dl:cancel:"):
@@ -269,10 +231,8 @@ async def download_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             try: await notice.delete()
             except Exception: pass
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/handlers/v71_handlers_parts/part_007_v71_command.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_handlers_parts/part_007_v71_command.py
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -280,10 +240,8 @@ from telegram.ext import ContextTypes
 async def v71_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🚀 V71 Production Hardening فعال است.\n\nDownloader 2.0، امنیت، cache، صف دانلود، شخصی‌سازی، Workspace، شاخه مکالمه، وظایف AI زمان‌بندی‌شده، اعلان هوشمند، observability و self-test فعال هستند.\n\n⚠️ خلاصه‌سازی خودکار گفتگوهای طولانی در این نسخه اضافه نشده است.")
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/handlers/v71_handlers_parts/part_008_v71_selftest_command.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_handlers_parts/part_008_v71_selftest_command.py
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -291,10 +249,8 @@ from telegram.ext import ContextTypes
 async def v71_selftest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result=self_test(); await update.message.reply_text("🧪 Self-Test\n"+str(result))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/handlers/v71_handlers_parts/part_009_workspace_command.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_handlers_parts/part_009_workspace_command.py
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -306,10 +262,8 @@ async def workspace_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     name,data=args.split("=",1); set_workspace(update.effective_user.id,name.strip(),data.strip()); await update.message.reply_text("✅ Workspace ذخیره شد.")
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/handlers/v71_handlers_parts/part_010_branch_command.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_handlers_parts/part_010_branch_command.py
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -323,10 +277,8 @@ async def branch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     name,data=args.split("=",1); save_branch(uid,name.strip(),data.strip()); await update.message.reply_text("✅ شاخه ذخیره شد.")
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/handlers/v71_handlers_parts/part_011_schedule_ai_command.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_handlers_parts/part_011_schedule_ai_command.py
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -339,10 +291,8 @@ async def schedule_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     run_at,repeat,prompt=m.groups(); jid=schedule_ai(update.effective_user.id,prompt,run_at,int(repeat or 0)); await update.message.reply_text(f"✅ وظیفه AI ثبت شد. شناسه: {jid}")
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/handlers/v71_handlers_parts/part_012_personalize_command.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_handlers_parts/part_012_personalize_command.py
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -365,4 +315,27 @@ async def personalize_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     current=personalize(update.effective_user.id,lang,style,mode,None)
     await update.message.reply_text(f"✅ شخصی‌سازی ذخیره شد.\n🌍 {current['language']}\n✍️ {current['response_style']}\n🤖 {current['ai_mode']}")
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import asyncio, re, secrets
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
+from bot.logger import logger
+from bot.services.downloader import is_url, extract_url, probe, download, cleanup, user_message
+from bot.services.v71_platform import (
+    SUPPORTED_LANGS, detect_language, personalize, self_test, set_workspace,
+    get_workspace, save_branch, list_branches, schedule_ai,
+)
+from bot.services.v72_platform import format_options, record_download, update_download, normalize_download_mode, ux_text
+
+v71_handlers_parts/part_001__dl_lang.py
+v71_handlers_parts/part_002_downloader_entry_v71.py
+v71_handlers_parts/part_003__start_probe.py
+v71_handlers_parts/part_004_handle_downloader_url_v71.py
+v71_handlers_parts/part_005__download_social_direct.py
+v71_handlers_parts/part_006_download_callback.py
+v71_handlers_parts/part_007_v71_command.py
+v71_handlers_parts/part_008_v71_selftest_command.py
+v71_handlers_parts/part_009_workspace_command.py
+v71_handlers_parts/part_010_branch_command.py
+v71_handlers_parts/part_011_schedule_ai_command.py
+v71_handlers_parts/part_012_personalize_command.py

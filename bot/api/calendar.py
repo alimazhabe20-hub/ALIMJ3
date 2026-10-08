@@ -1,6 +1,5 @@
 """Calendar helpers with Tehran/Baghdad local-day handling and live Hijri API."""
 
-from __future__ import annotations
 
 from datetime import date, datetime
 from functools import lru_cache

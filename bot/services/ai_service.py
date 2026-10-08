@@ -4,11 +4,10 @@ The implementation lives in ``ai_service_parts/part_999_core_legacy.py`` while
 provider/runtime state lives in ``ai_runtime``. This facade keeps all historical
 imports used by handlers stable across modular deployments.
 """
-from bot.utils import load_modular_part
 
-
-# --- INLINED MODULAR PART: bot/services/ai_service_parts/part_999_core_legacy.py ---
+# BEGIN MERGED LEGACY PART: ai_service_parts/part_999_core_legacy.py
 """AI router, per-user model selection, and multi-key rotation for Rooze Ziba."""
+
 import asyncio
 import base64
 import os
@@ -2341,8 +2340,7 @@ async def ask_ai_stream(user_id: int, prompt: str):
     raise RuntimeError("استریم ناموفق:\n" + "\n".join(errors[:8]))
 
 
-# --- END INLINED MODULAR PART ---
-
+# END MERGED LEGACY PART: 
 import os
 TTS_VOICE = os.getenv("TTS_VOICE", "fa-IR-DilaraNeural")
 
@@ -2354,10 +2352,4 @@ from bot.services.ai_runtime import (
     set_selected_provider,
     get_selected_model,
 )
-
-# Compatibility: adaptive provider health is owned by ai_runtime.
-from bot.services.ai_runtime import _PROVIDER_HEALTH
-
-from bot.services.ai_runtime import AI_PROVIDER_FAILURE_THRESHOLD
-from bot.services.ai_runtime import _record_provider
-from bot.services.ai_runtime import _provider_available
+ai_service_parts/part_999_core_legacy.py

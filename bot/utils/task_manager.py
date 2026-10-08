@@ -1,5 +1,4 @@
 """Bounded background-task lifecycle management for the long-running bot."""
-from __future__ import annotations
 import asyncio
 from collections.abc import Coroutine
 from typing import Any

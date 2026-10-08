@@ -1,5 +1,4 @@
 """High-level API Hub helpers used by bot features and AI tools."""
-from __future__ import annotations
 
 from typing import Any
 

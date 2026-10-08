@@ -1,5 +1,4 @@
 """Protected V74 observability dashboard."""
-from __future__ import annotations
 import hmac, os
 from flask import Blueprint, jsonify, Response, request
 

@@ -9,43 +9,8 @@ Memory 2.0, Workspace, and Report Generator.
 The module is intentionally dependency-light. Network/AI-heavy operations delegate
 to existing project services and degrade safely when an optional provider is absent.
 """
-from bot.utils import load_modular_part
 
-import ast
-import csv
-import hashlib
-import io
-import json
-import os
-import re
-import sqlite3
-import time
-import uuid
-from collections import Counter, defaultdict, deque
-from dataclasses import dataclass, asdict
-from pathlib import Path
-from typing import Any, Iterable
-
-from bot.logger import logger
-
-VERSION = "75.0.0"
-MAX_WORKFLOW_STEPS = max(1, min(12, int(os.getenv("V75_WORKFLOW_MAX_STEPS", "8"))))
-MAX_AGENT_STEPS = max(1, min(12, int(os.getenv("V75_AGENT_MAX_STEPS", "8"))))
-MAX_AGENT_CALLS = max(2, min(32, int(os.getenv("V75_AGENT_MAX_CALLS", "16"))))
-MAX_AGENT_MS = max(5000, min(180000, int(os.getenv("V75_AGENT_BUDGET_MS", "60000"))))
-MAX_ALERTS_PER_USER = max(10, min(500, int(os.getenv("V75_MAX_ALERTS", "100"))))
-MAX_MEMORY_ITEMS = max(20, min(2000, int(os.getenv("V75_MAX_MEMORY", "500"))))
-
-# ---------------------------------------------------------------------------
-# Generic helpers / security
-# ---------------------------------------------------------------------------
-_SECRET_RE = re.compile(r"(?i)(bot[_-]?token|api[_-]?key|secret|password|authorization|cookie)\s*[:=]\s*([^\s,;]+)")
-_INJECTION_RE = re.compile(
-    r"(?i)(ignore\s+(all|any|previous|prior)\s+instructions|system\s+prompt|developer\s+message|reveal\s+.*prompt|نادیده\s+بگیر|دستورهای?\s+سیستم)"
-)
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_001_redact.py ---
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_001_redact.py
 from typing import Any
 
 # Auto-split part 1: redact
@@ -55,10 +20,8 @@ def redact(value: Any, limit: int = 8000) -> str:
     text = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]{12,}", "Bearer [REDACTED]", text)
     return text[:limit]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_002_security_scan.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_002_security_scan.py
 from typing import Any
 
 # Auto-split part 2: security_scan
@@ -70,10 +33,8 @@ def security_scan(text: str) -> dict[str, Any]:
     return {"prompt_injection": injection, "secret_exposure": secrets, "dangerous_command": suspicious_commands,
             "risk": "high" if injection or suspicious_commands else "medium" if secrets else "low"}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_003_stable_hash.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_003_stable_hash.py
 from typing import Any
 
 # Auto-split part 3: stable_hash
@@ -81,22 +42,15 @@ def stable_hash(value: Any) -> str:
     raw = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode()
     return hashlib.sha256(raw).hexdigest()
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# SQLite persistence
-# ---------------------------------------------------------------------------
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_004__db.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_004__db.py
 # Auto-split part 4: _db
 def _db():
     from bot.database import get_db_connection
     return get_db_connection()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_005_init_v75_tables.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_005_init_v75_tables.py
 # Auto-split part 5: init_v75_tables
 def init_v75_tables() -> None:
     conn = _db()
@@ -143,13 +97,8 @@ def init_v75_tables() -> None:
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# 1/2 Agent 3.0 + Multi-Agent
-# ---------------------------------------------------------------------------
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_006_AgentTask.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_006_AgentTask.py
 from dataclasses import dataclass
 
 # Auto-split part 6: AgentTask
@@ -160,10 +109,8 @@ class AgentTask:
     steps: list[dict[str, Any]]
     status: str = "planned"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_007_plan_agent.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_007_plan_agent.py
 from typing import Iterable
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -195,10 +142,8 @@ def plan_agent(goal: str, available_tools: Iterable[str] = ()) -> AgentTask:
         steps = steps[:MAX_AGENT_STEPS]
     return AgentTask(uuid.uuid4().hex, goal, steps, "planned" if steps else "direct_answer")
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_008_run_agent_3.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_008_run_agent_3.py
 from typing import Any
 
 # Auto-split part 8: run_agent_3
@@ -226,10 +171,8 @@ async def run_agent_3(goal: str, *, user_id: int = 0) -> dict[str, Any]:
     return {"ok": task.status in {"completed", "partial"}, "task_id": task.id, "status": task.status,
             "goal": task.goal, "steps": results, "elapsed_ms": round((time.monotonic()-started)*1000, 1)}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_009_run_multi_agent.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_009_run_multi_agent.py
 from typing import Any
 
 # Auto-split part 9: run_multi_agent
@@ -241,10 +184,8 @@ async def run_multi_agent(goal: str, *, user_id: int = 0) -> dict[str, Any]:
         specialists.append({"specialist": _specialist_for(item["tool"]), "tool": item["tool"], "ok": item["ok"]})
     return {**result, "specialists": specialists, "reviewed": bool(result.get("steps"))}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_010__specialist_for.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_010__specialist_for.py
 # Auto-split part 10: _specialist_for
 def _specialist_for(tool: str) -> str:
     if "market" in tool: return "finance"
@@ -253,13 +194,8 @@ def _specialist_for(tool: str) -> str:
     if "weather" in tool: return "utility"
     return "general"
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# 3 Security Center
-# ---------------------------------------------------------------------------
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_011_security_center_snapshot.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_011_security_center_snapshot.py
 from typing import Any
 
 # Auto-split part 11: security_center_snapshot
@@ -274,13 +210,8 @@ def security_center_snapshot() -> dict[str, Any]:
         "score": 100,
     }
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# 5 Web Intelligence 3.0 / 6 RAG 3.0
-# ---------------------------------------------------------------------------
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_012_rank_sources.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_012_rank_sources.py
 from typing import Any
 
 # Auto-split part 12: rank_sources
@@ -298,10 +229,8 @@ def rank_sources(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out.append(item)
     return sorted(out, key=lambda x: (-x["trust_score"], x.get("title", "")))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_013_rag_chunk.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_013_rag_chunk.py
 # Auto-split part 13: rag_chunk
 def rag_chunk(text: str, *, chunk_size: int = 900, overlap: int = 120) -> list[str]:
     text = re.sub(r"\s+", " ", str(text or "")).strip()
@@ -313,10 +242,8 @@ def rag_chunk(text: str, *, chunk_size: int = 900, overlap: int = 120) -> list[s
         start=max(start+1, end-overlap)
     return chunks
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_014_rag_rank.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_014_rag_rank.py
 from typing import Any
 
 # Auto-split part 14: rag_rank
@@ -329,13 +256,8 @@ def rag_rank(query: str, chunks: list[str], top_k: int = 5) -> list[dict[str, An
         scored.append({"index":i,"score":round(score,4),"text":chunk})
     return sorted(scored,key=lambda x:(-x["score"],x["index"]))[:max(1,min(20,int(top_k)))]
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# 7 Market Intelligence 2.0
-# ---------------------------------------------------------------------------
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_015_market_intelligence_2.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_015_market_intelligence_2.py
 from typing import Any
 
 # Auto-split part 15: market_intelligence_2
@@ -352,13 +274,8 @@ def market_intelligence_2(symbol: str, data: dict[str, Any] | None = None) -> di
             "confidence": round(min(0.95, 0.35 + min(len(closes), 100)/200),3),
             "scenarios": {"bullish": "continuation above resistance", "bearish": "break below support", "neutral": "range-bound"}}
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# 8 News / 9 Calendar intelligence
-# ---------------------------------------------------------------------------
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_016_score_news.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_016_score_news.py
 from typing import Any
 
 # Auto-split part 16: score_news
@@ -370,10 +287,8 @@ def score_news(title: str, content: str = "") -> dict[str, Any]:
     impact=min(1.0, (len(re.findall(r"!|عاجل|breaking|urgent", text, re.I))*0.2)+0.2)
     return {"sentiment":round(sentiment,3),"impact":round(impact,3),"label":"positive" if sentiment>0.2 else "negative" if sentiment<-0.2 else "neutral"}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_017_economic_surprise.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_017_economic_surprise.py
 from typing import Any
 
 # Auto-split part 17: economic_surprise
@@ -385,13 +300,8 @@ def economic_surprise(actual: str, forecast: str) -> dict[str, Any]:
     diff=a-f; scale=max(1,abs(f)); score=max(-1,min(1,diff/scale))
     return {"available":True,"difference":round(diff,6),"score":round(score,4),"direction":"above" if diff>0 else "below" if diff<0 else "inline"}
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# 10 Backup / DR 3.0
-# ---------------------------------------------------------------------------
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_018_backup_integrity.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_018_backup_integrity.py
 from pathlib import Path
 from typing import Any
 
@@ -405,15 +315,8 @@ def backup_integrity(path: str | Path) -> dict[str, Any]:
             size+=len(block); h.update(block)
     return {"ok":size>0,"size":size,"sha256":h.hexdigest()}
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# 11 Performance / 12 QA
-# ---------------------------------------------------------------------------
-_PERF=defaultdict(lambda: deque(maxlen=100))
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_019_record_perf.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_019_record_perf.py
 # Auto-split part 19: record_perf
 def record_perf(component: str, latency_ms: float, ok: bool=True) -> None:
     _PERF[component].append((time.time(), float(latency_ms), bool(ok)))
@@ -421,10 +324,8 @@ def record_perf(component: str, latency_ms: float, ok: bool=True) -> None:
         conn=_db(); conn.execute("INSERT INTO v75_metrics(component,operation,latency_ms,ok) VALUES(?,?,?,?)",(component,"runtime",float(latency_ms),1 if ok else 0)); conn.commit(); conn.close()
     except Exception: pass
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_020_performance_snapshot.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_020_performance_snapshot.py
 from typing import Any
 
 # Auto-split part 20: performance_snapshot
@@ -434,10 +335,8 @@ def performance_snapshot() -> dict[str, Any]:
         vals=[r[1] for r in rows]; out[name]={"count":len(rows),"avg_ms":round(sum(vals)/len(vals),2) if vals else 0,"p95_ms":round(sorted(vals)[max(0,int(len(vals)*.95)-1)],2) if vals else 0,"errors":sum(not r[2] for r in rows)}
     return out
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_021_qa_snapshot.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_021_qa_snapshot.py
 from pathlib import Path
 from typing import Any
 
@@ -450,13 +349,8 @@ def qa_snapshot(root: str | Path = ".") -> dict[str, Any]:
         except Exception: bad.append(str(p))
     return {"ok":not bad,"python_files":len(files),"syntax_errors":bad[:20],"security":security_center_snapshot(),"performance":performance_snapshot()}
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# 13 Workflow Builder
-# ---------------------------------------------------------------------------
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_022_validate_workflow.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_022_validate_workflow.py
 from typing import Any
 
 # Auto-split part 22: validate_workflow
@@ -468,10 +362,8 @@ def validate_workflow(steps: list[dict[str, Any]]) -> tuple[bool,str]:
         if s.get("tool") == "run_workflow": return False,"nested_workflow"
     return True,"ok"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_023_execute_workflow.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_023_execute_workflow.py
 from typing import Any
 
 # Auto-split part 23: execute_workflow
@@ -496,13 +388,8 @@ async def execute_workflow(name: str, steps: list[dict[str,Any]], *, user_id:int
     conn=_db(); conn.execute("UPDATE v75_workflow_runs SET status=?,result_json=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",(status,json.dumps(payload,ensure_ascii=False),run_id)); conn.commit(); conn.close()
     return payload
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# 14 Smart Alerts
-# ---------------------------------------------------------------------------
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_024_create_alert.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_024_create_alert.py
 from typing import Any
 
 # Auto-split part 24: create_alert
@@ -511,10 +398,8 @@ def create_alert(user_id:int, kind:str, config:dict[str,Any]) -> str:
     if count>=MAX_ALERTS_PER_USER: conn.close(); raise ValueError("alert_limit")
     aid=uuid.uuid4().hex; conn.execute("INSERT INTO v75_alerts(id,user_id,kind,config_json) VALUES(?,?,?,?)",(aid,user_id,kind,json.dumps(config,ensure_ascii=False))); conn.commit(); conn.close(); return aid
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_025_evaluate_alert.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_025_evaluate_alert.py
 from typing import Any
 
 # Auto-split part 25: evaluate_alert
@@ -530,21 +415,14 @@ def evaluate_alert(alert:dict[str,Any], context:dict[str,Any]) -> bool:
     if kind=="combo": return all(bool(context.get(k)) for k in cfg.get("all",[]))
     return False
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# 15 Memory 2.0 / 16 Workspace
-# ---------------------------------------------------------------------------
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_026_remember.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_026_remember.py
 # Auto-split part 26: remember
 def remember(user_id:int, category:str, key:str, value:str, confidence:float=1.0, source:str="user") -> None:
     conn=_db(); conn.execute("INSERT INTO v75_memory(id,user_id,category,key,value,confidence,source) VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,category,key) DO UPDATE SET value=excluded.value,confidence=excluded.confidence,source=excluded.source,updated_at=CURRENT_TIMESTAMP",(uuid.uuid4().hex,user_id,category,key,redact(value,2000),max(0,min(1,float(confidence))),source)); conn.commit(); conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_027_recall.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_027_recall.py
 from typing import Any
 
 # Auto-split part 27: recall
@@ -556,21 +434,14 @@ def recall(user_id:int, category:str|None=None, limit:int=20) -> list[dict[str,A
         rows=conn.execute("SELECT category,key,value,confidence,source,updated_at FROM v75_memory WHERE user_id=? ORDER BY updated_at DESC LIMIT ?",(user_id,min(MAX_MEMORY_ITEMS,limit))).fetchall()
     conn.close(); return [dict(r) for r in rows]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_028_create_workspace.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_028_create_workspace.py
 # Auto-split part 28: create_workspace
 def create_workspace(user_id:int,name:str) -> str:
     wid=uuid.uuid4().hex; conn=_db(); conn.execute("INSERT INTO v75_workspaces(id,user_id,name) VALUES(?,?,?)",(wid,user_id,redact(name,100))); conn.commit(); conn.close(); return wid
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# 17 Report Generator
-# ---------------------------------------------------------------------------
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_029_generate_report.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_029_generate_report.py
 from typing import Any
 
 # Auto-split part 29: generate_report
@@ -607,13 +478,8 @@ def generate_report(title:str, rows:list[dict[str,Any]], fmt:str="json") -> tupl
         except Exception: return generate_report(title,rows,"json")
     return generate_report(title,rows,"json")
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# Dashboard + self test
-# ---------------------------------------------------------------------------
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_030_dashboard.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_030_dashboard.py
 from typing import Any
 
 # Auto-split part 30: dashboard
@@ -623,10 +489,8 @@ def dashboard() -> dict[str,Any]:
     except Exception: users=alerts=runs=mem=0
     return {"version":VERSION,"users":users,"active_alerts":alerts,"workflow_runs":runs,"memory_items":mem,"security":security_center_snapshot(),"performance":performance_snapshot()}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v75_platform_parts/part_031_self_test.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v75_platform_parts/part_031_self_test.py
 from pathlib import Path
 from typing import Any
 
@@ -642,4 +506,109 @@ def self_test(root: str|Path=".") -> dict[str,Any]:
     checks["qa"]=qa_snapshot(root)["ok"]
     return {"ok":all(checks.values()),"checks":checks,"dashboard":dashboard()}
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import ast
+import csv
+import hashlib
+import io
+import json
+import os
+import re
+import sqlite3
+import time
+import uuid
+from collections import Counter, defaultdict, deque
+from dataclasses import dataclass, asdict
+from pathlib import Path
+from typing import Any, Iterable
+
+from bot.logger import logger
+
+VERSION = "75.0.0"
+MAX_WORKFLOW_STEPS = max(1, min(12, int(os.getenv("V75_WORKFLOW_MAX_STEPS", "8"))))
+MAX_AGENT_STEPS = max(1, min(12, int(os.getenv("V75_AGENT_MAX_STEPS", "8"))))
+MAX_AGENT_CALLS = max(2, min(32, int(os.getenv("V75_AGENT_MAX_CALLS", "16"))))
+MAX_AGENT_MS = max(5000, min(180000, int(os.getenv("V75_AGENT_BUDGET_MS", "60000"))))
+MAX_ALERTS_PER_USER = max(10, min(500, int(os.getenv("V75_MAX_ALERTS", "100"))))
+MAX_MEMORY_ITEMS = max(20, min(2000, int(os.getenv("V75_MAX_MEMORY", "500"))))
+
+# ---------------------------------------------------------------------------
+# Generic helpers / security
+# ---------------------------------------------------------------------------
+_SECRET_RE = re.compile(r"(?i)(bot[_-]?token|api[_-]?key|secret|password|authorization|cookie)\s*[:=]\s*([^\s,;]+)")
+_INJECTION_RE = re.compile(
+    r"(?i)(ignore\s+(all|any|previous|prior)\s+instructions|system\s+prompt|developer\s+message|reveal\s+.*prompt|نادیده\s+بگیر|دستورهای?\s+سیستم)"
+)
+
+# ---------------------------------------------------------------------------
+# SQLite persistence
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 1/2 Agent 3.0 + Multi-Agent
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 3 Security Center
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 5 Web Intelligence 3.0 / 6 RAG 3.0
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 7 Market Intelligence 2.0
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 8 News / 9 Calendar intelligence
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 10 Backup / DR 3.0
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 11 Performance / 12 QA
+# ---------------------------------------------------------------------------
+_PERF=defaultdict(lambda: deque(maxlen=100))
+
+# ---------------------------------------------------------------------------
+# 13 Workflow Builder
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 14 Smart Alerts
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 15 Memory 2.0 / 16 Workspace
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 17 Report Generator
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Dashboard + self test
+# ---------------------------------------------------------------------------
+v75_platform_parts/part_001_redact.py
+v75_platform_parts/part_002_security_scan.py
+v75_platform_parts/part_003_stable_hash.py
+v75_platform_parts/part_004__db.py
+v75_platform_parts/part_005_init_v75_tables.py
+v75_platform_parts/part_006_AgentTask.py
+v75_platform_parts/part_007_plan_agent.py
+v75_platform_parts/part_008_run_agent_3.py
+v75_platform_parts/part_009_run_multi_agent.py
+v75_platform_parts/part_010__specialist_for.py
+v75_platform_parts/part_011_security_center_snapshot.py
+v75_platform_parts/part_012_rank_sources.py
+v75_platform_parts/part_013_rag_chunk.py
+v75_platform_parts/part_014_rag_rank.py
+v75_platform_parts/part_015_market_intelligence_2.py
+v75_platform_parts/part_016_score_news.py
+v75_platform_parts/part_017_economic_surprise.py
+v75_platform_parts/part_018_backup_integrity.py
+v75_platform_parts/part_019_record_perf.py
+v75_platform_parts/part_020_performance_snapshot.py
+v75_platform_parts/part_021_qa_snapshot.py
+v75_platform_parts/part_022_validate_workflow.py
+v75_platform_parts/part_023_execute_workflow.py
+v75_platform_parts/part_024_create_alert.py
+v75_platform_parts/part_025_evaluate_alert.py
+v75_platform_parts/part_026_remember.py
+v75_platform_parts/part_027_recall.py
+v75_platform_parts/part_028_create_workspace.py
+v75_platform_parts/part_029_generate_report.py
+v75_platform_parts/part_030_dashboard.py
+v75_platform_parts/part_031_self_test.py

@@ -1,5 +1,4 @@
 """Read-only public API for V65. No secrets, payments or subscriptions."""
-from __future__ import annotations
 import hmac, os
 from flask import Blueprint, jsonify, request
 from bot.release import APP_NAME, VERSION

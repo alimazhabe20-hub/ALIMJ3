@@ -6,32 +6,15 @@ Order (identical to the reference bot):
 
 Returns a local file path. Caller is responsible for cleanup/send.
 """
-from bot.utils import load_modular_part
 
-import asyncio
-import os
-import shutil
-import subprocess
-import tempfile
-from pathlib import Path
-from urllib.parse import urlparse
-
-from bot.logger import logger
-
-VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
-
-
-
-# --- INLINED MODULAR PART: bot/services/insta_downloader_parts/part_001_is_instagram_url.py ---
+# BEGIN MERGED LEGACY PART: insta_downloader_parts/part_001_is_instagram_url.py
 # Auto-split part 1: is_instagram_url
 def is_instagram_url(url: str) -> bool:
     host = (urlparse((url or "").strip()).hostname or "").lower().rstrip(".")
     return host == "instagram.com" or host.endswith(".instagram.com")
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/insta_downloader_parts/part_002_is_social_url.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: insta_downloader_parts/part_002_is_social_url.py
 # Auto-split part 2: is_social_url
 def is_social_url(url: str) -> bool:
     host = (urlparse((url or "").strip()).hostname or "").lower().rstrip(".")
@@ -52,10 +35,8 @@ def is_social_url(url: str) -> bool:
     )
     return any(host == h or host.endswith("." + h) for h in social)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/insta_downloader_parts/part_003__normalize_instagram_url.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: insta_downloader_parts/part_003__normalize_instagram_url.py
 # Auto-split part 3: _normalize_instagram_url
 def _normalize_instagram_url(url: str) -> str:
     """Strip tracking query params like the production ALIMJ3 normalizer."""
@@ -65,10 +46,8 @@ def _normalize_instagram_url(url: str) -> str:
         return p._replace(query="").geturl()
     return url.strip()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/insta_downloader_parts/part_004_download_from_gallery.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: insta_downloader_parts/part_004_download_from_gallery.py
 # Auto-split part 4: download_from_gallery
 async def download_from_gallery(url: str, temp_dir: str | None = None) -> str:
     """Exact logic from insta-downloader-bot/downloaders/gallery.py."""
@@ -113,10 +92,8 @@ async def download_from_gallery(url: str, temp_dir: str | None = None) -> str:
             shutil.rmtree(temp_dir, ignore_errors=True)
         raise
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/insta_downloader_parts/part_005_download_from_ytdlp.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: insta_downloader_parts/part_005_download_from_ytdlp.py
 # Auto-split part 5: download_from_ytdlp
 async def download_from_ytdlp(url: str, temp_dir: str | None = None) -> str:
     """Exact logic from insta-downloader-bot/downloaders/ytdlp.py (+ cookies/proxy)."""
@@ -190,10 +167,8 @@ async def download_from_ytdlp(url: str, temp_dir: str | None = None) -> str:
             shutil.rmtree(temp_dir, ignore_errors=True)
         raise
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/insta_downloader_parts/part_006_download.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: insta_downloader_parts/part_006_download.py
 # Auto-split part 6: download
 async def download(url: str) -> str:
     """Download Instagram/social media with an Instagram web-API fallback.
@@ -339,18 +314,14 @@ async def _download_instagram_graphql(url: str) -> str:
     loop = _asyncio.get_running_loop()
     return await loop.run_in_executor(None, work)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/insta_downloader_parts/part_007_is_video_path.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: insta_downloader_parts/part_007_is_video_path.py
 # Auto-split part 7: is_video_path
 def is_video_path(path: str) -> bool:
     return Path(path).suffix.lower() in VIDEO_EXTS
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/insta_downloader_parts/part_008_cleanup_path.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: insta_downloader_parts/part_008_cleanup_path.py
 # Auto-split part 8: cleanup_path
 def cleanup_path(path: str | None) -> None:
     if not path:
@@ -364,4 +335,25 @@ def cleanup_path(path: str | None) -> None:
     except Exception:
         pass
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import asyncio
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+from urllib.parse import urlparse
+
+from bot.logger import logger
+
+VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
+
+
+insta_downloader_parts/part_001_is_instagram_url.py
+insta_downloader_parts/part_002_is_social_url.py
+insta_downloader_parts/part_003__normalize_instagram_url.py
+insta_downloader_parts/part_004_download_from_gallery.py
+insta_downloader_parts/part_005_download_from_ytdlp.py
+insta_downloader_parts/part_006_download.py
+insta_downloader_parts/part_007_is_video_path.py
+insta_downloader_parts/part_008_cleanup_path.py

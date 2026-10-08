@@ -1,7 +1,6 @@
 """V70 platform layer: agents, memory, RAG, workspace, scheduling, flags and observability.
 All features are local/free and degrade gracefully when optional dependencies are absent.
 """
-from __future__ import annotations
 import ast, asyncio, json, os, re, sqlite3, time, hashlib
 from collections import deque
 from dataclasses import dataclass

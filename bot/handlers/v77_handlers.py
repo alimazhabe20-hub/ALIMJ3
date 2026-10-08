@@ -1,4 +1,3 @@
-from __future__ import annotations
 import json
 from telegram import Update
 from telegram.ext import ContextTypes

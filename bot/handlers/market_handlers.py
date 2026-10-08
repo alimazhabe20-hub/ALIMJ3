@@ -4,10 +4,8 @@ IMPORTANT: Keep this file small and stable. New functionality belongs in the
 secondary ``market_handlers_parts/`` modules. The complete legacy implementation is kept
 unchanged in ``market_handlers_parts/part_999_core_legacy.py`` for compatibility.
 """
-from bot.utils import load_modular_part
 
-
-# --- INLINED MODULAR PART: bot/handlers/market_handlers_parts/part_999_core_legacy.py ---
+# BEGIN MERGED LEGACY PART: market_handlers_parts/part_999_core_legacy.py
 """Domain-specific Telegram handlers. Compatibility-preserving extraction from feature_handlers."""
 import re
 from bot.utils.helpers import get_market_keyboard
@@ -309,8 +307,7 @@ async def _h_ict(u, c, t, uid):
 
 
 
-# --- END INLINED MODULAR PART ---
-
+# END MERGED LEGACY PART: 
 _legacy_h_profit = _h_profit
 _legacy_h_currency = _h_currency
 _legacy_h_crypto_full = _h_crypto_full
@@ -323,3 +320,4 @@ async def _h_crypto_full(*args, **kwargs): return await _legacy_h_crypto_full(*a
 async def _h_crypto_pos(*args, **kwargs): return await _legacy_h_crypto_pos(*args, **kwargs)
 async def _h_crypto_chart(*args, **kwargs): return await _legacy_h_crypto_chart(*args, **kwargs)
 async def _h_crypto_analyze(*args, **kwargs): return await _legacy_h_crypto_analyze(*args, **kwargs)
+market_handlers_parts/part_999_core_legacy.py

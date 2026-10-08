@@ -4,29 +4,14 @@ This layer deliberately uses deterministic intent planning rather than an
 unbounded LLM loop. It selects existing read-only tools, executes at most a
 small number of steps, and can retry a failed step with a safe fallback.
 """
-from bot.utils import load_modular_part
 
-import re
-from typing import Any
-
-from bot.logger import logger
-
-MAX_PLAN_STEPS = 4
-import os
-
-MAX_REPAIRS = max(0, min(2, int(os.getenv("AI_AGENT_MAX_REPAIRS", "1"))))
-
-
-
-# --- INLINED MODULAR PART: bot/services/agent_engine_parts/part_001__current.py ---
+# BEGIN MERGED LEGACY PART: agent_engine_parts/part_001__current.py
 # Auto-split part 1: _current
 def _current(text: str) -> bool:
     return bool(re.search(r"امروز|الان|فعلی|جدیدترین|آخرین|اخبار|قیمت|نرخ|today|latest|current|news|price|rate", text, re.I))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/agent_engine_parts/part_002__city_from_query.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: agent_engine_parts/part_002__city_from_query.py
 # Auto-split part 2: _city_from_query
 def _city_from_query(text: str) -> str | None:
     """Extract a likely city name; avoid swallowing the rest of a multi-intent sentence."""
@@ -45,10 +30,8 @@ def _city_from_query(text: str) -> str | None:
         return None
     return value
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/agent_engine_parts/part_003_build_plan.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: agent_engine_parts/part_003_build_plan.py
 from typing import Any
 
 # Auto-split part 3: build_plan
@@ -90,10 +73,8 @@ def build_plan(goal: str) -> list[dict[str, Any]]:
         steps.append({"tool": "web_search", "arguments": {"query": q}})
     return steps[:MAX_PLAN_STEPS]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/agent_engine_parts/part_004_run_agent.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: agent_engine_parts/part_004_run_agent.py
 # Auto-split part 4: run_agent
 async def run_agent(goal: str, *, user_id: int = 0) -> str:
     """Plan, execute, and perform one bounded repair attempt."""
@@ -151,4 +132,19 @@ async def run_agent(goal: str, *, user_id: int = 0) -> str:
 
     return str({"ok": True, "goal": goal[:500], "steps": results, "repairs": repairs})[:7000]
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import re
+from typing import Any
+
+from bot.logger import logger
+
+MAX_PLAN_STEPS = 4
+import os
+
+MAX_REPAIRS = max(0, min(2, int(os.getenv("AI_AGENT_MAX_REPAIRS", "1"))))
+
+
+agent_engine_parts/part_001__current.py
+agent_engine_parts/part_002__city_from_query.py
+agent_engine_parts/part_003_build_plan.py
+agent_engine_parts/part_004_run_agent.py

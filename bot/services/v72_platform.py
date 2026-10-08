@@ -4,36 +4,8 @@ Scope: Downloader 3.0, AI routing 2.0, Web Intelligence, Document Intelligence,
 Market Intelligence, QA automation, and UX helpers.  No conversation-summary
 engine is implemented here.
 """
-from bot.utils import load_modular_part
 
-import asyncio
-import csv
-import hashlib
-import io
-import ipaddress
-import json
-import os
-import re
-import socket
-import subprocess
-import sys
-import time
-import zipfile
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
-from urllib.parse import urljoin, urlparse
-
-from bot.database_core import get_db_connection, _execute_write
-from bot.logger import logger
-
-MAX_DOCUMENT_BYTES = max(1, int(os.getenv("V72_MAX_DOCUMENT_BYTES", str(12 * 1024 * 1024))))
-MAX_DOCUMENT_CHARS = max(1000, int(os.getenv("V72_MAX_DOCUMENT_CHARS", "120000")))
-WEB_TIMEOUT = max(5, float(os.getenv("V72_WEB_TIMEOUT", "15")))
-
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_001_init_v72_tables.py ---
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_001_init_v72_tables.py
 # Auto-split part 1: init_v72_tables
 def init_v72_tables() -> None:
     conn = get_db_connection(); cur = conn.cursor()
@@ -51,14 +23,8 @@ def init_v72_tables() -> None:
         cur.execute(sql)
     conn.commit(); conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------- Downloader 3.0 ----------------
-QUALITY_MODES = ("best", "1080p", "720p", "480p", "audio")
-
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_002_normalize_download_mode.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_002_normalize_download_mode.py
 # Auto-split part 2: normalize_download_mode
 def normalize_download_mode(mode: str) -> str:
     mode = (mode or "best").strip().lower()
@@ -66,10 +32,8 @@ def normalize_download_mode(mode: str) -> str:
     mode = aliases.get(mode, mode)
     return mode if mode in QUALITY_MODES else "best"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_003_ytdlp_format.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_003_ytdlp_format.py
 # Auto-split part 3: ytdlp_format
 def ytdlp_format(mode: str) -> str:
     mode = normalize_download_mode(mode)
@@ -80,10 +44,8 @@ def ytdlp_format(mode: str) -> str:
     height = mode[:-1]
     return f"bv*[height<={height}]+ba/b[height<={height}]/b[height<={height}]/b"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_004_format_options.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_004_format_options.py
 from typing import Any
 
 # Auto-split part 4: format_options
@@ -97,10 +59,8 @@ def format_options(info: dict[str, Any]) -> list[dict[str, Any]]:
             out.append({"mode": mode, "label": {"best": "🎬 بهترین کیفیت", "1080p": "📺 تا 1080p", "720p": "📺 تا 720p", "480p": "📺 تا 480p", "audio": "🎵 فقط صدا (MP3)"}[mode]})
     return out
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_005_record_download.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_005_record_download.py
 # Auto-split part 5: record_download
 def record_download(user_id: int, url: str, mode: str, status: str = "queued", progress: float = 0.0, error_code: str = "") -> int:
     conn = get_db_connection(); cur = conn.execute(
@@ -108,10 +68,8 @@ def record_download(user_id: int, url: str, mode: str, status: str = "queued", p
         (int(user_id), str(url)[:4000], normalize_download_mode(mode), status[:30], max(0.0, min(100.0, float(progress))), error_code[:80]),
     ); conn.commit(); jid = int(cur.lastrowid); conn.close(); return jid
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_006_update_download.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_006_update_download.py
 # Auto-split part 6: update_download
 def update_download(job_id: int, *, status: str | None = None, progress: float | None = None, error_code: str = "") -> None:
     fields, vals = [], []
@@ -123,20 +81,15 @@ def update_download(job_id: int, *, status: str | None = None, progress: float |
     vals.append(int(job_id))
     _execute_write(f"UPDATE v72_download_jobs SET {','.join(fields)} WHERE id=?", tuple(vals))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_007_progress_percent.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_007_progress_percent.py
 # Auto-split part 7: progress_percent
 def progress_percent(done: int, total: int) -> float:
     if total <= 0: return 0.0
     return round(max(0.0, min(100.0, done * 100.0 / total)), 1)
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------- AI Router 2.0 ----------------
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_008_RouteCandidate.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_008_RouteCandidate.py
 from dataclasses import dataclass
 
 # Auto-split part 8: RouteCandidate
@@ -147,10 +100,8 @@ class RouteCandidate:
     score: float
     reason: str
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_009_classify_ai_complexity.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_009_classify_ai_complexity.py
 # Auto-split part 9: classify_ai_complexity
 def classify_ai_complexity(prompt: str) -> str:
     t = (prompt or "").strip()
@@ -160,10 +111,8 @@ def classify_ai_complexity(prompt: str) -> str:
     score = max(0.0, min(1.0, score))
     return "fast" if score < .25 else "quality" if score >= .65 else "balanced"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_010_route_candidates.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_010_route_candidates.py
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from bot.services.v72_platform import RouteCandidate
@@ -182,12 +131,8 @@ def route_candidates(prompt: str, providers: list[tuple[str, str]] | None = None
         out.append(RouteCandidate(provider, model, round(score, 4), f"{mode}:{'quality' if score > .8 else 'speed'}"))
     return sorted(out, key=lambda x: (-x.score, x.provider, x.model))
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------- Web Intelligence ----------------
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_011_safe_web_url.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_011_safe_web_url.py
 # Auto-split part 11: safe_web_url
 def safe_web_url(url: str) -> str:
     p = urlparse((url or "").strip())
@@ -201,10 +146,8 @@ def safe_web_url(url: str) -> str:
     # redirect target immediately before connecting.
     return p.geturl()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_012__assert_public_host.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_012__assert_public_host.py
 # Auto-split part 12: _assert_public_host
 def _assert_public_host(host: str) -> None:
     try:
@@ -216,10 +159,8 @@ def _assert_public_host(host: str) -> None:
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
             raise ValueError("blocked_host")
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_013_dedupe_sources.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_013_dedupe_sources.py
 from typing import Any
 
 # Auto-split part 13: dedupe_sources
@@ -237,10 +178,8 @@ def dedupe_sources(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out.append({**item, "url": key, "domain": domain, "score": round(min(1.0, score), 4)})
     return sorted(out, key=lambda x: (-x["score"], x["domain"]))[:20]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_014_fetch_web_page.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_014_fetch_web_page.py
 from typing import Any
 
 # Auto-split part 14: fetch_web_page
@@ -268,10 +207,8 @@ async def fetch_web_page(url: str) -> dict[str, Any]:
             return {"url": current, "ok": True, "status": r.status_code, "title": title, "text": text}
     return {"url": current, "ok": False, "status": 0, "text": ""}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_015_verify_claims_against_sources.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_015_verify_claims_against_sources.py
 from typing import Any
 
 # Auto-split part 15: verify_claims_against_sources
@@ -289,10 +226,8 @@ def verify_claims_against_sources(claims: list[str], sources: list[dict[str, Any
         results.append({"claim": claim[:500], "status": status, "evidence": evidence[:5]})
     return {"ok": bool(results), "claims": results}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_016_web_intelligence_search.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_016_web_intelligence_search.py
 from typing import Any
 
 # Auto-split part 16: web_intelligence_search
@@ -311,21 +246,15 @@ async def web_intelligence_search(query: str, max_results: int = 5) -> dict[str,
         final.append({**base, **item, "score": round(min(1.0, float(base.get("score", 0)) + min(.45, len(item.get("text", "")) / 20000)), 4)})
     return {"query": query[:300], "sources": dedupe_sources(final), "raw": raw[:12000]}
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------- Document Intelligence ----------------
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_017__safe_member.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_017__safe_member.py
 # Auto-split part 17: _safe_member
 def _safe_member(name: str) -> bool:
     p = Path(name)
     return not p.is_absolute() and ".." not in p.parts and not name.startswith(("/", "\\"))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_018_extract_document.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_018_extract_document.py
 from typing import Any
 
 # Auto-split part 18: extract_document
@@ -377,10 +306,8 @@ def extract_document(data: bytes, filename: str, mime: str = "") -> dict[str, An
     digest = hashlib.sha256(data).hexdigest()
     return {"name": name, "size": len(data), "sha256": digest, "kind": kind, "text": text, "meta": meta}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_019_store_document.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_019_store_document.py
 from typing import Any
 
 # Auto-split part 19: store_document
@@ -395,10 +322,8 @@ def store_document(user_id: int, doc: dict[str, Any]) -> bool:
         logger.exception("v72 document store failed")
         return False
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_020_document_context.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_020_document_context.py
 from typing import Any
 
 # Auto-split part 20: document_context
@@ -408,11 +333,8 @@ def document_context(doc: dict[str, Any]) -> str:
             f"File: {doc['name']} | Type: {doc['kind']} | SHA256: {doc['sha256']}\n"
             + doc.get("text", "")[:MAX_DOCUMENT_CHARS])
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------- Market Intelligence ----------------
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_021_market_intelligence.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_021_market_intelligence.py
 from typing import Any
 
 # Auto-split part 21: market_intelligence
@@ -446,10 +368,8 @@ async def market_intelligence(symbol: str, timeframes: tuple[str, ...] = ("1h", 
     result["risk"] = "high" if abs(confluence) <= 1 else "medium"
     return result
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_022_market_summary.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_022_market_summary.py
 from typing import Any
 
 # Auto-split part 22: market_summary
@@ -463,11 +383,8 @@ def market_summary(data: dict[str, Any]) -> str:
     lines.append("⚠️ تحلیل آموزشی است و تضمین سود نیست.")
     return "\n".join(lines)
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------- QA / Ruff ----------------
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_023_run_ruff.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_023_run_ruff.py
 from pathlib import Path
 from typing import Any
 
@@ -480,10 +397,8 @@ def run_ruff(root: str | Path) -> dict[str, Any]:
         return {"available": False, "ok": False, "reason": type(exc).__name__}
     return {"available": True, "ok": proc.returncode == 0, "returncode": proc.returncode, "output": (proc.stdout + proc.stderr)[-12000:]}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_024_run_compile.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_024_run_compile.py
 from pathlib import Path
 from typing import Any
 
@@ -495,10 +410,8 @@ def run_compile(root: str | Path) -> dict[str, Any]:
     except Exception as exc:
         return {"ok": False, "output": type(exc).__name__}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_025_qa_snapshot.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_025_qa_snapshot.py
 from pathlib import Path
 from typing import Any
 
@@ -512,8 +425,50 @@ def qa_snapshot(root: str | Path) -> dict[str, Any]:
     except Exception: pass
     return {"ok": ok, "compile": compile_result, "ruff": ruff_result}
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v72_platform_parts/part_026_ux_text.py
+# Auto-split part 26: ux_text
+def ux_text(lang: str, key: str, default: str = "") -> str:
+    return TEXTS.get(lang, TEXTS["fa"]).get(key, default or TEXTS["fa"].get(key, key))
 
+# END MERGED LEGACY PART: 
+import asyncio
+import csv
+import hashlib
+import io
+import ipaddress
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import time
+import zipfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+from urllib.parse import urljoin, urlparse
+
+from bot.database_core import get_db_connection, _execute_write
+from bot.logger import logger
+
+MAX_DOCUMENT_BYTES = max(1, int(os.getenv("V72_MAX_DOCUMENT_BYTES", str(12 * 1024 * 1024))))
+MAX_DOCUMENT_CHARS = max(1000, int(os.getenv("V72_MAX_DOCUMENT_CHARS", "120000")))
+WEB_TIMEOUT = max(5, float(os.getenv("V72_WEB_TIMEOUT", "15")))
+
+
+# ---------------- Downloader 3.0 ----------------
+QUALITY_MODES = ("best", "1080p", "720p", "480p", "audio")
+
+
+# ---------------- AI Router 2.0 ----------------
+# ---------------- Web Intelligence ----------------
+
+# ---------------- Document Intelligence ----------------
+
+# ---------------- Market Intelligence ----------------
+# ---------------- QA / Ruff ----------------
 # ---------------- UX ----------------
 TEXTS = {
     "fa": {"download_title":"📥 دانلودر فایل حرفه‌ای","intro":"✨ لینک دانلودت رو همین‌جا بفرست!\n\n📸 Instagram • 🎵 TikTok • 📘 Facebook\n🌐 و کلی سایت دیگه + لینک مستقیم فایل\n\n🚀 سریع، ساده و حرفه‌ای","invalid":"❌ لینک معتبر http/https بفرستید.","checking":"🔎 در حال بررسی لینک و کیفیت‌های قابل دریافت…","downloading":"⏬ در حال دانلود…","ready":"✅ فایل آماده شد.","cancelled":"❌ دانلود لغو شد.","expired":"⚠️ این درخواست منقضی شده است. لینک را دوباره بفرستید.","prepared":"📥 لینک آماده است","choose":"فرمت/کیفیت را انتخاب کنید:","sending":"در حال ارسال…","probe_failed":"⚠️ بررسی لینک ناموفق بود. دوباره امتحان کنید."},
@@ -522,10 +477,29 @@ TEXTS = {
 }
 
 
-
-# --- INLINED MODULAR PART: bot/services/v72_platform_parts/part_026_ux_text.py ---
-# Auto-split part 26: ux_text
-def ux_text(lang: str, key: str, default: str = "") -> str:
-    return TEXTS.get(lang, TEXTS["fa"]).get(key, default or TEXTS["fa"].get(key, key))
-
-# --- END INLINED MODULAR PART ---
+v72_platform_parts/part_001_init_v72_tables.py
+v72_platform_parts/part_002_normalize_download_mode.py
+v72_platform_parts/part_003_ytdlp_format.py
+v72_platform_parts/part_004_format_options.py
+v72_platform_parts/part_005_record_download.py
+v72_platform_parts/part_006_update_download.py
+v72_platform_parts/part_007_progress_percent.py
+v72_platform_parts/part_008_RouteCandidate.py
+v72_platform_parts/part_009_classify_ai_complexity.py
+v72_platform_parts/part_010_route_candidates.py
+v72_platform_parts/part_011_safe_web_url.py
+v72_platform_parts/part_012__assert_public_host.py
+v72_platform_parts/part_013_dedupe_sources.py
+v72_platform_parts/part_014_fetch_web_page.py
+v72_platform_parts/part_015_verify_claims_against_sources.py
+v72_platform_parts/part_016_web_intelligence_search.py
+v72_platform_parts/part_017__safe_member.py
+v72_platform_parts/part_018_extract_document.py
+v72_platform_parts/part_019_store_document.py
+v72_platform_parts/part_020_document_context.py
+v72_platform_parts/part_021_market_intelligence.py
+v72_platform_parts/part_022_market_summary.py
+v72_platform_parts/part_023_run_ruff.py
+v72_platform_parts/part_024_run_compile.py
+v72_platform_parts/part_025_qa_snapshot.py
+v72_platform_parts/part_026_ux_text.py

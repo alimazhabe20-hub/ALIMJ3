@@ -4,7 +4,6 @@ Specialists are intentionally lightweight and deterministic. They reuse the
 existing tool registry, so all V3-V22 timeout/cache/concurrency/observability
 controls remain in force.
 """
-from __future__ import annotations
 
 import asyncio
 import re

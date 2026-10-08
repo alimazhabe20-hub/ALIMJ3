@@ -3,29 +3,8 @@
 Low-level connection, transaction and backup primitives are isolated in
 ``database_core.py``; feature repositories remain available from this module.
 """
-from bot.utils import load_modular_part
-import sqlite3
-import os
-import time
-from datetime import datetime
-from typing import Any
-from pathlib import Path
-from bot.logger import logger
-from bot.config import config
 
-from bot.database_migrations import ensure_schema_version, schema_status, SCHEMA_VERSION
-
-from bot.database_core import (
-    BACKUP_KEEP, DB_BUSY_RETRIES, DB_BUSY_BACKOFF,
-    _ensure_parent, get_db_connection, run_db_transaction, _execute_write,
-    _user_count, restore_from_backup_if_needed, backup_db,
-)
-
-DB_PATH = config.DB_PATH
-BACKUP_DIR = Path(config.BACKUP_DIR)
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_001_init_db.py ---
+# BEGIN MERGED LEGACY PART: database_parts/part_001_init_db.py
 # Auto-split part 1: init_db
 def init_db() -> None:
     logger.info(f"Initializing database at {DB_PATH} ...")
@@ -139,10 +118,8 @@ def init_db() -> None:
     n = _user_count(DB_PATH)
     logger.info(f"Database ready — {n} users")
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_002_get_schema_status.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_002_get_schema_status.py
 # Auto-split part 2: get_schema_status
 def get_schema_status() -> dict[str, object]:
     """Return safe database schema metadata for diagnostics and tests."""
@@ -152,10 +129,8 @@ def get_schema_status() -> dict[str, object]:
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_003_get_user.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_003_get_user.py
 from typing import Any
 
 # Auto-split part 3: get_user
@@ -167,10 +142,8 @@ def get_user(user_id: int) -> tuple[Any, ...] | None:
     conn.close()
     return result
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_004_save_user.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_004_save_user.py
 # Auto-split part 4: save_user
 def save_user(user_id: int, first_name: str | None, city: str = "قم", country: str = "Iran", language: str = "fa") -> None:
     """ثبت/به‌روزرسانی کاربر با retry محدود در صورت lock دیتابیس."""
@@ -185,10 +158,8 @@ def save_user(user_id: int, first_name: str | None, city: str = "قم", country:
         (user_id, first_name, city, country, language),
     )
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_005_update_user_field.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_005_update_user_field.py
 from typing import Any
 
 # Auto-split part 5: update_user_field
@@ -206,10 +177,8 @@ def update_user_field(user_id: int, field: str, value: Any) -> None:
         (value, user_id),
     )
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_006_get_all_users.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_006_get_all_users.py
 from typing import Any
 
 # Auto-split part 6: get_all_users
@@ -221,10 +190,8 @@ def get_all_users() -> list[tuple[Any, ...]]:
     conn.close()
     return result
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_007_get_active_users_today.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_007_get_active_users_today.py
 # Auto-split part 7: get_active_users_today
 def get_active_users_today() -> int:
     conn = get_db_connection()
@@ -234,10 +201,8 @@ def get_active_users_today() -> int:
     conn.close()
     return result
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_008_update_stats.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_008_update_stats.py
 # Auto-split part 8: update_stats
 def update_stats() -> None:
     conn = get_db_connection()
@@ -250,49 +215,29 @@ def update_stats() -> None:
     conn.close()
     logger.info(f"Stats updated: total={total}, active={active}")
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_009_get_user_city.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_009_get_user_city.py
 # Auto-split part 9: get_user_city
 def get_user_city(user_id: int) -> str:
     user = get_user(user_id)
     return user[2] if user else "قم"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_010_get_user_country.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_010_get_user_country.py
 # Auto-split part 10: get_user_country
 def get_user_country(user_id: int) -> str:
     user = get_user(user_id)
     return user[3] if user else "Iran"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_011_get_user_language.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_011_get_user_language.py
 # Auto-split part 11: get_user_language
 def get_user_language(user_id: int) -> str:
     user = get_user(user_id)
     return user[4] if user else "fa"
 
-# --- END INLINED MODULAR PART ---
-
-# ── تنظیمات اذان ──
-# ستون‌ها: notification_enabled, notify_fajr, notify_dhuhr, notify_asr, notify_maghrib, notify_isha
-
-AZAN_FIELDS = {
-    "fajr": ("notify_fajr", "اذان صبح"),
-    "dhuhr": ("notify_dhuhr", "اذان ظهر"),
-    "asr": ("notify_asr", "اذان عصر"),
-    "maghrib": ("notify_maghrib", "اذان مغرب"),
-    "isha": ("notify_isha", "اذان عشاء"),
-}
-
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_012_get_azan_settings.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_012_get_azan_settings.py
 # Auto-split part 12: get_azan_settings
 def get_azan_settings(user_id):
     """
@@ -335,19 +280,15 @@ def get_azan_settings(user_id):
         "isha": bool(row[5]),
     }
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_013_set_azan_master.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_013_set_azan_master.py
 # Auto-split part 13: set_azan_master
 def set_azan_master(user_id, enabled: bool):
     """روشن/خاموش کردن کل اعلان اذان"""
     update_user_field(user_id, "notification_enabled", 1 if enabled else 0)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_014_toggle_azan_prayer.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_014_toggle_azan_prayer.py
 # Auto-split part 14: toggle_azan_prayer
 def toggle_azan_prayer(user_id, prayer_key: str) -> bool:
     """
@@ -363,10 +304,8 @@ def toggle_azan_prayer(user_id, prayer_key: str) -> bool:
     update_user_field(user_id, field, 1 if new_val else 0)
     return new_val
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_015_get_users_for_azan.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_015_get_users_for_azan.py
 # Auto-split part 15: get_users_for_azan
 def get_users_for_azan():
     """
@@ -396,10 +335,8 @@ def get_users_for_azan():
         conn.close()
     return rows
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_016_get_last_main_msg_id.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_016_get_last_main_msg_id.py
 # Auto-split part 16: get_last_main_msg_id
 def get_last_main_msg_id(user_id):
     conn = get_db_connection()
@@ -413,10 +350,8 @@ def get_last_main_msg_id(user_id):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_017_set_last_main_msg_id.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_017_set_last_main_msg_id.py
 # Auto-split part 17: set_last_main_msg_id
 def set_last_main_msg_id(user_id, message_id):
     try:
@@ -424,12 +359,8 @@ def set_last_main_msg_id(user_id, message_id):
     except Exception as e:
         logger.error(f"set_last_main_msg_id failed: {e}")
 
-# --- END INLINED MODULAR PART ---
-
-# ── یادداشت و یادآوری و آمار شخصی ──
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_018_init_extra_tables.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_018_init_extra_tables.py
 # Auto-split part 18: init_extra_tables
 def init_extra_tables():
     conn = get_db_connection()
@@ -583,10 +514,8 @@ def init_extra_tables():
     conn.commit()
     conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_019_get_sent_joke_hashes.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_019_get_sent_joke_hashes.py
 # Auto-split part 19: get_sent_joke_hashes
 def get_sent_joke_hashes(user_id, limit=5000):
     conn = get_db_connection()
@@ -602,10 +531,8 @@ def get_sent_joke_hashes(user_id, limit=5000):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_020_mark_joke_sent.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_020_mark_joke_sent.py
 # Auto-split part 20: mark_joke_sent
 def mark_joke_sent(user_id, joke_hash):
     conn = get_db_connection()
@@ -621,10 +548,8 @@ def mark_joke_sent(user_id, joke_hash):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_021_reset_sent_jokes.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_021_reset_sent_jokes.py
 # Auto-split part 21: reset_sent_jokes
 def reset_sent_jokes(user_id):
     """اگر همه جوک‌ها دیده شد، تاریخچه را پاک کن تا از اول شروع شود"""
@@ -638,10 +563,8 @@ def reset_sent_jokes(user_id):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_022_add_note.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_022_add_note.py
 # Auto-split part 22: add_note
 def add_note(user_id, content):
     conn = get_db_connection()
@@ -650,10 +573,8 @@ def add_note(user_id, content):
     conn.commit()
     conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_023_get_notes.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_023_get_notes.py
 # Auto-split part 23: get_notes
 def get_notes(user_id, limit=10):
     conn = get_db_connection()
@@ -663,10 +584,8 @@ def get_notes(user_id, limit=10):
     conn.close()
     return rows
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_024_delete_note.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_024_delete_note.py
 # Auto-split part 24: delete_note
 def delete_note(user_id, note_id):
     conn = get_db_connection()
@@ -675,10 +594,8 @@ def delete_note(user_id, note_id):
     conn.commit()
     conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_025_add_reminder.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_025_add_reminder.py
 # Auto-split part 25: add_reminder
 def add_reminder(user_id, text, remind_at, repeat_type="once", repeat_every=0):
     """
@@ -697,10 +614,8 @@ def add_reminder(user_id, text, remind_at, repeat_type="once", repeat_every=0):
     conn.close()
     return rid
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_026_get_pending_reminders.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_026_get_pending_reminders.py
 # Auto-split part 26: get_pending_reminders
 def get_pending_reminders(before_time=None):
     conn = get_db_connection()
@@ -722,10 +637,8 @@ def get_pending_reminders(before_time=None):
     conn.close()
     return rows
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_027_mark_reminder_done.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_027_mark_reminder_done.py
 # Auto-split part 27: mark_reminder_done
 def mark_reminder_done(rid):
     conn = get_db_connection()
@@ -734,10 +647,8 @@ def mark_reminder_done(rid):
     conn.commit()
     conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_028_reschedule_reminder.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_028_reschedule_reminder.py
 # Auto-split part 28: reschedule_reminder
 def reschedule_reminder(rid, next_at):
     conn = get_db_connection()
@@ -749,10 +660,8 @@ def reschedule_reminder(rid, next_at):
     conn.commit()
     conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_029_list_user_reminders.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_029_list_user_reminders.py
 # Auto-split part 29: list_user_reminders
 def list_user_reminders(user_id, limit=20):
     conn = get_db_connection()
@@ -767,10 +676,8 @@ def list_user_reminders(user_id, limit=20):
     conn.close()
     return rows
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_030_cancel_reminder.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_030_cancel_reminder.py
 # Auto-split part 30: cancel_reminder
 def cancel_reminder(user_id, rid):
     conn = get_db_connection()
@@ -784,12 +691,8 @@ def cancel_reminder(user_id, rid):
     conn.close()
     return n > 0
 
-# --- END INLINED MODULAR PART ---
-
-# ── حافظه بلندمدت AI ────────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_031_set_ai_memory.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_031_set_ai_memory.py
 # Auto-split part 31: set_ai_memory
 def set_ai_memory(user_id, key, value):
     key = (key or "note").strip()[:80]
@@ -806,10 +709,8 @@ def set_ai_memory(user_id, key, value):
     conn.commit()
     conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_032_get_ai_memory.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_032_get_ai_memory.py
 # Auto-split part 32: get_ai_memory
 def get_ai_memory(user_id, limit=40, query=None):
     """Return memory, optionally ranked by lightweight lexical relevance.
@@ -852,10 +753,8 @@ def get_ai_memory(user_id, limit=40, query=None):
     scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
     return [(key, value) for score, _updated, key, value in scored[:limit]]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_033_delete_ai_memory.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_033_delete_ai_memory.py
 # Auto-split part 33: delete_ai_memory
 def delete_ai_memory(user_id, key=None):
     conn = get_db_connection()
@@ -867,10 +766,8 @@ def delete_ai_memory(user_id, key=None):
     conn.commit()
     conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_034_get_ai_history_summary.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_034_get_ai_history_summary.py
 # Auto-split part 34: get_ai_history_summary
 def get_ai_history_summary(user_id):
     conn = get_db_connection()
@@ -884,10 +781,8 @@ def get_ai_history_summary(user_id):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_035_set_ai_history_summary.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_035_set_ai_history_summary.py
 # Auto-split part 35: set_ai_history_summary
 def set_ai_history_summary(user_id, summary):
     conn = get_db_connection()
@@ -900,10 +795,8 @@ def set_ai_history_summary(user_id, summary):
     conn.commit()
     conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_036_clear_ai_history_summary.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_036_clear_ai_history_summary.py
 # Auto-split part 36: clear_ai_history_summary
 def clear_ai_history_summary(user_id):
     conn = get_db_connection()
@@ -914,10 +807,8 @@ def clear_ai_history_summary(user_id):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_037_record_agent_outcome.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_037_record_agent_outcome.py
 # Auto-split part 37: record_agent_outcome
 def record_agent_outcome(user_id, agent, tool, success, error=""):
     """Record bounded agent/tool feedback for future routing decisions."""
@@ -944,10 +835,8 @@ def record_agent_outcome(user_id, agent, tool, success, error=""):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_038_get_agent_tool_reliability.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_038_get_agent_tool_reliability.py
 # Auto-split part 38: get_agent_tool_reliability
 def get_agent_tool_reliability(user_id, agent, tool):
     """Return (score, attempts, failures) with a neutral prior for unknown tools."""
@@ -965,10 +854,8 @@ def get_agent_tool_reliability(user_id, agent, tool):
     attempts = success + failures
     return ((success / attempts) if attempts else 0.5), attempts, failures
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_039_get_agent_learning.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_039_get_agent_learning.py
 # Auto-split part 39: get_agent_learning
 def get_agent_learning(user_id, limit=50):
     """Return recent agent learning rows for diagnostics/UI."""
@@ -983,10 +870,8 @@ def get_agent_learning(user_id, limit=50):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_040_track_usage.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_040_track_usage.py
 # Auto-split part 40: track_usage
 def track_usage(user_id, feature):
     conn = get_db_connection()
@@ -998,10 +883,8 @@ def track_usage(user_id, feature):
     conn.commit()
     conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_041_get_user_usage.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_041_get_user_usage.py
 # Auto-split part 41: get_user_usage
 def get_user_usage(user_id):
     conn = get_db_connection()
@@ -1011,10 +894,8 @@ def get_user_usage(user_id):
     conn.close()
     return rows
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_042_set_birth_date.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_042_set_birth_date.py
 # Auto-split part 42: set_birth_date
 def set_birth_date(user_id, birth_date):
     conn = get_db_connection()
@@ -1023,10 +904,8 @@ def set_birth_date(user_id, birth_date):
     conn.commit()
     conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_043_get_birth_date.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_043_get_birth_date.py
 # Auto-split part 43: get_birth_date
 def get_birth_date(user_id):
     conn = get_db_connection()
@@ -1040,12 +919,8 @@ def get_birth_date(user_id):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-# ── Smart UX preferences ───────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_044_get_user_preferences.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_044_get_user_preferences.py
 # Auto-split part 44: get_user_preferences
 def get_user_preferences(user_id):
     """Return lightweight UX preferences without exposing raw conversation data."""
@@ -1063,10 +938,8 @@ def get_user_preferences(user_id):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_045_set_user_preference.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_045_set_user_preference.py
 # Auto-split part 45: set_user_preference
 def set_user_preference(user_id, key, value):
     """Safely update one supported UX preference."""
@@ -1088,10 +961,8 @@ def set_user_preference(user_id, key, value):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_046_clear_user_preferences.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_046_clear_user_preferences.py
 # Auto-split part 46: clear_user_preferences
 def clear_user_preferences(user_id):
     conn = get_db_connection()
@@ -1101,10 +972,8 @@ def clear_user_preferences(user_id):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_047_get_top_user_features.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_047_get_top_user_features.py
 # Auto-split part 47: get_top_user_features
 def get_top_user_features(user_id, limit=3):
     """Return most-used features, preferring recent usage when counts tie."""
@@ -1120,12 +989,8 @@ def get_top_user_features(user_id, limit=3):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-# ── Proactive automation preferences ───────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_048_get_automation_preferences.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_048_get_automation_preferences.py
 # Auto-split part 48: get_automation_preferences
 def get_automation_preferences(user_id):
     conn = get_db_connection()
@@ -1140,10 +1005,8 @@ def get_automation_preferences(user_id):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_049_set_daily_digest.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_049_set_daily_digest.py
 # Auto-split part 49: set_daily_digest
 def set_daily_digest(user_id, enabled):
     enabled = 1 if enabled else 0
@@ -1159,10 +1022,8 @@ def set_daily_digest(user_id, enabled):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_050_get_users_for_daily_digest.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_050_get_users_for_daily_digest.py
 # Auto-split part 50: get_users_for_daily_digest
 def get_users_for_daily_digest(date_key, limit=5000):
     conn = get_db_connection()
@@ -1175,10 +1036,8 @@ def get_users_for_daily_digest(date_key, limit=5000):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_051_mark_daily_digest_sent.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_051_mark_daily_digest_sent.py
 # Auto-split part 51: mark_daily_digest_sent
 def mark_daily_digest_sent(user_id, date_key):
     conn = get_db_connection()
@@ -1193,10 +1052,8 @@ def mark_daily_digest_sent(user_id, date_key):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_052_get_upcoming_user_reminders.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_052_get_upcoming_user_reminders.py
 # Auto-split part 52: get_upcoming_user_reminders
 def get_upcoming_user_reminders(user_id, now_iso, limit=5):
     conn = get_db_connection()
@@ -1210,12 +1067,8 @@ def get_upcoming_user_reminders(user_id, now_iso, limit=5):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-# ── AI provider preference (per user) ──────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_053_get_ai_preference.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_053_get_ai_preference.py
 # Auto-split part 53: get_ai_preference
 def get_ai_preference(user_id):
     """Returns (provider, model) or None. model='*' means all models of provider."""
@@ -1235,10 +1088,8 @@ def get_ai_preference(user_id):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_054_set_ai_preference.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_054_set_ai_preference.py
 # Auto-split part 54: set_ai_preference
 def set_ai_preference(user_id, provider, model="*"):
     conn = get_db_connection()
@@ -1256,10 +1107,8 @@ def set_ai_preference(user_id, provider, model="*"):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_055_clear_ai_preference.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_055_clear_ai_preference.py
 # Auto-split part 55: clear_ai_preference
 def clear_ai_preference(user_id):
     conn = get_db_connection()
@@ -1270,12 +1119,8 @@ def clear_ai_preference(user_id):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-# ── تقویم اقتصادی ───────────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_056_get_economic_calendar_preferences.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_056_get_economic_calendar_preferences.py
 # Auto-split part 56: get_economic_calendar_preferences
 def get_economic_calendar_preferences(user_id):
     conn = get_db_connection()
@@ -1296,10 +1141,8 @@ def get_economic_calendar_preferences(user_id):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_057_set_economic_calendar_preferences.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_057_set_economic_calendar_preferences.py
 # Auto-split part 57: set_economic_calendar_preferences
 def set_economic_calendar_preferences(user_id, *, alerts=None, lead_minutes=None, timezone=None, currencies=None, impact=None):
     current = get_economic_calendar_preferences(user_id)
@@ -1328,10 +1171,8 @@ def set_economic_calendar_preferences(user_id, *, alerts=None, lead_minutes=None
         conn.close()
     return current
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_058_upsert_economic_calendar_events.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_058_upsert_economic_calendar_events.py
 # Auto-split part 58: upsert_economic_calendar_events
 def upsert_economic_calendar_events(events):
     """ذخیره/به‌روزرسانی رویدادها بدون حذف تاریخچه.
@@ -1379,10 +1220,8 @@ def upsert_economic_calendar_events(events):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_059_get_economic_calendar_event.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_059_get_economic_calendar_event.py
 # Auto-split part 59: get_economic_calendar_event
 def get_economic_calendar_event(event_id):
     conn = get_db_connection()
@@ -1394,10 +1233,8 @@ def get_economic_calendar_event(event_id):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_060_get_economic_calendar_events.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_060_get_economic_calendar_events.py
 # Auto-split part 60: get_economic_calendar_events
 def get_economic_calendar_events(start_utc=None, end_utc=None):
     """بازیابی تاریخچه تقویم؛ بدون حذف رویدادهای گذشته."""
@@ -1420,10 +1257,8 @@ def get_economic_calendar_events(start_utc=None, end_utc=None):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_061_get_economic_calendar_alert_users.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_061_get_economic_calendar_alert_users.py
 # Auto-split part 61: get_economic_calendar_alert_users
 def get_economic_calendar_alert_users():
     conn = get_db_connection()
@@ -1436,10 +1271,8 @@ def get_economic_calendar_alert_users():
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_062_economic_calendar_alert_was_sent.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_062_economic_calendar_alert_was_sent.py
 # Auto-split part 62: economic_calendar_alert_was_sent
 def economic_calendar_alert_was_sent(user_id, event_id):
     conn = get_db_connection()
@@ -1451,10 +1284,8 @@ def economic_calendar_alert_was_sent(user_id, event_id):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_063_mark_economic_calendar_alert_sent.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_063_mark_economic_calendar_alert_sent.py
 # Auto-split part 63: mark_economic_calendar_alert_sent
 def mark_economic_calendar_alert_sent(user_id, event_id):
     conn = get_db_connection()
@@ -1467,10 +1298,8 @@ def mark_economic_calendar_alert_sent(user_id, event_id):
     finally:
         conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_064_set_reminder_active.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_064_set_reminder_active.py
 # Auto-split part 64: set_reminder_active
 def set_reminder_active(user_id, rid, active):
     conn = get_db_connection()
@@ -1484,10 +1313,8 @@ def set_reminder_active(user_id, rid, active):
     conn.close()
     return ok
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_065_update_reminder.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_065_update_reminder.py
 # Auto-split part 65: update_reminder
 def update_reminder(user_id, rid, text=None, remind_at=None, repeat_type=None, repeat_every=None):
     conn = get_db_connection()
@@ -1508,10 +1335,8 @@ def update_reminder(user_id, rid, text=None, remind_at=None, repeat_type=None, r
     c.execute(f"UPDATE reminders SET {', '.join(fields)} WHERE id=? AND user_id=?", values)
     conn.commit(); ok = c.rowcount > 0; conn.close(); return ok
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/database_parts/part_066_delete_reminder.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: database_parts/part_066_delete_reminder.py
 # Auto-split part 66: delete_reminder
 def delete_reminder(user_id, rid):
     conn = get_db_connection()
@@ -1519,4 +1344,114 @@ def delete_reminder(user_id, rid):
     c.execute("DELETE FROM reminders WHERE id=? AND user_id=?", (rid, user_id))
     conn.commit(); ok = c.rowcount > 0; conn.close(); return ok
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import sqlite3
+import os
+import time
+from datetime import datetime
+from typing import Any
+from pathlib import Path
+from bot.logger import logger
+from bot.config import config
+
+from bot.database_migrations import ensure_schema_version, schema_status, SCHEMA_VERSION
+
+from bot.database_core import (
+    BACKUP_KEEP, DB_BUSY_RETRIES, DB_BUSY_BACKOFF,
+    _ensure_parent, get_db_connection, run_db_transaction, _execute_write,
+    _user_count, restore_from_backup_if_needed, backup_db,
+)
+
+DB_PATH = config.DB_PATH
+BACKUP_DIR = Path(config.BACKUP_DIR)
+
+# ── تنظیمات اذان ──
+# ستون‌ها: notification_enabled, notify_fajr, notify_dhuhr, notify_asr, notify_maghrib, notify_isha
+
+AZAN_FIELDS = {
+    "fajr": ("notify_fajr", "اذان صبح"),
+    "dhuhr": ("notify_dhuhr", "اذان ظهر"),
+    "asr": ("notify_asr", "اذان عصر"),
+    "maghrib": ("notify_maghrib", "اذان مغرب"),
+    "isha": ("notify_isha", "اذان عشاء"),
+}
+
+
+# ── یادداشت و یادآوری و آمار شخصی ──
+
+# ── حافظه بلندمدت AI ────────────────────────────────────────────────────────
+
+# ── Smart UX preferences ───────────────────────────────────────────────────
+
+# ── Proactive automation preferences ───────────────────────────────────────
+
+# ── AI provider preference (per user) ──────────────────────────────────────
+
+# ── تقویم اقتصادی ───────────────────────────────────────────────────────────
+
+database_parts/part_001_init_db.py
+database_parts/part_002_get_schema_status.py
+database_parts/part_003_get_user.py
+database_parts/part_004_save_user.py
+database_parts/part_005_update_user_field.py
+database_parts/part_006_get_all_users.py
+database_parts/part_007_get_active_users_today.py
+database_parts/part_008_update_stats.py
+database_parts/part_009_get_user_city.py
+database_parts/part_010_get_user_country.py
+database_parts/part_011_get_user_language.py
+database_parts/part_012_get_azan_settings.py
+database_parts/part_013_set_azan_master.py
+database_parts/part_014_toggle_azan_prayer.py
+database_parts/part_015_get_users_for_azan.py
+database_parts/part_016_get_last_main_msg_id.py
+database_parts/part_017_set_last_main_msg_id.py
+database_parts/part_018_init_extra_tables.py
+database_parts/part_019_get_sent_joke_hashes.py
+database_parts/part_020_mark_joke_sent.py
+database_parts/part_021_reset_sent_jokes.py
+database_parts/part_022_add_note.py
+database_parts/part_023_get_notes.py
+database_parts/part_024_delete_note.py
+database_parts/part_025_add_reminder.py
+database_parts/part_026_get_pending_reminders.py
+database_parts/part_027_mark_reminder_done.py
+database_parts/part_028_reschedule_reminder.py
+database_parts/part_029_list_user_reminders.py
+database_parts/part_030_cancel_reminder.py
+database_parts/part_031_set_ai_memory.py
+database_parts/part_032_get_ai_memory.py
+database_parts/part_033_delete_ai_memory.py
+database_parts/part_034_get_ai_history_summary.py
+database_parts/part_035_set_ai_history_summary.py
+database_parts/part_036_clear_ai_history_summary.py
+database_parts/part_037_record_agent_outcome.py
+database_parts/part_038_get_agent_tool_reliability.py
+database_parts/part_039_get_agent_learning.py
+database_parts/part_040_track_usage.py
+database_parts/part_041_get_user_usage.py
+database_parts/part_042_set_birth_date.py
+database_parts/part_043_get_birth_date.py
+database_parts/part_044_get_user_preferences.py
+database_parts/part_045_set_user_preference.py
+database_parts/part_046_clear_user_preferences.py
+database_parts/part_047_get_top_user_features.py
+database_parts/part_048_get_automation_preferences.py
+database_parts/part_049_set_daily_digest.py
+database_parts/part_050_get_users_for_daily_digest.py
+database_parts/part_051_mark_daily_digest_sent.py
+database_parts/part_052_get_upcoming_user_reminders.py
+database_parts/part_053_get_ai_preference.py
+database_parts/part_054_set_ai_preference.py
+database_parts/part_055_clear_ai_preference.py
+database_parts/part_056_get_economic_calendar_preferences.py
+database_parts/part_057_set_economic_calendar_preferences.py
+database_parts/part_058_upsert_economic_calendar_events.py
+database_parts/part_059_get_economic_calendar_event.py
+database_parts/part_060_get_economic_calendar_events.py
+database_parts/part_061_get_economic_calendar_alert_users.py
+database_parts/part_062_economic_calendar_alert_was_sent.py
+database_parts/part_063_mark_economic_calendar_alert_sent.py
+database_parts/part_064_set_reminder_active.py
+database_parts/part_065_update_reminder.py
+database_parts/part_066_delete_reminder.py

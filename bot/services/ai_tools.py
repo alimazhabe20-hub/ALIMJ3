@@ -4,15 +4,14 @@ IMPORTANT: Keep this file small and stable. New functionality belongs in the
 secondary ``ai_tools_parts/`` modules. The complete legacy implementation is kept
 unchanged in ``ai_tools_parts/part_999_core_legacy.py`` for compatibility.
 """
-from bot.utils import load_modular_part
 
-
-# --- INLINED MODULAR PART: bot/services/ai_tools_parts/part_999_core_legacy.py ---
+# BEGIN MERGED LEGACY PART: ai_tools_parts/part_999_core_legacy.py
 """Built-in AI tool handlers and public tool API.
 
 Generic registry/execution machinery lives in tool_runtime.py. This facade
 re-exports the historical public functions so existing imports are stable.
 """
+
 import asyncio
 import json
 from typing import Any, List
@@ -259,7 +258,7 @@ async def _daily_verse_hadith(user_id: int = 0) -> str:
 
 
 def _religious_countdown() -> str:
-    from bot.features.religious.features_religious_events import religious_countdown
+    from bot.features.religious.religious_events import religious_countdown
 
     return religious_countdown()
 
@@ -1229,8 +1228,7 @@ try:
 except Exception:
     pass
 
-# --- END INLINED MODULAR PART ---
-
+# END MERGED LEGACY PART: 
 # Keyless Public API Hub bridge. Kept outside the legacy implementation.
 try:
     from bot.services.api_hub import api_hub_ai as _api_hub_ai  # noqa: F401,E402
@@ -1268,3 +1266,4 @@ except Exception as _cap_exc:  # never break AI import path
         _lg.warning("capability autoload failed: %s", _cap_exc)
     except Exception:
         pass
+ai_tools_parts/part_999_core_legacy.py

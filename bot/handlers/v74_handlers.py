@@ -1,5 +1,4 @@
 """V74 operator-safe diagnostics command."""
-from __future__ import annotations
 
 from telegram import Update
 from telegram.ext import ContextTypes

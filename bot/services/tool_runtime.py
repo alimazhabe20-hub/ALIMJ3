@@ -3,34 +3,8 @@
 Built-in handlers remain in ai_tools.py; this module owns the generic runtime
 so adding tools does not require growing the execution engine.
 """
-from bot.utils import load_modular_part
-import inspect
-import json
-import re
-import asyncio
-import os
-import time
-from typing import Any, Callable, Dict, List, Optional
-from bot.logger import logger
-from bot.utils.observability import record as record_metric
 
-_REGISTRY: Dict[str, dict] = {}
-_TOOL_INFLIGHT: Dict[str, asyncio.Task] = {}
-_TOOL_INFLIGHT_LOCK = asyncio.Lock()
-_TOOL_SEMAPHORE = asyncio.Semaphore(max(2, int(os.getenv("AI_TOOL_CONCURRENCY", "8"))))
-_TOOL_CACHE: Dict[tuple, tuple[float, str]] = {}
-_TOOL_CACHE_TTL = max(5, int(os.getenv("AI_TOOL_CACHE_TTL", "20")))
-_TOOL_TIMEOUT = max(5.0, float(os.getenv("AI_TOOL_TIMEOUT", "25")))
-_TOOL_CACHE_MAX = max(64, int(os.getenv("AI_TOOL_CACHE_MAX", "1024")))
-_TOOL_CACHEABLE = {
-    "get_weather", "get_weather_forecast", "get_air_quality",
-    "get_market_prices", "get_top_crypto", "get_user_city", "get_economic_calendar",
-    "analyze_gold", "get_current_datetime", "get_crypto_price",
-}
-
-
-
-# --- INLINED MODULAR PART: bot/services/tool_runtime_parts/part_001_register_tool.py ---
+# BEGIN MERGED LEGACY PART: tool_runtime_parts/part_001_register_tool.py
 from typing import Callable
 from typing import List
 from typing import Optional
@@ -61,19 +35,15 @@ def register_tool(
     }
     logger.debug("AI tool registered: %s", name)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/tool_runtime_parts/part_002_get_registered_tool_names.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: tool_runtime_parts/part_002_get_registered_tool_names.py
 # Auto-split part 2: get_registered_tool_names
 def get_registered_tool_names() -> set[str]:
     """Return a snapshot of registered tool names for workflow validation."""
     return set(_REGISTRY)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/tool_runtime_parts/part_003_get_tool_definitions.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: tool_runtime_parts/part_003_get_tool_definitions.py
 from typing import List
 
 # Auto-split part 3: get_tool_definitions
@@ -93,10 +63,8 @@ def get_tool_definitions() -> List[dict]:
         )
     return out
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/tool_runtime_parts/part_004_parse_tool_arguments.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: tool_runtime_parts/part_004_parse_tool_arguments.py
 from typing import Any
 
 # Auto-split part 4: parse_tool_arguments
@@ -110,10 +78,8 @@ def parse_tool_arguments(raw: Any) -> dict:
             return {}
     return {}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/tool_runtime_parts/part_005_execute_tool.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: tool_runtime_parts/part_005_execute_tool.py
 # Auto-split part 5: execute_tool
 async def execute_tool(name: str, arguments: dict, *, user_id: int = 0, source: str = "system", approved: bool = False) -> str:
     entry = _REGISTRY.get(name)
@@ -224,10 +190,8 @@ async def execute_tool(name: str, arguments: dict, *, user_id: int = 0, source: 
                 if _TOOL_INFLIGHT.get(fingerprint) is task:
                     _TOOL_INFLIGHT.pop(fingerprint, None)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/tool_runtime_parts/part_006_select_capability_tool.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: tool_runtime_parts/part_006_select_capability_tool.py
 from typing import Optional
 
 # Auto-split part 6: select_capability_tool
@@ -341,10 +305,8 @@ def select_capability_tool(prompt: str) -> Optional[str]:
         return None
     return best[3]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/tool_runtime_parts/part_007__normalize_capability_text.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: tool_runtime_parts/part_007__normalize_capability_text.py
 # Auto-split part 7: _normalize_capability_text
 def _normalize_capability_text(text: str) -> str:
     """نرمال‌سازی سبک برای Router بدون تغییر متن اصلی ارسالی به مدل."""
@@ -354,10 +316,8 @@ def _normalize_capability_text(text: str) -> str:
     text = re.sub(r"\s+", " ", text)
     return text
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/tool_runtime_parts/part_008_gather_context_for_prompt.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: tool_runtime_parts/part_008_gather_context_for_prompt.py
 # Auto-split part 8: gather_context_for_prompt
 async def gather_context_for_prompt(user_id: int, prompt: str) -> str:
     """
@@ -403,26 +363,46 @@ async def gather_context_for_prompt(user_id: int, prompt: str) -> str:
         + "\n---\n".join(chunks[:6])
     )
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/tool_runtime_parts/part_009_list_registered_tools.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: tool_runtime_parts/part_009_list_registered_tools.py
 from typing import List
 
 # Auto-split part 9: list_registered_tools
 def list_registered_tools() -> List[str]:
     return sorted(_REGISTRY.keys())
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/tool_runtime_parts/part_010_clear_tool_cache.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: tool_runtime_parts/part_010_clear_tool_cache.py
 # Auto-split part 10: clear_tool_cache
 def clear_tool_cache() -> None:
     """Clear read-through tool cache without touching tool registry/state."""
     _TOOL_CACHE.clear()
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import inspect
+import json
+import re
+import asyncio
+import os
+import time
+from typing import Any, Callable, Dict, List, Optional
+from bot.logger import logger
+from bot.utils.observability import record as record_metric
+
+_REGISTRY: Dict[str, dict] = {}
+_TOOL_INFLIGHT: Dict[str, asyncio.Task] = {}
+_TOOL_INFLIGHT_LOCK = asyncio.Lock()
+_TOOL_SEMAPHORE = asyncio.Semaphore(max(2, int(os.getenv("AI_TOOL_CONCURRENCY", "8"))))
+_TOOL_CACHE: Dict[tuple, tuple[float, str]] = {}
+_TOOL_CACHE_TTL = max(5, int(os.getenv("AI_TOOL_CACHE_TTL", "20")))
+_TOOL_TIMEOUT = max(5.0, float(os.getenv("AI_TOOL_TIMEOUT", "25")))
+_TOOL_CACHE_MAX = max(64, int(os.getenv("AI_TOOL_CACHE_MAX", "1024")))
+_TOOL_CACHEABLE = {
+    "get_weather", "get_weather_forecast", "get_air_quality",
+    "get_market_prices", "get_top_crypto", "get_user_city", "get_economic_calendar",
+    "analyze_gold", "get_current_datetime", "get_crypto_price",
+}
+
 
 # ── Auto-connect: ensure full capability set is visible to the model ─────────
 def _ensure_caps() -> None:
@@ -455,3 +435,13 @@ async def execute_tool(*args, **kwargs):
 def get_registered_tool_names(*args, **kwargs):
     _ensure_caps()
     return _orig_get_registered_tool_names(*args, **kwargs)
+tool_runtime_parts/part_001_register_tool.py
+tool_runtime_parts/part_002_get_registered_tool_names.py
+tool_runtime_parts/part_003_get_tool_definitions.py
+tool_runtime_parts/part_004_parse_tool_arguments.py
+tool_runtime_parts/part_005_execute_tool.py
+tool_runtime_parts/part_006_select_capability_tool.py
+tool_runtime_parts/part_007__normalize_capability_text.py
+tool_runtime_parts/part_008_gather_context_for_prompt.py
+tool_runtime_parts/part_009_list_registered_tools.py
+tool_runtime_parts/part_010_clear_tool_cache.py

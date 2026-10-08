@@ -7,7 +7,6 @@ Telegram handlers, and provides deterministic routing hints for live requests.
 It deliberately does not implement feature logic; existing feature handlers
 remain the source of truth.
 """
-from __future__ import annotations
 
 import re
 from typing import Any
@@ -112,11 +111,6 @@ def route_live_capability(prompt: str) -> str | None:
         return None
     # Keep this tiny and deterministic. Detailed scoring remains in the generic
     # selector; these cases must never be answered from stale model knowledge.
-    # Specific live domains must win over generic words such as «امروز».
-    if re.search(r"(?:آب.?وهوا|هوای|دمای|باران|برف|رطوبت|کیفیت هوا|weather|forecast)", q, re.I):
-        return "get_weather" if "get_weather" in _registry() else None
-    if re.search(r"(?:خبر|اخبار|breaking|headline|news)", q, re.I):
-        return "web_search" if "web_search" in _registry() else None
     if re.search(r"(?:تاریخ\s*(?:دقیق|فعلی|الان|امروز|فردا|دیروز|پس\s*فردا)|(?:امروز|فردا|دیروز|پس\s*فردا)\s*(?:چندمه|چه\s*تاریخیه|چه\s*روزیه)?|الان\s*(?:چه\s*)?تاریخ|current\s*(?:date|datetime)|today(?:\s*date)?|tomorrow|yesterday)", q, re.I):
         return "get_current_datetime" if "get_current_datetime" in _registry() else None
     if re.search(r"(?:الان\s*(?:ساعت|چه\s*ساعتی)|ساعت\s*الان|what\s*time|current\s*time)", q, re.I):

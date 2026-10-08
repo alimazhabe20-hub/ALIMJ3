@@ -1,5 +1,4 @@
 """Domain-specific Telegram handlers. Compatibility-preserving extraction from feature_handlers."""
-from __future__ import annotations
 from bot.database import set_birth_date
 from bot.utils.helpers import get_date_tools_keyboard
 from bot.features.date.features_date_date_tools import parse_shamsi, parse_any_date, parse_two_dates, parse_countdown, birthday_countdown, zodiac_animal, lunar_age, date_diff, age_diff, convert_with_weekday, search_events, custom_countdown

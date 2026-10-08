@@ -4,10 +4,8 @@ IMPORTANT: Keep this file small and stable. New functionality belongs in the
 secondary ``motivation_parts/`` modules. The complete legacy implementation is kept
 unchanged in ``motivation_parts/part_999_core_legacy.py`` for compatibility.
 """
-from bot.utils import load_modular_part
 
-
-# --- INLINED MODULAR PART: bot/utils/motivation_parts/part_999_core_legacy.py ---
+# BEGIN MERGED LEGACY PART: motivation_parts/part_999_core_legacy.py
 import random
 from collections.abc import Sequence
 
@@ -218,4 +216,5 @@ def get_motivation(messages: Sequence[str] | None = None) -> str:
     last_index = index
     return pool[index]
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+motivation_parts/part_999_core_legacy.py

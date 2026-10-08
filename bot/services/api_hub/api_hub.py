@@ -3,7 +3,6 @@
 Includes cache, bounded retry/backoff, per-provider health tracking, circuit
 breakers and deterministic fallback chains.
 """
-from __future__ import annotations
 
 import asyncio
 import hashlib

@@ -1,5 +1,4 @@
 """Minimal operator dashboard; protected by ADMIN_PANEL_TOKEN/METRICS_TOKEN."""
-from __future__ import annotations
 import hmac, os
 from flask import Blueprint, jsonify, request, Response
 from bot.services.v61_v65_platform import health_snapshot, features_snapshot

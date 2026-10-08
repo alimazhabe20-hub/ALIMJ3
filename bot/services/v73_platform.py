@@ -3,41 +3,8 @@
 All controls are bounded and deterministic. No unbounded autonomous loops, no secret
 exposure, and no security bypasses are implemented here.
 """
-from bot.utils import load_modular_part
 
-import ast
-import asyncio
-import hashlib
-import ipaddress
-import json
-import os
-import re
-import socket
-import time
-import urllib.parse
-from collections import defaultdict, deque
-from pathlib import Path
-from typing import Any
-
-from bot.logger import logger
-
-VERSION = "73.0.0"
-MAX_AGENT_STEPS = max(1, min(8, int(os.getenv("V73_AGENT_MAX_STEPS", "6"))))
-MAX_AGENT_REPAIRS = max(0, min(3, int(os.getenv("V73_AGENT_MAX_REPAIRS", "2"))))
-MAX_TOOL_CALLS_PER_RUN = max(2, min(20, int(os.getenv("V73_AGENT_MAX_TOOL_CALLS", "10"))))
-SLOW_TOOL_MS = max(100, float(os.getenv("V73_SLOW_TOOL_MS", "3000")))
-
-# ---------------------------------------------------------------------------
-# Security primitives
-# ---------------------------------------------------------------------------
-_SECRET_PATTERNS = [
-    re.compile(r"(?i)(bot[_-]?token|api[_-]?key|secret|password|authorization)\s*[:=]\s*([^\s,;]+)"),
-    re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]{12,}"),
-]
-
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_001_redact_secrets.py ---
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_001_redact_secrets.py
 from typing import Any
 
 # Auto-split part 1: redact_secrets
@@ -47,10 +14,8 @@ def redact_secrets(value: Any) -> str:
         text = pattern.sub(lambda m: m.group(1) + "=[REDACTED]" if m.lastindex == 2 else "Bearer [REDACTED]", text)
     return text[:4000]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_002_safe_public_url.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_002_safe_public_url.py
 # Auto-split part 2: safe_public_url
 def safe_public_url(url: str, *, allow_http: bool = True) -> tuple[bool, str]:
     """Reject malformed URLs and SSRF-sensitive destinations."""
@@ -77,10 +42,8 @@ def safe_public_url(url: str, *, allow_http: bool = True) -> tuple[bool, str]:
             return False, "private_host"
     return True, "ok"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_003_safe_path.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_003_safe_path.py
 from pathlib import Path
 
 # Auto-split part 3: safe_path
@@ -92,10 +55,8 @@ def safe_path(path: str, root: str | Path) -> bool:
     except Exception:
         return False
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_004_safe_archive_member.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_004_safe_archive_member.py
 # Auto-split part 4: safe_archive_member
 def safe_archive_member(name: str) -> bool:
     n = (name or "").replace("\\", "/")
@@ -104,10 +65,8 @@ def safe_archive_member(name: str) -> bool:
     parts = [p for p in n.split("/") if p]
     return ".." not in parts
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_005_sanitize_tool_arguments.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_005_sanitize_tool_arguments.py
 from typing import Any
 
 # Auto-split part 5: sanitize_tool_arguments
@@ -127,13 +86,8 @@ def sanitize_tool_arguments(args: dict[str, Any], *, max_text=6000) -> dict[str,
             out[key] = str(value)[:max_text]
     return out
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# Agent architecture
-# ---------------------------------------------------------------------------
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_006_AgentRun.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_006_AgentRun.py
 # Auto-split part 6: AgentRun
 class AgentRun:
     def __init__(self, goal: str, user_id: int = 0):
@@ -151,10 +105,8 @@ class AgentRun:
     def record(self, **item: Any) -> None:
         self.steps.append({**item, "elapsed_ms": round((time.monotonic() - self.started) * 1000, 1)})
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_007__intent_candidates.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_007__intent_candidates.py
 from typing import Any
 
 # Auto-split part 7: _intent_candidates
@@ -176,10 +128,8 @@ def _intent_candidates(goal: str, available: set[str]) -> list[dict[str, Any]]:
     candidates.sort(key=lambda x: (-x[0], x[1]))
     return [{"tool": t, "arguments": a} for _, t, a in candidates[:MAX_AGENT_STEPS]]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_008_run_production_agent.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_008_run_production_agent.py
 # Auto-split part 8: run_production_agent
 async def run_production_agent(goal: str, *, user_id: int = 0) -> str:
     """Bounded agent with planning, policy checks, repair, trace and safe output."""
@@ -224,17 +174,8 @@ async def run_production_agent(goal: str, *, user_id: int = 0) -> str:
 
     return json.dumps({"ok": bool(run.steps), "goal": run.goal[:500], "steps": run.steps, "repairs": run.repairs}, ensure_ascii=False)[:9000]
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# Self-healing and circuit protection
-# ---------------------------------------------------------------------------
-_FAILURES: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=20))
-_COOLDOWN_UNTIL: dict[str, float] = {}
-
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_009_note_failure.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_009_note_failure.py
 # Auto-split part 9: note_failure
 def note_failure(component: str) -> bool:
     now = time.monotonic()
@@ -246,18 +187,14 @@ def note_failure(component: str) -> bool:
         return True
     return False
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_010_component_available.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_010_component_available.py
 # Auto-split part 10: component_available
 def component_available(component: str) -> bool:
     return time.monotonic() >= _COOLDOWN_UNTIL.get(component, 0.0)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_011_recover_component.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_011_recover_component.py
 from typing import Any
 
 # Auto-split part 11: recover_component
@@ -279,10 +216,8 @@ def recover_component(component: str) -> dict[str, Any]:
     _COOLDOWN_UNTIL[component] = time.monotonic() + 3
     return {"component": component, "recovered": True, "actions": actions}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_012_health_snapshot.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_012_health_snapshot.py
 from typing import Any
 
 # Auto-split part 12: health_snapshot
@@ -296,16 +231,8 @@ def health_snapshot() -> dict[str, Any]:
         for name, q in _FAILURES.items()
     }
 
-# --- END INLINED MODULAR PART ---
-
-# ---------------------------------------------------------------------------
-# Performance + QA
-# ---------------------------------------------------------------------------
-_PERF: dict[str, dict[str, float]] = defaultdict(lambda: {"calls": 0, "errors": 0, "total_ms": 0.0, "max_ms": 0.0})
-
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_013_record_performance.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_013_record_performance.py
 # Auto-split part 13: record_performance
 def record_performance(name: str, elapsed_ms: float, ok: bool = True) -> None:
     p = _PERF[name]
@@ -315,10 +242,8 @@ def record_performance(name: str, elapsed_ms: float, ok: bool = True) -> None:
     if not ok:
         p["errors"] += 1
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_014_performance_snapshot.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_014_performance_snapshot.py
 from typing import Any
 
 # Auto-split part 14: performance_snapshot
@@ -335,10 +260,8 @@ def performance_snapshot() -> dict[str, Any]:
         }
     return out
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_015_qa_snapshot.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_015_qa_snapshot.py
 from pathlib import Path
 from typing import Any
 
@@ -361,10 +284,8 @@ def qa_snapshot(root: str | Path = ".") -> dict[str, Any]:
         "agent_limits": {"steps": MAX_AGENT_STEPS, "calls": MAX_TOOL_CALLS_PER_RUN, "repairs": MAX_AGENT_REPAIRS},
     }
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v73_platform_parts/part_016_init_v73_tables.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v73_platform_parts/part_016_init_v73_tables.py
 # Auto-split part 16: init_v73_tables
 def init_v73_tables() -> None:
     """Create persistent operational tables without touching existing user data."""
@@ -382,4 +303,67 @@ def init_v73_tables() -> None:
     except Exception as exc:
         logger.warning("V73 table initialization failed: %s", exc)
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import ast
+import asyncio
+import hashlib
+import ipaddress
+import json
+import os
+import re
+import socket
+import time
+import urllib.parse
+from collections import defaultdict, deque
+from pathlib import Path
+from typing import Any
+
+from bot.logger import logger
+
+VERSION = "73.0.0"
+MAX_AGENT_STEPS = max(1, min(8, int(os.getenv("V73_AGENT_MAX_STEPS", "6"))))
+MAX_AGENT_REPAIRS = max(0, min(3, int(os.getenv("V73_AGENT_MAX_REPAIRS", "2"))))
+MAX_TOOL_CALLS_PER_RUN = max(2, min(20, int(os.getenv("V73_AGENT_MAX_TOOL_CALLS", "10"))))
+SLOW_TOOL_MS = max(100, float(os.getenv("V73_SLOW_TOOL_MS", "3000")))
+
+# ---------------------------------------------------------------------------
+# Security primitives
+# ---------------------------------------------------------------------------
+_SECRET_PATTERNS = [
+    re.compile(r"(?i)(bot[_-]?token|api[_-]?key|secret|password|authorization)\s*[:=]\s*([^\s,;]+)"),
+    re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]{12,}"),
+]
+
+
+# ---------------------------------------------------------------------------
+# Agent architecture
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Self-healing and circuit protection
+# ---------------------------------------------------------------------------
+_FAILURES: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=20))
+_COOLDOWN_UNTIL: dict[str, float] = {}
+
+
+# ---------------------------------------------------------------------------
+# Performance + QA
+# ---------------------------------------------------------------------------
+_PERF: dict[str, dict[str, float]] = defaultdict(lambda: {"calls": 0, "errors": 0, "total_ms": 0.0, "max_ms": 0.0})
+
+
+v73_platform_parts/part_001_redact_secrets.py
+v73_platform_parts/part_002_safe_public_url.py
+v73_platform_parts/part_003_safe_path.py
+v73_platform_parts/part_004_safe_archive_member.py
+v73_platform_parts/part_005_sanitize_tool_arguments.py
+v73_platform_parts/part_006_AgentRun.py
+v73_platform_parts/part_007__intent_candidates.py
+v73_platform_parts/part_008_run_production_agent.py
+v73_platform_parts/part_009_note_failure.py
+v73_platform_parts/part_010_component_available.py
+v73_platform_parts/part_011_recover_component.py
+v73_platform_parts/part_012_health_snapshot.py
+v73_platform_parts/part_013_record_performance.py
+v73_platform_parts/part_014_performance_snapshot.py
+v73_platform_parts/part_015_qa_snapshot.py
+v73_platform_parts/part_016_init_v73_tables.py

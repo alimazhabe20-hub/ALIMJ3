@@ -1,5 +1,4 @@
 """Shared HTTP clients with connection pooling and conservative retry policy."""
-from __future__ import annotations
 import asyncio
 import time
 import hashlib

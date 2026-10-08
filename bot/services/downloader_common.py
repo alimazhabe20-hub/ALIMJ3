@@ -1,6 +1,5 @@
 """Shared imports and module state for the refactored downloader."""
 
-from __future__ import annotations
 
 """Ordered compatibility loader for cleaned source chunks."""
 

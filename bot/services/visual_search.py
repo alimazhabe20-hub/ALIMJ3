@@ -20,41 +20,9 @@ VISION_MAX_RESULTS       : results per query, default 6.
 VISION_HTTP_TIMEOUT      : HTTP timeout, default 12 seconds.
 VISION_SEARCH_REGION     : DuckDuckGo region, default wt-wt.
 """
-from bot.utils import load_modular_part
-
-import asyncio
-import html
-import io
-import os
-import re
-import shutil
-from collections import Counter
-from dataclasses import dataclass
-from functools import lru_cache
-from typing import Any, Iterable, Optional
-from urllib.parse import parse_qs, quote_plus, unquote, urlparse
-
-import httpx
-
-try:
-    from PIL import Image
-except Exception:  # pragma: no cover
-    Image = None
 
 
-DEFAULT_VISION_MODEL = os.getenv(
-    "LOCAL_VISION_MODEL", "Salesforce/blip-image-captioning-base"
-)
-LOCAL_VISION_MODEL_PATH = os.getenv("LOCAL_VISION_MODEL_PATH", "").strip()
-TESSERACT_CMD = os.getenv("TESSERACT_CMD", "").strip()
-MAX_QUERIES = max(3, int(os.getenv("VISION_MAX_QUERIES", "7")))
-MAX_RESULTS_PER_QUERY = max(3, int(os.getenv("VISION_MAX_RESULTS", "6")))
-HTTP_TIMEOUT = float(os.getenv("VISION_HTTP_TIMEOUT", "12"))
-SEARCH_REGION = os.getenv("VISION_SEARCH_REGION", "wt-wt")
-
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_001_SearchResult.py ---
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_001_SearchResult.py
 from dataclasses import dataclass
 
 # Auto-split part 1: SearchResult
@@ -66,18 +34,8 @@ class SearchResult:
     score: float = 0.0
     matched_query: str = ""
 
-# --- END INLINED MODULAR PART ---
-
-_STOPWORDS = {
-    "و", "در", "از", "با", "برای", "به", "یک", "این", "آن", "است", "که",
-    "را", "روی", "داخل", "شده", "شود", "می", "های", "the", "a", "an", "of",
-    "and", "with", "for", "to", "in", "on", "this", "that", "is", "are", "image",
-    "photo", "picture", "product", "find", "search", "similar", "item",
-}
-
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_002__normalize.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_002__normalize.py
 # Auto-split part 2: _normalize
 def _normalize(text: str) -> str:
     text = (text or "").lower()
@@ -92,10 +50,8 @@ def _normalize(text: str) -> str:
     text = re.sub(r"[^\w\u0600-\u06ff\s.-]", " ", text, flags=re.UNICODE)
     return re.sub(r"\s+", " ", text).strip()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_003__tokens.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_003__tokens.py
 # Auto-split part 3: _tokens
 def _tokens(text: str) -> list[str]:
     return [
@@ -103,10 +59,8 @@ def _tokens(text: str) -> list[str]:
         if len(t) > 1 and t not in _STOPWORDS
     ]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_004__unique.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_004__unique.py
 from typing import Iterable
 
 # Auto-split part 4: _unique
@@ -120,10 +74,8 @@ def _unique(items: Iterable[str]) -> list[str]:
             out.append(item)
     return out
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_005__extract_keywords.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_005__extract_keywords.py
 # Auto-split part 5: _extract_keywords
 def _extract_keywords(text: str, limit: int = 14) -> list[str]:
     words = _tokens(text)
@@ -132,10 +84,8 @@ def _extract_keywords(text: str, limit: int = 14) -> list[str]:
     counts = Counter(words)
     return [w for w, _ in counts.most_common(limit)]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_006__image_info.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_006__image_info.py
 from typing import Any
 
 # Auto-split part 6: _image_info
@@ -154,10 +104,8 @@ def _image_info(image_bytes: bytes) -> dict[str, Any]:
     except Exception:
         return {}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_007__ocr.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_007__ocr.py
 # Auto-split part 7: _ocr
 def _ocr(image_bytes: bytes) -> str:
     """Run Tesseract locally. Returns empty text when OCR is unavailable."""
@@ -185,22 +133,14 @@ def _ocr(image_bytes: bytes) -> str:
     except Exception:
         return ""
 
-# --- END INLINED MODULAR PART ---
-
-# BLIP is deliberately lazy-loaded: normal bot startup does not import torch.
-_VISION_STATE: dict[str, Any] = {"ready": False, "failed": False, "processor": None, "model": None}
-
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_008__vision_model_source.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_008__vision_model_source.py
 # Auto-split part 8: _vision_model_source
 def _vision_model_source() -> str:
     return LOCAL_VISION_MODEL_PATH or DEFAULT_VISION_MODEL
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_009__load_vision_model.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_009__load_vision_model.py
 from typing import Any
 
 # Auto-split part 9: _load_vision_model
@@ -228,10 +168,8 @@ def _load_vision_model() -> tuple[Any, Any] | tuple[None, None]:
         _VISION_STATE["failed"] = True
         return None, None
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_010__vision_caption.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_010__vision_caption.py
 # Auto-split part 10: _vision_caption
 def _vision_caption(image_bytes: bytes) -> str:
     if Image is None:
@@ -250,10 +188,8 @@ def _vision_caption(image_bytes: bytes) -> str:
     except Exception:
         return ""
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_011__strip_ddg_url.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_011__strip_ddg_url.py
 # Auto-split part 11: _strip_ddg_url
 def _strip_ddg_url(url: str) -> str:
     url = html.unescape(url or "").strip()
@@ -269,19 +205,15 @@ def _strip_ddg_url(url: str) -> str:
         pass
     return url
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_012__clean_html.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_012__clean_html.py
 # Auto-split part 12: _clean_html
 def _clean_html(text: str) -> str:
     text = html.unescape(re.sub(r"<[^>]+>", " ", text or ""))
     return re.sub(r"\s+", " ", text).strip()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_013__ddg_search.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_013__ddg_search.py
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from bot.services.visual_search import MAX_RESULTS_PER_QUERY
@@ -321,10 +253,8 @@ async def _ddg_search(query: str, limit: int = MAX_RESULTS_PER_QUERY) -> list[Se
             break
     return results
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_014__query_variants.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_014__query_variants.py
 # Auto-split part 14: _query_variants
 def _query_variants(description: str, ocr: str, caption: str = "") -> list[str]:
     """Generate short, complementary queries instead of one overly-specific sentence."""
@@ -357,10 +287,8 @@ def _query_variants(description: str, ocr: str, caption: str = "") -> list[str]:
     variants.append(" ".join(keys[:4]))
     return _unique(variants)[:MAX_QUERIES]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_015__score_result.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_015__score_result.py
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from bot.services.visual_search import SearchResult
@@ -385,10 +313,8 @@ def _score_result(result: SearchResult, query_terms: list[str], all_terms: list[
     score = 0.62 * q_overlap + 0.35 * global_overlap + bonus
     return max(0.0, min(1.0, score))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_016__dedupe_and_rank.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_016__dedupe_and_rank.py
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from bot.services.visual_search import SearchResult
@@ -409,10 +335,8 @@ def _dedupe_and_rank(results: list[SearchResult], description: str, ocr: str, ca
     ranked = sorted(best_by_url.values(), key=lambda x: x.score, reverse=True)
     return ranked[:15]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_017_looks_like_visual_search.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_017_looks_like_visual_search.py
 # Auto-split part 17: looks_like_visual_search
 def looks_like_visual_search(text: str) -> bool:
     """Return True for explicit Lens / image-search requests."""
@@ -425,10 +349,8 @@ def looks_like_visual_search(text: str) -> bool:
     )
     return any(p in t for p in patterns)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/visual_search_parts/part_018_visual_search.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: visual_search_parts/part_018_visual_search.py
 # Auto-split part 18: visual_search
 async def visual_search(
     image_bytes: bytes,
@@ -484,6 +406,66 @@ async def visual_search(
     lines.append("\n⚠️ درصدها «شباهت تقریبی متنی/جستجویی» هستند، نه تضمین تطابق محصول.")
     return "\n".join(lines)[:12000]
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import asyncio
+import html
+import io
+import os
+import re
+import shutil
+from collections import Counter
+from dataclasses import dataclass
+from functools import lru_cache
+from typing import Any, Iterable, Optional
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse
+
+import httpx
+
+try:
+    from PIL import Image
+except Exception:  # pragma: no cover
+    Image = None
+
+
+DEFAULT_VISION_MODEL = os.getenv(
+    "LOCAL_VISION_MODEL", "Salesforce/blip-image-captioning-base"
+)
+LOCAL_VISION_MODEL_PATH = os.getenv("LOCAL_VISION_MODEL_PATH", "").strip()
+TESSERACT_CMD = os.getenv("TESSERACT_CMD", "").strip()
+MAX_QUERIES = max(3, int(os.getenv("VISION_MAX_QUERIES", "7")))
+MAX_RESULTS_PER_QUERY = max(3, int(os.getenv("VISION_MAX_RESULTS", "6")))
+HTTP_TIMEOUT = float(os.getenv("VISION_HTTP_TIMEOUT", "12"))
+SEARCH_REGION = os.getenv("VISION_SEARCH_REGION", "wt-wt")
+
+
+_STOPWORDS = {
+    "و", "در", "از", "با", "برای", "به", "یک", "این", "آن", "است", "که",
+    "را", "روی", "داخل", "شده", "شود", "می", "های", "the", "a", "an", "of",
+    "and", "with", "for", "to", "in", "on", "this", "that", "is", "are", "image",
+    "photo", "picture", "product", "find", "search", "similar", "item",
+}
+
+
+# BLIP is deliberately lazy-loaded: normal bot startup does not import torch.
+_VISION_STATE: dict[str, Any] = {"ready": False, "failed": False, "processor": None, "model": None}
+
 
 __all__ = ["visual_search", "looks_like_visual_search"]
+visual_search_parts/part_001_SearchResult.py
+visual_search_parts/part_002__normalize.py
+visual_search_parts/part_003__tokens.py
+visual_search_parts/part_004__unique.py
+visual_search_parts/part_005__extract_keywords.py
+visual_search_parts/part_006__image_info.py
+visual_search_parts/part_007__ocr.py
+visual_search_parts/part_008__vision_model_source.py
+visual_search_parts/part_009__load_vision_model.py
+visual_search_parts/part_010__vision_caption.py
+visual_search_parts/part_011__strip_ddg_url.py
+visual_search_parts/part_012__clean_html.py
+visual_search_parts/part_013__ddg_search.py
+visual_search_parts/part_014__query_variants.py
+visual_search_parts/part_015__score_result.py
+visual_search_parts/part_016__dedupe_and_rank.py
+visual_search_parts/part_017_looks_like_visual_search.py
+visual_search_parts/part_018_visual_search.py

@@ -4,10 +4,8 @@ IMPORTANT: Keep this file small and stable. New functionality belongs in the
 secondary ``callbacks_parts/`` modules. The complete legacy implementation is kept
 unchanged in ``callbacks_parts/part_999_core_legacy.py`` for compatibility.
 """
-from bot.utils import load_modular_part
 
-
-# --- INLINED MODULAR PART: bot/handlers/callbacks_parts/part_999_core_legacy.py ---
+# BEGIN MERGED LEGACY PART: callbacks_parts/part_999_core_legacy.py
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
@@ -1772,7 +1770,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # هر callback ناشناخته‌ای — حداقل spinner را قطع کن
     await _safe_answer(query)
 
-# --- END INLINED MODULAR PART ---
-
+# END MERGED LEGACY PART: 
 _legacy_button_handler = button_handler
 async def button_handler(*args, **kwargs): return await _legacy_button_handler(*args, **kwargs)
+callbacks_parts/part_999_core_legacy.py

@@ -1,7 +1,6 @@
 """Shared resilient HTTP primitives for ALIMJ.
 Keeps provider retries bounded, reuses connections, and supports stale cache values.
 """
-from __future__ import annotations
 import asyncio, random, time
 from typing import Any, Optional
 import httpx

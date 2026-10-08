@@ -1,28 +1,8 @@
 """V71 production hardening and AI platform services.
 No automatic conversation summarisation is implemented here.
 """
-from bot.utils import load_modular_part
 
-import ast
-import asyncio
-import hashlib
-import ipaddress
-import os
-import re
-import socket
-import time
-from collections import defaultdict, deque
-from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
-
-from bot.database_core import get_db_connection, _execute_write
-from bot.logger import logger
-
-SUPPORTED_LANGS = ("fa", "en", "ar")
-
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_001_init_v71_tables.py ---
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_001_init_v71_tables.py
 # Auto-split part 1: init_v71_tables
 def init_v71_tables() -> None:
     conn = get_db_connection(); c = conn.cursor()
@@ -39,58 +19,44 @@ def init_v71_tables() -> None:
         c.execute(sql)
     conn.commit(); conn.close()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_002_set_workspace.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_002_set_workspace.py
 # Auto-split part 2: set_workspace
 def set_workspace(user_id: int, name: str, data: str) -> None:
     _execute_write("INSERT INTO v71_workspaces(user_id,name,data) VALUES(?,?,?) ON CONFLICT(user_id,name) DO UPDATE SET data=excluded.data,updated_at=CURRENT_TIMESTAMP", (user_id, name[:100], data[:30000]))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_003_get_workspace.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_003_get_workspace.py
 # Auto-split part 3: get_workspace
 def get_workspace(user_id: int, name: str) -> str | None:
     conn=get_db_connection(); r=conn.execute("SELECT data FROM v71_workspaces WHERE user_id=? AND name=?",(user_id,name[:100])).fetchone(); conn.close(); return r[0] if r else None
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_004_save_branch.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_004_save_branch.py
 # Auto-split part 4: save_branch
 def save_branch(user_id: int, name: str, context: str) -> None:
     _execute_write("INSERT INTO v71_branches(user_id,name,context) VALUES(?,?,?) ON CONFLICT(user_id,name) DO UPDATE SET context=excluded.context,updated_at=CURRENT_TIMESTAMP",(user_id,name[:100],context[:30000]))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_005_list_branches.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_005_list_branches.py
 # Auto-split part 5: list_branches
 def list_branches(user_id: int) -> list[str]:
     conn=get_db_connection(); rows=conn.execute("SELECT name FROM v71_branches WHERE user_id=? ORDER BY updated_at DESC",(user_id,)).fetchall(); conn.close(); return [r[0] for r in rows]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_006_schedule_ai.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_006_schedule_ai.py
 # Auto-split part 6: schedule_ai
 def schedule_ai(user_id:int,prompt:str,run_at:str,repeat_minutes:int=0)->int:
     conn=get_db_connection(); cur=conn.execute("INSERT INTO v71_scheduled_ai(user_id,prompt,run_at,repeat_minutes) VALUES(?,?,?,?)",(user_id,prompt[:4000],run_at,max(0,int(repeat_minutes)))); conn.commit(); jid=int(cur.lastrowid); conn.close(); return jid
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_007_due_ai_jobs.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_007_due_ai_jobs.py
 # Auto-split part 7: due_ai_jobs
 def due_ai_jobs(limit:int=50)->list[tuple]:
     conn=get_db_connection(); rows=conn.execute("SELECT id,user_id,prompt,run_at,repeat_minutes FROM v71_scheduled_ai WHERE enabled=1 AND run_at<=datetime('now') ORDER BY id LIMIT ?",(max(1,min(200,limit)),)).fetchall(); conn.close(); return rows
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_008_complete_ai_job.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_008_complete_ai_job.py
 # Auto-split part 8: complete_ai_job
 def complete_ai_job(job_id:int,repeat_minutes:int)->None:
     if repeat_minutes>0:
@@ -98,10 +64,8 @@ def complete_ai_job(job_id:int,repeat_minutes:int)->None:
     else:
         _execute_write("UPDATE v71_scheduled_ai SET enabled=0,last_run=datetime('now') WHERE id=?",(job_id,))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_009_notification_claim.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_009_notification_claim.py
 # Auto-split part 9: notification_claim
 def notification_claim(user_id:int,kind:str,payload:str,dedupe_key:str,ttl_seconds:int=900)->bool:
     # Atomic enough for SQLite's single-writer model; avoids duplicate notifications.
@@ -111,10 +75,8 @@ def notification_claim(user_id:int,kind:str,payload:str,dedupe_key:str,ttl_secon
         conn.close(); return False
     conn.execute("INSERT INTO v71_notifications(user_id,kind,payload,dedupe_key) VALUES(?,?,?,?)",(user_id,kind,payload,dedupe_key)); conn.commit(); conn.close(); return True
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_010_detect_language.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_010_detect_language.py
 # Auto-split part 10: detect_language
 def detect_language(text:str)->str:
     t=text or ""
@@ -124,10 +86,8 @@ def detect_language(text:str)->str:
     if en: return "en"
     return "fa"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_011_personalize.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_011_personalize.py
 # Auto-split part 11: personalize
 def personalize(user_id:int, language:str|None=None, response_style:str|None=None, ai_mode:str|None=None, notifications:bool|None=None)->dict:
     current={"language":"fa","response_style":"balanced","ai_mode":"balanced","notifications":1}
@@ -137,10 +97,8 @@ def personalize(user_id:int, language:str|None=None, response_style:str|None=Non
     _execute_write("INSERT INTO v71_user_settings(user_id,language,response_style,ai_mode,notifications) VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET language=excluded.language,response_style=excluded.response_style,ai_mode=excluded.ai_mode,notifications=excluded.notifications",(user_id,updates["language"],updates["response_style"],updates["ai_mode"],updates["notifications"]))
     return updates
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_012_code_agent_review.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_012_code_agent_review.py
 # Auto-split part 12: code_agent_review
 def code_agent_review(source:str)->dict:
     """Static-only code agent: syntax, dangerous constructs, imports and complexity hints."""
@@ -161,10 +119,8 @@ def code_agent_review(source:str)->dict:
         return {"ok":False,"syntax":"unavailable","warnings":[]}
     return result
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_013_verify_facts_with_sources.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_013_verify_facts_with_sources.py
 # Auto-split part 13: verify_facts_with_sources
 def verify_facts_with_sources(text:str, sources:dict[str,str]|None=None)->dict:
     claims=[x.strip() for x in re.split(r"(?<=[.!؟?])\s+",text.strip()) if len(x.strip())>20][:12]
@@ -176,10 +132,8 @@ def verify_facts_with_sources(text:str, sources:dict[str,str]|None=None)->dict:
         verified.append({"id":key,"claim":claim,"sources":matched[:5],"status":"supported" if matched else "needs_source"})
     return {"verified":bool(verified) and all(x["status"]=="supported" for x in verified),"claims":verified}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_014_source_intelligence.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_014_source_intelligence.py
 # Auto-split part 14: source_intelligence
 def source_intelligence(urls:list[str])->dict:
     out=[]
@@ -190,10 +144,8 @@ def source_intelligence(urls:list[str])->dict:
         except Exception: pass
     return {"sources":out,"unique_domains":sorted({x["domain"] for x in out if x["domain"]})}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_015_security_check_url.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_015_security_check_url.py
 # Auto-split part 15: security_check_url
 def security_check_url(url:str)->dict:
     from urllib.parse import urlparse
@@ -208,10 +160,8 @@ def security_check_url(url:str)->dict:
         return {"ok":True,"ips":ips}
     except Exception: return {"ok":False,"reason":"resolution_failed"}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_016_ai_route_hint.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_016_ai_route_hint.py
 # Auto-split part 16: ai_route_hint
 def ai_route_hint(prompt: str, provider_count: int = 1) -> dict:
     """Deterministic routing hint used by the existing AI router; no model call."""
@@ -220,28 +170,22 @@ def ai_route_hint(prompt: str, provider_count: int = 1) -> dict:
     mode="fast" if complexity < 0.25 else ("balanced" if complexity < 0.65 else "quality")
     return {"mode":mode,"complexity":round(complexity,3),"provider_count":max(1,int(provider_count))}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_017_auto_recovery_policy.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_017_auto_recovery_policy.py
 # Auto-split part 17: auto_recovery_policy
 def auto_recovery_policy(error_code: str, attempt: int) -> dict:
     code=(error_code or "").lower()
     retryable=code in {"timeout","429","rate_limited","temporarily_unavailable","network"}
     return {"retry":bool(retryable and attempt < 2),"backoff_seconds":min(8,2**max(0,attempt)) if retryable else 0,"fallback":retryable}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_018_run_self_test_suite.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_018_run_self_test_suite.py
 # Auto-split part 18: run_self_test_suite
 def run_self_test_suite() -> dict:
     return self_test()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_019_health_snapshot.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_019_health_snapshot.py
 # Auto-split part 19: health_snapshot
 def health_snapshot()->dict:
     init_v71_tables()
@@ -250,10 +194,8 @@ def health_snapshot()->dict:
     except Exception: db=False
     return {"ok":db,"database":db,"languages":list(SUPPORTED_LANGS),"features":{"agent":True,"multi_agent":True,"fact_check":True,"source_intelligence":True,"memory_2":True,"rag":True,"document_intelligence":True,"code_agent":True,"self_test":True,"auto_recovery":True,"performance":True,"security_2":True,"workspace":True,"ai_optimizer":True,"conversation_branching":True,"scheduled_ai":True,"smart_notifications":True,"personalization":True,"observability":True}}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/v71_platform_parts/part_020_self_test.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: v71_platform_parts/part_020_self_test.py
 # Auto-split part 20: self_test
 def self_test()->dict:
     checks={"db":False,"code":False,"security":False,"language":False,"scheduler":False}
@@ -270,4 +212,42 @@ def self_test()->dict:
         logger.exception("v71 self test failed")
     return {"ok":all(checks.values()),"checks":checks,"latency_ms":round((time.perf_counter()-started)*1000,1)}
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import ast
+import asyncio
+import hashlib
+import ipaddress
+import os
+import re
+import socket
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable
+
+from bot.database_core import get_db_connection, _execute_write
+from bot.logger import logger
+
+SUPPORTED_LANGS = ("fa", "en", "ar")
+
+
+v71_platform_parts/part_001_init_v71_tables.py
+v71_platform_parts/part_002_set_workspace.py
+v71_platform_parts/part_003_get_workspace.py
+v71_platform_parts/part_004_save_branch.py
+v71_platform_parts/part_005_list_branches.py
+v71_platform_parts/part_006_schedule_ai.py
+v71_platform_parts/part_007_due_ai_jobs.py
+v71_platform_parts/part_008_complete_ai_job.py
+v71_platform_parts/part_009_notification_claim.py
+v71_platform_parts/part_010_detect_language.py
+v71_platform_parts/part_011_personalize.py
+v71_platform_parts/part_012_code_agent_review.py
+v71_platform_parts/part_013_verify_facts_with_sources.py
+v71_platform_parts/part_014_source_intelligence.py
+v71_platform_parts/part_015_security_check_url.py
+v71_platform_parts/part_016_ai_route_hint.py
+v71_platform_parts/part_017_auto_recovery_policy.py
+v71_platform_parts/part_018_run_self_test_suite.py
+v71_platform_parts/part_019_health_snapshot.py
+v71_platform_parts/part_020_self_test.py

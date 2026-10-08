@@ -1,5 +1,4 @@
 """Release metadata and lightweight runtime information for Rooze Ziba / ALIMJ."""
-from __future__ import annotations
 
 APP_NAME = "Rooze Ziba / ALIMJ"
 VERSION = "80.2.0"

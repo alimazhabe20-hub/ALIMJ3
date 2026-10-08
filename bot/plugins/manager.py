@@ -1,15 +1,6 @@
 """Safe local plugin registry with dependency-aware lifecycle management."""
-from bot.utils import load_modular_part
 
-import importlib
-import os
-import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict
-
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_001_PluginSpec.py ---
+# BEGIN MERGED LEGACY PART: manager_parts/part_001_PluginSpec.py
 from dataclasses import dataclass
 
 # Auto-split part 1: PluginSpec
@@ -23,10 +14,8 @@ class PluginSpec:
     tags: tuple[str, ...] = field(default_factory=tuple)
     dependencies: tuple[str, ...] = field(default_factory=tuple)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_002_PluginState.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_002_PluginState.py
 from dataclasses import dataclass
 
 # Auto-split part 2: PluginState
@@ -43,24 +32,15 @@ class PluginState:
     last_error: str = ""
     healthy: bool = True
 
-# --- END INLINED MODULAR PART ---
-
-_REGISTRY: Dict[str, PluginSpec] = {}
-_STATE: Dict[str, PluginState] = {}
-_HOOKS: Dict[str, object] = {}
-
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_003__disabled_names.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_003__disabled_names.py
 # Auto-split part 3: _disabled_names
 def _disabled_names() -> set[str]:
     raw = os.getenv("PLUGINS_DISABLED", "")
     return {x.strip().lower() for x in raw.split(",") if x.strip()}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_004_register.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_004_register.py
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from bot.plugins.manager import PluginSpec
@@ -79,10 +59,8 @@ def register(spec: PluginSpec) -> PluginSpec:
     _STATE.setdefault(spec.name, PluginState())
     return spec
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_005_register_builtin_plugins.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_005_register_builtin_plugins.py
 # Auto-split part 5: register_builtin_plugins
 def register_builtin_plugins() -> None:
     specs = (
@@ -97,19 +75,15 @@ def register_builtin_plugins() -> None:
     for spec in specs:
         register(spec)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_006_is_enabled.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_006_is_enabled.py
 # Auto-split part 6: is_enabled
 def is_enabled(name: str) -> bool:
     spec = _REGISTRY.get(name)
     return bool(spec and spec.enabled)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_007__dependency_error.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_007__dependency_error.py
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from bot.plugins.manager import PluginSpec
@@ -127,10 +101,8 @@ def _dependency_error(spec: PluginSpec) -> str:
         return "failed dependency: " + ", ".join(failed)
     return ""
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_008_list_plugins.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_008_list_plugins.py
 from typing import Any
 
 # Auto-split part 8: list_plugins
@@ -151,10 +123,8 @@ def list_plugins() -> list[dict[str, Any]]:
         for spec in sorted(_REGISTRY.values(), key=lambda x: x.name)
     ]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_009_plugin_health.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_009_plugin_health.py
 from typing import Any
 
 # Auto-split part 9: plugin_health
@@ -164,10 +134,8 @@ def plugin_health() -> dict[str, Any]:
     unhealthy = [item["name"] for item in items if item["enabled"] and not item["healthy"]]
     return {"ok": not unhealthy, "total": len(items), "unhealthy": unhealthy, "plugins": items}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_010__load_order.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_010__load_order.py
 # Auto-split part 10: _load_order
 def _load_order() -> list[str]:
     result: list[str] = []
@@ -193,10 +161,8 @@ def _load_order() -> list[str]:
             visit(name)
     return result
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_011_load_plugin.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_011_load_plugin.py
 # Auto-split part 11: load_plugin
 def load_plugin(name: str) -> bool:
     spec = _REGISTRY.get(name)
@@ -230,10 +196,8 @@ def load_plugin(name: str) -> bool:
         state.healthy = False
         return False
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_012_load_enabled.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_012_load_enabled.py
 # Auto-split part 12: load_enabled
 def load_enabled() -> dict[str, bool]:
     try:
@@ -242,10 +206,8 @@ def load_enabled() -> dict[str, bool]:
         return {name: False for name in _REGISTRY if _REGISTRY[name].enabled} | {"__error__": False}
     return {name: load_plugin(name) for name in order}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_013__call_hook.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_013__call_hook.py
 # Auto-split part 13: _call_hook
 def _call_hook(name: str, hook: str) -> None:
     module = _HOOKS.get(name)
@@ -253,10 +215,8 @@ def _call_hook(name: str, hook: str) -> None:
     if fn:
         fn()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_014_start_enabled.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_014_start_enabled.py
 # Auto-split part 14: start_enabled
 def start_enabled() -> None:
     try:
@@ -284,10 +244,8 @@ def start_enabled() -> None:
             state.load_error = state.last_error
             state.healthy = False
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_015_stop_enabled.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_015_stop_enabled.py
 # Auto-split part 15: stop_enabled
 def stop_enabled() -> None:
     try:
@@ -313,14 +271,40 @@ def stop_enabled() -> None:
             state.stop_count += 1
             state.started = False
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/plugins/manager_parts/part_016_reset_registry_for_tests.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: manager_parts/part_016_reset_registry_for_tests.py
 # Auto-split part 16: reset_registry_for_tests
 def reset_registry_for_tests() -> None:
     _REGISTRY.clear()
     _STATE.clear()
     _HOOKS.clear()
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import importlib
+import os
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict
+
+
+_REGISTRY: Dict[str, PluginSpec] = {}
+_STATE: Dict[str, PluginState] = {}
+_HOOKS: Dict[str, object] = {}
+
+
+manager_parts/part_001_PluginSpec.py
+manager_parts/part_002_PluginState.py
+manager_parts/part_003__disabled_names.py
+manager_parts/part_004_register.py
+manager_parts/part_005_register_builtin_plugins.py
+manager_parts/part_006_is_enabled.py
+manager_parts/part_007__dependency_error.py
+manager_parts/part_008_list_plugins.py
+manager_parts/part_009_plugin_health.py
+manager_parts/part_010__load_order.py
+manager_parts/part_011_load_plugin.py
+manager_parts/part_012_load_enabled.py
+manager_parts/part_013__call_hook.py
+manager_parts/part_014_start_enabled.py
+manager_parts/part_015_stop_enabled.py
+manager_parts/part_016_reset_registry_for_tests.py

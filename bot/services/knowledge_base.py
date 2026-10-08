@@ -1,5 +1,4 @@
 """Compatibility facade for the V40 RAG knowledge base."""
-from __future__ import annotations
 
 from typing import Any
 

@@ -1,5 +1,4 @@
 """Lightweight in-process observability for AI, tools and HTTP traffic."""
-from __future__ import annotations
 import threading
 import time
 from collections import defaultdict, deque

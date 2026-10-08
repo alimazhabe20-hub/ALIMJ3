@@ -4,7 +4,6 @@ A workflow is a small sequential plan. Each step calls one registered tool and
 may reference previous results with ``$stepN`` or ``$stepN.field`` in arguments.
 The engine is deliberately bounded to avoid runaway agent loops.
 """
-from __future__ import annotations
 
 import json
 import os

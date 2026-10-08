@@ -2,34 +2,8 @@
 قابلیت‌های اضافه دستیار: نمودار، جستجوی وب، کش جواب برای دکمه ویس،
 یادآوری زبان‌طبیعی، OCR فیش، و کمک‌کننده‌های استریم.
 """
-from bot.utils import load_modular_part
 
-import io
-import re
-import time
-import hashlib
-from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
-
-import pytz
-
-from bot.logger import logger
-
-TEHRAN = pytz.timezone("Asia/Tehran")
-
-# answer_id -> (user_id, text, expires, prompt)
-_ANSWER_CACHE: Dict[str, Tuple[int, str, float, str]] = {}
-_CACHE_TTL = 3600 * 6
-
-_LAST_ANSWER: Dict[int, str] = {}
-# user_id -> last original user prompt (for continue)
-_LAST_PROMPT: Dict[int, str] = {}
-# user_id -> last answer_id
-_LAST_ANSWER_ID: Dict[int, str] = {}
-
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_001_parse_natural_weather.py ---
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_001_parse_natural_weather.py
 from typing import Optional
 from typing import Tuple
 
@@ -67,10 +41,8 @@ def parse_natural_weather(text: str) -> Optional[Tuple[str, bool]]:
         return None
     return city, forecast
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_002_parse_natural_crypto_price.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_002_parse_natural_crypto_price.py
 from typing import Optional
 
 # Auto-split part 2: parse_natural_crypto_price
@@ -94,10 +66,8 @@ def parse_natural_crypto_price(text: str) -> Optional[str]:
             return symbol
     return None
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_003_store_answer.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_003_store_answer.py
 # Auto-split part 3: store_answer
 def store_answer(user_id: int, text: str, prompt: str = "") -> str:
     """ذخیره جواب برای دکمه ویس، ادامه پاسخ و درخواست «ویس بفرست»."""
@@ -115,10 +85,8 @@ def store_answer(user_id: int, text: str, prompt: str = "") -> str:
             _ANSWER_CACHE.pop(k, None)
     return aid
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_004_get_stored_answer.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_004_get_stored_answer.py
 from typing import Optional
 
 # Auto-split part 4: get_stored_answer
@@ -131,10 +99,8 @@ def get_stored_answer(answer_id: str, user_id: int) -> Optional[str]:
         return None
     return text
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_005_get_stored_prompt.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_005_get_stored_prompt.py
 from typing import Optional
 
 # Auto-split part 5: get_stored_prompt
@@ -151,10 +117,8 @@ def get_stored_prompt(answer_id: str, user_id: int) -> Optional[str]:
         return None
     return prompt or _LAST_PROMPT.get(user_id)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_006_get_last_answer.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_006_get_last_answer.py
 from typing import Optional
 
 # Auto-split part 6: get_last_answer
@@ -162,32 +126,24 @@ def get_last_answer(user_id: int) -> Optional[str]:
     """آخرین جواب AI همین کاربر."""
     return _LAST_ANSWER.get(user_id) or None
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_007_get_last_prompt.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_007_get_last_prompt.py
 from typing import Optional
 
 # Auto-split part 7: get_last_prompt
 def get_last_prompt(user_id: int) -> Optional[str]:
     return _LAST_PROMPT.get(user_id)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_008_get_last_answer_id.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_008_get_last_answer_id.py
 from typing import Optional
 
 # Auto-split part 8: get_last_answer_id
 def get_last_answer_id(user_id: int) -> Optional[str]:
     return _LAST_ANSWER_ID.get(user_id)
 
-# --- END INLINED MODULAR PART ---
-
-# ── نمودار ──────────────────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_009_make_chart_image.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_009_make_chart_image.py
 from typing import List
 
 # Auto-split part 9: make_chart_image
@@ -232,10 +188,8 @@ def make_chart_image(
     buf.seek(0)
     return buf.read()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_010_parse_chart_request.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_010_parse_chart_request.py
 from typing import List
 from typing import Optional
 from typing import Tuple
@@ -275,12 +229,8 @@ def parse_chart_request(text: str) -> Optional[Tuple[str, List[str], List[float]
         title = m.group(1).strip()[:60] or title
     return title, labels, values, ctype
 
-# --- END INLINED MODULAR PART ---
-
-# ── جستجوی وب ───────────────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_011_web_search.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_011_web_search.py
 # Auto-split part 11: web_search  (v79 — real search APIs + keyless fallback)
 #
 # Provider order (first one with a key wins, then automatic fallback to the next):
@@ -464,38 +414,28 @@ async def web_search(query: str, max_results: int = 5) -> str:
         return "LIVE_DATA_UNAVAILABLE: جستجوی وب فعلاً در دسترس نیست؛ اطلاعات قدیمی را جایگزین نکن."
 
     last_error = None
-    try:
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-            for name, fn in providers:
-                try:
-                    results = await fn(client, query, max_results, newsy)
-                except Exception as e:
-                    last_error = e
-                    logger.warning("web_search provider %s failed: %s", name, e)
-                    continue
-                if results:
-                    return (
-                        f"LIVE_WEB_RESULTS (provider={name}, searched {date_tag} UTC) برای «{query}»:\n\n"
-                        + "\n\n".join(results)
-                        + "\n\nقانون پاسخ: فقط از همین نتایج استفاده کن، تاریخ/منبع را ذکر کن، "
-                          "و اگر نتایج کافی یا مرتبط نیستند صریحاً بگو."
-                    )
-    except Exception as e:
-        # Includes failures while constructing/entering AsyncClient. Never leak
-        # provider exceptions or secrets to the user.
-        logger.warning("web_search client unavailable: %s", e)
-        return "LIVE_DATA_UNAVAILABLE: جستجوی وب فعلاً در دسترس نیست؛ اطلاعات قدیمی را جایگزین نکن."
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        for name, fn in providers:
+            try:
+                results = await fn(client, query, max_results, newsy)
+            except Exception as e:
+                last_error = e
+                logger.warning("web_search provider %s failed: %s", name, e)
+                continue
+            if results:
+                return (
+                    f"LIVE_WEB_RESULTS (provider={name}, searched {date_tag} UTC) برای «{query}»:\n\n"
+                    + "\n\n".join(results)
+                    + "\n\nقانون پاسخ: فقط از همین نتایج استفاده کن، تاریخ/منبع را ذکر کن، "
+                      "و اگر نتایج کافی یا مرتبط نیستند صریحاً بگو."
+                )
     if last_error is not None:
         logger.warning("web_search: all providers failed, last error: %s", last_error)
         return "LIVE_DATA_UNAVAILABLE: جستجوی وب فعلاً در دسترس نیست؛ اطلاعات قدیمی را جایگزین نکن."
     return f"LIVE_DATA_UNAVAILABLE: برای «{query}» نتیجه قابل اتکایی پیدا نشد."
 
-# --- END INLINED MODULAR PART ---
-
-# ── یادآوری زبان طبیعی ─────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_012_parse_natural_reminder.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_012_parse_natural_reminder.py
 import re
 from datetime import datetime, timedelta
 from typing import Optional
@@ -632,25 +572,8 @@ def parse_natural_reminder(text: str) -> Optional[Tuple[str, datetime, str, int]
     body = re.sub(r"\s+", " ", body).strip(" :،,-") or "یادآوری"
     return body[:200], when, repeat_type, repeat_every
 
-# --- END INLINED MODULAR PART ---
-
-# ── OCR فیش (پرامپت تقویت‌شده) ─────────────────────────────────────────────
-
-RECEIPT_OCR_PROMPT = (
-    "این تصویر احتمالاً فیش، رسید، فاکتور یا کارت است. "
-    "همه متن را با دقت OCR کن و ساخت‌یافته به فارسی برگردان:\n"
-    "• فروشنده / فروشگاه\n"
-    "• تاریخ و ساعت\n"
-    "• اقلام (نام + تعداد + قیمت)\n"
-    "• جمع کل / مالیات / تخفیف\n"
-    "• شماره پیگیری / مرجع\n"
-    "• هر مبلغ یا شماره مهم دیگر\n"
-    "اگر خوانا نبود بگو کدام بخش مبهم است. اعداد را دقیق بنویس."
-)
-
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_013_enhance_ocr_prompt.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_013_enhance_ocr_prompt.py
 # Auto-split part 13: enhance_ocr_prompt
 def enhance_ocr_prompt(user_prompt: str, has_image: bool) -> str:
     if not has_image:
@@ -665,12 +588,8 @@ def enhance_ocr_prompt(user_prompt: str, has_image: bool) -> str:
         )
     return base
 
-# --- END INLINED MODULAR PART ---
-
-# ── کیبورد اینلاین زیر جواب AI ───────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_014_get_ai_result_keyboard.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_014_get_ai_result_keyboard.py
 # Auto-split part 14: get_ai_result_keyboard
 def get_ai_result_keyboard(user_id: int, answer_id: str = "", *, offer_continue: bool = False):
     """
@@ -692,10 +611,8 @@ def get_ai_result_keyboard(user_id: int, answer_id: str = "", *, offer_continue:
         return None
     return InlineKeyboardMarkup(rows)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/ai_extras_parts/part_015_build_continue_prompt.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: ai_extras_parts/part_015_build_continue_prompt.py
 from typing import Optional
 
 # Auto-split part 15: build_continue_prompt
@@ -722,4 +639,66 @@ def build_continue_prompt(user_id: int, answer_id: str = "") -> Optional[str]:
         return f"موضوع اصلی کاربر: {prompt}\n\n{base}"
     return base
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import io
+import re
+import time
+import hashlib
+from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timedelta
+
+import pytz
+
+from bot.logger import logger
+
+TEHRAN = pytz.timezone("Asia/Tehran")
+
+# answer_id -> (user_id, text, expires, prompt)
+_ANSWER_CACHE: Dict[str, Tuple[int, str, float, str]] = {}
+_CACHE_TTL = 3600 * 6
+
+_LAST_ANSWER: Dict[int, str] = {}
+# user_id -> last original user prompt (for continue)
+_LAST_PROMPT: Dict[int, str] = {}
+# user_id -> last answer_id
+_LAST_ANSWER_ID: Dict[int, str] = {}
+
+
+# ── نمودار ──────────────────────────────────────────────────────────────────
+
+# ── جستجوی وب ───────────────────────────────────────────────────────────────
+
+# ── یادآوری زبان طبیعی ─────────────────────────────────────────────────────
+
+# ── OCR فیش (پرامپت تقویت‌شده) ─────────────────────────────────────────────
+
+RECEIPT_OCR_PROMPT = (
+    "این تصویر احتمالاً فیش، رسید، فاکتور یا کارت است. "
+    "همه متن را با دقت OCR کن و ساخت‌یافته به فارسی برگردان:\n"
+    "• فروشنده / فروشگاه\n"
+    "• تاریخ و ساعت\n"
+    "• اقلام (نام + تعداد + قیمت)\n"
+    "• جمع کل / مالیات / تخفیف\n"
+    "• شماره پیگیری / مرجع\n"
+    "• هر مبلغ یا شماره مهم دیگر\n"
+    "اگر خوانا نبود بگو کدام بخش مبهم است. اعداد را دقیق بنویس."
+)
+
+
+# ── کیبورد اینلاین زیر جواب AI ───────────────────────────────────────────────
+
+ai_extras_parts/part_001_parse_natural_weather.py
+ai_extras_parts/part_002_parse_natural_crypto_price.py
+ai_extras_parts/part_003_store_answer.py
+ai_extras_parts/part_004_get_stored_answer.py
+ai_extras_parts/part_005_get_stored_prompt.py
+ai_extras_parts/part_006_get_last_answer.py
+ai_extras_parts/part_007_get_last_prompt.py
+ai_extras_parts/part_008_get_last_answer_id.py
+ai_extras_parts/part_009_make_chart_image.py
+ai_extras_parts/part_010_parse_chart_request.py
+ai_extras_parts/part_011_web_search.py
+ai_extras_parts/part_012_parse_natural_reminder.py
+ai_extras_parts/part_013_enhance_ocr_prompt.py
+ai_extras_parts/part_014_get_ai_result_keyboard.py
+ai_extras_parts/part_015_build_continue_prompt.py

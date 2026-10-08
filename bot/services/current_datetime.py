@@ -1,5 +1,4 @@
 """Reliable current date/time service for the AI tool router."""
-from __future__ import annotations
 
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo

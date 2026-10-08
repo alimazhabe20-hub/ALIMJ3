@@ -3,7 +3,6 @@
 This module intentionally contains only the product-shopping interception logic.
 The actual handler in ``handlers_messages_parts_part_999_core_legacy.py`` imports it before generic AI.
 """
-from __future__ import annotations
 
 import re
 

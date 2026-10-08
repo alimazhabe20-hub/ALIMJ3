@@ -3,7 +3,6 @@
 Imported by the stable ai_tools facade. It adds one generic, read-only tool
 instead of adding a large number of Telegram buttons.
 """
-from __future__ import annotations
 
 from bot.services.tool_runtime import register_tool
 from bot.services.api_hub import (

@@ -1,5 +1,4 @@
 """Advanced personal reminder manager: list, pause/resume, edit and delete."""
-from __future__ import annotations
 from datetime import datetime
 import pytz
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup

@@ -4,15 +4,14 @@ IMPORTANT: Keep this file small and stable. New functionality belongs in the
 secondary ``ai_media_parts/`` modules. The complete legacy implementation is kept
 unchanged in ``ai_media_parts/part_999_core_legacy.py`` for compatibility.
 """
-from bot.utils import load_modular_part
 
-
-# --- INLINED MODULAR PART: bot/services/ai_media_parts/part_999_core_legacy.py ---
+# BEGIN MERGED LEGACY PART: ai_media_parts/part_999_core_legacy.py
 """Media, voice, image, music and video helpers for AI service.
 
 Kept separate from the main AI router to keep modules focused and easier to test.
 Runtime dependencies are imported from ai_service after its initialization.
 """
+
 import asyncio
 import base64
 import os
@@ -992,7 +991,7 @@ async def translate_voice(
 
 
 
-# --- END INLINED MODULAR PART ---
-
+# END MERGED LEGACY PART: 
 from bot.services import ai_service as _ai
 TTS_VOICE = _ai.TTS_VOICE
+ai_media_parts/part_999_core_legacy.py

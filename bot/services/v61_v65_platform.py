@@ -4,10 +4,8 @@ IMPORTANT: Keep this file small and stable. New functionality belongs in the
 secondary ``v61_v65_platform_parts/`` modules. The complete legacy implementation is kept
 unchanged in ``v61_v65_platform_parts/part_999_core_legacy.py`` for compatibility.
 """
-from bot.utils import load_modular_part
 
-
-# --- INLINED MODULAR PART: bot/services/v61_v65_platform_parts/part_999_core_legacy.py ---
+# BEGIN MERGED LEGACY PART: v61_v65_platform_parts/part_999_core_legacy.py
 """V61-V65 platform layer: intent routing, memory, watchlists, alerts, queue, i18n and health.
 Designed as a dependency-light layer over the existing ALIMJ3 services.
 """
@@ -261,4 +259,5 @@ def auto_capture_memory(user_id:int,text:str) -> None:
             except Exception as exc: logger.debug("memory capture skipped: %s",exc)
             return
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+v61_v65_platform_parts/part_999_core_legacy.py

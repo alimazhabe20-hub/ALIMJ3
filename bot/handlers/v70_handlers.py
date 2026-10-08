@@ -1,4 +1,3 @@
-from __future__ import annotations
 import asyncio, re
 from telegram import Update
 from telegram.ext import ContextTypes

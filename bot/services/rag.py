@@ -5,28 +5,8 @@ then ranked with a BM25-style lexical score plus phrase/coverage boosts. It is
 safe for production use because only an explicit allow-list is indexed; user
 memory and jokes_data.json are handled elsewhere and are never read here.
 """
-from bot.utils import load_modular_part
 
-import math
-import re
-from dataclasses import dataclass
-from functools import lru_cache
-from pathlib import Path
-from typing import Any
-
-ROOT = Path(__file__).resolve().parents[2]
-ALLOWED_DOCUMENTS = ("README.md", "RELEASE.md", ".env.example", "render.yaml", "pyproject.toml")
-MAX_FILE_CHARS = 80_000
-CHUNK_CHARS = 1_200
-CHUNK_OVERLAP = 180
-MAX_RESULTS = 8
-MAX_CONTEXT_CHARS = 4_000
-
-_TOKEN_RE = re.compile(r"[\w\u0600-\u06ff]{2,}")
-
-
-
-# --- INLINED MODULAR PART: bot/services/rag_parts/part_001_Chunk.py ---
+# BEGIN MERGED LEGACY PART: rag_parts/part_001_Chunk.py
 from dataclasses import dataclass
 
 # Auto-split part 1: Chunk
@@ -37,10 +17,8 @@ class Chunk:
     text: str
     tokens: tuple[str, ...]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/rag_parts/part_002_ScoredChunk.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: rag_parts/part_002_ScoredChunk.py
 from dataclasses import dataclass
 
 # Auto-split part 2: ScoredChunk
@@ -50,28 +28,22 @@ class ScoredChunk:
     score: float
     coverage: float
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/rag_parts/part_003__normalize.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: rag_parts/part_003__normalize.py
 # Auto-split part 3: _normalize
 def _normalize(text: str) -> str:
     text = (text or "").lower().replace("ي", "ی").replace("ك", "ک")
     text = re.sub(r"[\u200c\u200d]", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/rag_parts/part_004__tokens.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: rag_parts/part_004__tokens.py
 # Auto-split part 4: _tokens
 def _tokens(text: str) -> tuple[str, ...]:
     return tuple(_TOKEN_RE.findall(_normalize(text)))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/rag_parts/part_005__chunk_text.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: rag_parts/part_005__chunk_text.py
 # Auto-split part 5: _chunk_text
 def _chunk_text(text: str) -> list[str]:
     clean = text.replace("\r\n", "\n").strip()
@@ -94,10 +66,8 @@ def _chunk_text(text: str) -> list[str]:
         start = max(start + 1, end - CHUNK_OVERLAP)
     return chunks
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/rag_parts/part_006__index.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: rag_parts/part_006__index.py
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from bot.services.rag import Chunk
@@ -122,28 +92,22 @@ def _index() -> tuple[Chunk, ...]:
                 result.append(Chunk(name, idx, part, toks))
     return tuple(result)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/rag_parts/part_007_refresh_index.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: rag_parts/part_007_refresh_index.py
 # Auto-split part 7: refresh_index
 def refresh_index() -> None:
     """Invalidate the bounded in-process RAG index."""
     _index.cache_clear()
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/rag_parts/part_008_index_stats.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: rag_parts/part_008_index_stats.py
 # Auto-split part 8: index_stats
 def index_stats() -> dict[str, int]:
     chunks = _index()
     return {"documents": len({c.source for c in chunks}), "chunks": len(chunks)}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/rag_parts/part_009_search.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: rag_parts/part_009_search.py
 from typing import Any
 
 # Auto-split part 9: search
@@ -203,10 +167,8 @@ def search(query: str, limit: int = 5) -> list[dict[str, Any]]:
         for item in scored[:cap]
     ]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/services/rag_parts/part_010_build_context.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: rag_parts/part_010_build_context.py
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from bot.services.rag import MAX_CONTEXT_CHARS
@@ -229,4 +191,32 @@ def build_context(query: str, limit: int = 5, max_chars: int = MAX_CONTEXT_CHARS
         used += len(block) + 2
     return "\n\n".join(blocks)
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import math
+import re
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[2]
+ALLOWED_DOCUMENTS = ("README.md", "RELEASE.md", ".env.example", "render.yaml", "pyproject.toml")
+MAX_FILE_CHARS = 80_000
+CHUNK_CHARS = 1_200
+CHUNK_OVERLAP = 180
+MAX_RESULTS = 8
+MAX_CONTEXT_CHARS = 4_000
+
+_TOKEN_RE = re.compile(r"[\w\u0600-\u06ff]{2,}")
+
+
+rag_parts/part_001_Chunk.py
+rag_parts/part_002_ScoredChunk.py
+rag_parts/part_003__normalize.py
+rag_parts/part_004__tokens.py
+rag_parts/part_005__chunk_text.py
+rag_parts/part_006__index.py
+rag_parts/part_007_refresh_index.py
+rag_parts/part_008_index_stats.py
+rag_parts/part_009_search.py
+rag_parts/part_010_build_context.py

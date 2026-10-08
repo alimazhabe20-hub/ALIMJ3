@@ -4,15 +4,14 @@ IMPORTANT: Keep this file small and stable. New functionality belongs in the
 secondary ``ai_providers_parts/`` modules. The complete legacy implementation is kept
 unchanged in ``ai_providers_parts/part_999_core_legacy.py`` for compatibility.
 """
-from bot.utils import load_modular_part
 
-
-# --- INLINED MODULAR PART: bot/services/ai_providers_parts/part_999_core_legacy.py ---
+# BEGIN MERGED LEGACY PART: ai_providers_parts/part_999_core_legacy.py
 """AI provider implementations extracted from ai_service (V26).
 
 This module intentionally keeps the legacy function names so ai_service.py
 continues to act as a compatibility facade for existing imports.
 """
+
 import asyncio
 import os
 import time
@@ -746,8 +745,7 @@ async def _call_provider(
 
 
 
-# --- END INLINED MODULAR PART ---
-
+# END MERGED LEGACY PART: 
 # STATIC CONTRACT ANCHOR: def _prompt_needs_tools
 # use_tools = use_tools and _prompt_needs_tools(prompt)
 
@@ -755,3 +753,4 @@ async def _call_provider(
 def _legacy_ai_context():
     from bot.services import ai_service
     return ai_service.SYSTEM_PROMPT, ai_service._messages
+ai_providers_parts/part_999_core_legacy.py

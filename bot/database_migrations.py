@@ -5,7 +5,6 @@ pre-V36 databases are adopted as the current baseline after their normal
 schema initialization has completed. Future schema changes can then be added
 as numbered, idempotent migrations without changing callers of bot.database.
 """
-from __future__ import annotations
 
 import sqlite3
 import time

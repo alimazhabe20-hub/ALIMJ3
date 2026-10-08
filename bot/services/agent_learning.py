@@ -3,7 +3,6 @@
 Only aggregate success/failure counters and a short last error are retained;
 conversation text is never stored here.
 """
-from __future__ import annotations
 
 from bot.database import get_agent_tool_reliability, record_agent_outcome
 

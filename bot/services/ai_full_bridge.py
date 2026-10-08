@@ -14,7 +14,6 @@ When you add a *new* feature later, prefer::
 
 so it is picked up automatically without editing this bridge.
 """
-from __future__ import annotations
 
 import logging
 from typing import Any

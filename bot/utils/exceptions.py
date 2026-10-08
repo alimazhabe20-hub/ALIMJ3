@@ -3,7 +3,6 @@
 The hierarchy is intentionally small and dependency-free so lower-level utils can
 raise precise errors without importing Telegram handlers or service modules.
 """
-from __future__ import annotations
 
 
 class ALIMJError(Exception):

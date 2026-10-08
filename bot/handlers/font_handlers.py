@@ -1,5 +1,4 @@
 """Domain-specific Telegram handlers. Compatibility-preserving extraction from feature_handlers."""
-from __future__ import annotations
 from bot.utils.helpers import get_font_keyboard
 from bot.features.fonts import apply_font, apply_all_fonts
 

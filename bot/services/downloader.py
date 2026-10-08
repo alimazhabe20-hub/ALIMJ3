@@ -4,10 +4,8 @@ IMPORTANT: Keep this file small and stable. New functionality belongs in the
 secondary ``downloader_parts/`` modules. The complete legacy implementation is kept
 unchanged in ``downloader_parts/part_999_core_legacy.py`` for compatibility.
 """
-from bot.utils import load_modular_part
 
-
-# --- INLINED MODULAR PART: bot/services/downloader_parts/part_999_core_legacy.py ---
+# BEGIN MERGED LEGACY PART: downloader_parts/part_999_core_legacy.py
 """Production downloader for public URLs.
 
 Design goals: safe URL validation (including redirects), bounded concurrency,
@@ -15,6 +13,7 @@ per-user throttling, persistent small cache, resumable direct HTTP downloads,
 metadata/format probing, and clear handling of site blocks.  It never bypasses
 CAPTCHA, authentication, DRM, geo/access controls, or site bans.
 """
+
 import asyncio
 import hashlib
 import ipaddress
@@ -1091,11 +1090,11 @@ def user_message(code: str) -> str:
 # Regression contract: "extractor_args": {"instagram": {"app_id": "web"}}
 # Never treat an Instagram HTML/login/challenge page as a successfully downloaded media file.
 
-# --- END INLINED MODULAR PART ---
-
+# END MERGED LEGACY PART: 
 # STATIC CONTRACT ANCHORS:
 # if _is_instagram_url(current):
 # return current
 # "extractor_args": {"instagram": {"app_id": "web"}}
 # Never treat an Instagram HTML/login/challenge page
 # STATIC CONTRACT: _normalize_media_url | login page | "extractor_args"
+downloader_parts/part_999_core_legacy.py
