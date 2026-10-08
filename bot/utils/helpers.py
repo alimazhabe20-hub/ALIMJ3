@@ -15,7 +15,7 @@ import jdatetime
 import pytz
 from datetime import datetime
 from bot.config import config
-from bot.api.calendar import get_today_tehran, get_today_local, get_hijri_date, get_shamsi_events, get_hijri_events
+from bot.api.calendar import get_today_tehran, get_today_local, get_hijri_date, get_shamsi_events, get_hijri_events, get_country_timezone
 from bot.api.prayer import get_prayer_times, get_next_prayer_time, get_prayer_times_for_date
 from bot.api.api_weather import get_weather, format_weather
 from bot.api.tgju import get_market_prices
@@ -60,7 +60,7 @@ async def build_message(user_id, user_name, city):
         return (
             f"🌟 سلام {name} عزیز!\n\n"
             f"⚠️ بارگذاری اطلاعات موقتاً ممکن نیست.\n"
-            f"کد: {type(e).__name__}\n"
+            f"لطفاً چند لحظه بعد دوباره تلاش کنید.\n"
             f"/start را دوباره بفرستید."
         )
 
