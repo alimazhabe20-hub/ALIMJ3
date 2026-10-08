@@ -268,9 +268,3 @@ CITY_COORDS = {
 }
 
 
-prayer_parts/part_001__normalize_city.py
-prayer_parts/part_002__get_coords.py
-prayer_parts/part_003__parse_timings.py
-prayer_parts/part_004_get_prayer_times.py
-prayer_parts/part_005_get_next_prayer_time.py
-prayer_parts/part_006_get_prayer_times_for_date.py
