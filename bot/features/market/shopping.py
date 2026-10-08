@@ -1117,7 +1117,7 @@ def _save_history_rows(rows: list[dict]) -> None:
         conn=get_db_connection(); c=conn.cursor()
         c.execute("""CREATE TABLE IF NOT EXISTS shopping_price_history (id INTEGER PRIMARY KEY AUTOINCREMENT, product_key TEXT, title TEXT, source TEXT, url TEXT, price INTEGER, captured_at TEXT DEFAULT (datetime('now')))""")
         for x in rows:
-            if not x.get("price"): continue
+            if not x.get("price") or not x.get("_verified_direct"): continue
             key=hashlib.sha1(re.sub(r"\s+"," ",str(x.get("title") or "").lower()).encode("utf-8","ignore")).hexdigest()[:24]
             c.execute("INSERT INTO shopping_price_history(product_key,title,source,url,price) VALUES(?,?,?,?,?)",(key,str(x.get("title") or "")[:220],str(x.get("source") or "")[:80],str(x.get("url") or "")[:1000],int(x["price"])))
         conn.commit(); conn.close()
@@ -1239,34 +1239,55 @@ def _history_summary(query: str, days: int = 30) -> tuple[str, dict]:
 
 
 def _rank(rows: list[dict], query: str, max_price: int) -> list[dict]:
-    seen=set(); out=[]
+    intent=_shopping_intent(query)
+    seen_urls=set(); seen_model_source_price=set(); out=[]
     for x in rows:
         url=str(x.get("url") or "").strip()
-        if not url or url in seen: continue
-        seen.add(url)
+        if not url or url in seen_urls: continue
+        seen_urls.add(url)
         title=str(x.get("title") or ""); price=x.get("price")
-        rel=_relevance(title, query)
-        if rel < 15 and _tokens(query): continue
-        trust=TRUST.get(str(x.get("source") or "وب"), 60)
-        price_bonus=0
-        if price:
-            price_bonus=18 if max_price and price<=max_price else 5
-        x["_score"]=rel+trust*0.18+price_bonus
+        if not _shopping_product_match(x,query,intent): continue
+        if max_price and price and int(price)>int(max_price): continue
+        rel=_relevance(title,query)
+        if rel < 15: continue
+        model=_shopping_model_key(title)
+        src=str(x.get("source") or "وب")
+        dedupe=(model,src,int(price or 0))
+        if model and dedupe in seen_model_source_price: continue
+        seen_model_source_price.add(dedupe)
+        trust=TRUST.get(src,60)
+        score=rel + trust*0.18 + (18 if price and max_price and price<=max_price else 5 if price else 0)
+        if x.get("_verified_direct"): score+=8
+        x["_score"]=score
+        x["_model_key"]=model
         out.append(x)
-    out.sort(key=lambda x:(-x["_score"], x.get("price") or 10**30))
+    out.sort(key=lambda x:(-float(x.get("_score",0)), x.get("price") or 10**30))
     return out
 
 
 def _history_summary(query: str, days: int = 30) -> tuple[str, dict]:
     try:
         from bot.database import get_db_connection
-        conn=get_db_connection(); rows=conn.execute("SELECT title,source,price,captured_at,url FROM shopping_price_history WHERE captured_at >= datetime('now', ?) ORDER BY id DESC LIMIT 3000",(f"-{max(1,int(days))} days",)).fetchall(); conn.close()
-        qt=_tokens(query); matched=[r for r in rows if len(qt & _tokens(r[0])) >= max(1, len(qt)//2)] if qt else []
+        conn=get_db_connection(); rows=conn.execute(
+            "SELECT title,source,price,captured_at,url FROM shopping_price_history WHERE captured_at >= datetime('now', ?) ORDER BY id DESC LIMIT 5000",
+            (f"-{max(1,int(days))} days",)
+        ).fetchall(); conn.close()
+        intent=_shopping_intent(query); budget=_budget(query); target_model_tokens=set(_shopping_model_key(_clean_query(query)).split())
+        matched=[]
+        for r in rows:
+            title=str(r[0] or ""); price=int(r[2] or 0)
+            if not _shopping_product_match({"title":title,"snippet":""},query,intent): continue
+            if budget and (not price or price>budget): continue
+            if target_model_tokens:
+                tt=set(_shopping_model_key(title).split())
+                if len(target_model_tokens & tt) < max(1,min(2,len(target_model_tokens))): continue
+            matched.append(r)
         prices=[int(r[2]) for r in matched if r[2]]
-        if not prices: return "", {}
+        if not prices: return "",{}
         stats={"min":min(prices),"max":max(prices),"avg":int(sum(prices)/len(prices)),"count":len(prices)}
-        return f"📈 تاریخچه مشاهده‌شده: کمینه {stats['min']:,} | بیشینه {stats['max']:,} | میانگین {stats['avg']:,} تومان در {days} روز اخیر", stats
-    except Exception: return "", {}
+        return f"📈 تاریخچه مرتبط: کمینه {stats['min']:,} | بیشینه {stats['max']:,} | میانگین {stats['avg']:,} تومان در {days} روز اخیر",stats
+    except Exception:
+        return "",{}
 
 
 def _create_alert(user_id: int, query: str, target: int, direction: str = "below") -> str:
@@ -1333,6 +1354,25 @@ def _diversify_shopping_rows(rows: list[dict], max_results: int = 10, max_per_so
         if len(result) >= max_results:
             return result
     return result
+
+
+async def _mobo_phone_guide(query: str) -> set[str]:
+    """موبونیوز فقط منبع تحلیل/پیشنهاد است و هرگز منبع قیمت لحظه‌ای محسوب نمی‌شود."""
+    try:
+        async with _SEARCH_SEM:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0,connect=4.0),follow_redirects=True,headers={"User-Agent":UA,"Accept-Language":"fa-IR,fa;q=0.9"}) as client:
+                r=await client.get("https://mobo.news/best-priced-phone-guide/")
+        if r.status_code>=400: return set()
+        soup=BeautifulSoup(r.text,"html.parser"); out=set()
+        for node in soup.select("h2,h3,h4,p,li"):
+            t=" ".join(node.get_text(" ",strip=True).split())
+            if len(t)<5: continue
+            # فقط متن‌های دارای نشانه مدل/برند گوشی
+            if any(k in t.lower() for k in ("شیائومی","xiaomi","redmi","poco","پوکو","ردمی","سامسونگ","samsung","iphone","آیفون")):
+                out.add(_shopping_model_key(t))
+        return {x for x in out if x}
+    except Exception as exc:
+        logger.debug("mobo guide failed: %s",exc); return set()
 
 
 async def search_shopping(query: str = "", source: str = "all", max_results: int = 10, min_price: int = 0, max_price: int = 0, user_id: int = 0) -> str:
@@ -1426,6 +1466,15 @@ async def search_shopping(query: str = "", source: str = "all", max_results: int
 
         # رتبه‌بندی اولیه برای انتخاب صفحاتی که واقعاً باید باز شوند.
         rows=_rank(filtered,clean,max_price)
+
+        # موبونیوز برای تحلیل پیشنهادها بررسی می‌شود؛ قیمت آن وارد قیمت فروشگاهی نمی‌شود.
+        mobo_models=await _mobo_phone_guide(raw) if intent.get("phone") else set()
+        if mobo_models:
+            for x in rows:
+                mk=_shopping_model_key(x.get("title",""))
+                if mk and any(mk==mm or len(set(mk.split()) & set(mm.split()))>=2 for mm in mobo_models):
+                    x["_mobo_match"]=True
+                    x["_score"]=float(x.get("_score",0))+18
 
         # نتایج جستجوی snippet قیمت قطعی نیستند؛ صفحات برتر را مستقیم بررسی می‌کنیم.
         inspect_candidates=[]
@@ -1545,6 +1594,8 @@ async def search_shopping(query: str = "", source: str = "all", max_results: int
                 lines.append(f"• 📊 همین مدل در {len({x.get('source') for x in same_model})} منبع پیدا شد؛ بازه قیمت: {model_prices[0]:,} تا {model_prices[-1]:,} تومان")
         if unique_sources>=2:
             lines.append(f"• ✅ مقایسه واقعی چندفروشگاهی: {unique_sources} منبع در خروجی حضور دارند.")
+        mobo_hits=sum(1 for x in candidates if x.get("_mobo_match"))
+        lines.append(f"• 🧠 موبونیوز: {mobo_hits} مدل با راهنمای بهترین گوشی‌های بازه‌های قیمتی تطابق داشتند." if mobo_hits else "• 🧠 موبونیوز بررسی شد؛ تطابق کافی با مدل‌های نتیجه فعلی پیدا نشد.")
         if max_price:
             lines.append(f"• 💰 فاصله تا سقف بودجه: {max_price-best['price']:,} تومان")
         lines.append("• ⚠️ قبل از خرید، گارانتی، رجیستری، موجودی و قیمت نهایی همان فروشنده را دوباره بررسی کن.")
