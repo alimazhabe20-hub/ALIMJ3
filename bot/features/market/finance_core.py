@@ -3,81 +3,22 @@
 This module is intentionally independent of the large finance facade. Public
 legacy function names remain re-exported by ``finance.py`` for compatibility.
 """
-from bot.utils import load_modular_part
 
-import asyncio
-import re
-from datetime import datetime
-from typing import Any
-
-from bs4 import BeautifulSoup
-import httpx
-
-from bot.logger import logger
-from bot.utils.http_client import pooled_async_client, request_with_retry, safe_json
-
-_cache = {}
-_cache_t = {}
-_cache_locks = {}
-
-HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"}
-
-TGJU_SLUGS = {
-    "dollar": "price_dollar_rl", "euro": "price_eur", "pound": "price_gbp",
-    "dirham": "price_aed", "lira": "price_try", "yuan": "price_cny",
-    "ruble": "price_rub", "afghani": "price_afn", "dinar_iq": "price_iqd",
-    "gold18": "geram18", "silver": "silver_999", "copper": "copper",
-    "coin_emami": "sekee", "coin_bahar": "sekeb", "coin_half": "nim",
-    "coin_quarter": "rob",
-}
-_AJAX_URLS = ("https://call1.tgju.org/ajax.json", "https://call2.tgju.org/ajax.json")
-_BULK_CACHE_KEY = "tgju_bulk"
-_BULK_TTL = 90
-
-SYMBOL_TO_ID = {
-    "btc": "bitcoin", "bitcoin": "bitcoin", "بیتکوین": "bitcoin", "بیت‌کوین": "bitcoin",
-    "eth": "ethereum", "ethereum": "ethereum", "اتریوم": "ethereum",
-    "usdt": "tether", "tether": "tether", "تتر": "tether",
-    "usdc": "usd-coin", "busd": "binance-usd", "ton": "the-open-network",
-    "toncoin": "the-open-network", "تون": "the-open-network", "bnb": "binancecoin",
-    "sol": "solana", "xrp": "ripple", "ada": "cardano", "doge": "dogecoin",
-    "dot": "polkadot", "matic": "matic-network", "polygon": "matic-network",
-    "avax": "avalanche-2", "link": "chainlink", "trx": "tron", "shib": "shiba-inu",
-    "ltc": "litecoin", "bch": "bitcoin-cash", "atom": "cosmos", "uni": "uniswap",
-    "near": "near", "apt": "aptos", "arb": "arbitrum", "op": "optimism", "fil": "filecoin",
-    "icp": "internet-computer", "vet": "vechain", "algo": "algorand", "xlm": "stellar",
-    "eos": "eos", "xtz": "tezos", "aave": "aave", "mkr": "maker",
-    "comp": "compound-governance-token", "snx": "havven", "crv": "curve-dao-token",
-    "sushi": "sushi", "1inch": "1inch", "pepe": "pepe", "floki": "floki",
-    "bonk": "bonk", "wif": "dogwifcoin", "sui": "sui", "sei": "sei-network",
-    "inj": "injective-protocol", "tia": "celestia", "render": "render-token",
-    "fet": "fetch-ai", "rndr": "render-token", "imx": "immutable-x", "gala": "gala",
-    "sand": "the-sandbox", "mana": "decentraland", "axs": "axie-infinity",
-    "theta": "theta-token", "ftm": "fantom", "hbar": "hedera-hashgraph",
-    "egld": "elrond-erd-2", "kas": "kaspa", "rune": "thorchain", "stx": "blockstack",
-    "ordi": "ordinals", "sats": "sats-ordinals",
-}
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_001__get_usd_rial.py ---
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_001__get_usd_rial.py
 # Auto-split part 1: _get_usd_rial
 async def _get_usd_rial() -> int | None:
     return await _tgju_price("price_dollar_rl")
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_002_pn.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_002_pn.py
 from typing import Any
 
 # Auto-split part 2: pn
 def pn(n: Any) -> str:
     return str(n).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_003__parse_price.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_003__parse_price.py
 from typing import Any
 
 # Auto-split part 3: _parse_price
@@ -94,10 +35,8 @@ def _parse_price(raw: Any) -> int | None:
     except (TypeError, ValueError):
         return None
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_004__fetch_tgju_bulk.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_004__fetch_tgju_bulk.py
 from typing import Any
 
 # Auto-split part 4: _fetch_tgju_bulk
@@ -126,10 +65,8 @@ async def _fetch_tgju_bulk() -> dict[str, Any]:
     # stale-while-error: market values are better than an avoidable outage.
     return _cache.get(_BULK_CACHE_KEY, {})
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_005__tgju_price.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_005__tgju_price.py
 # Auto-split part 5: _tgju_price
 async def _tgju_price(slug: str) -> int | None:
     key = f"tgju_{slug}"
@@ -166,10 +103,8 @@ async def _tgju_price(slug: str) -> int | None:
         logger.error(f"tgju fallback {slug}: {e}")
     return None
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_006_resolve_coin_id.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_006_resolve_coin_id.py
 from typing import Optional
 
 # Auto-split part 6: resolve_coin_id
@@ -206,10 +141,8 @@ async def resolve_coin_id(symbol: str) -> Optional[str]:
         logger.warning(f"resolve_coin_id {symbol}: {e}")
     return None
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_007__crypto_simple.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_007__crypto_simple.py
 from typing import Any
 
 # Auto-split part 7: _crypto_simple
@@ -266,10 +199,8 @@ async def _crypto_simple(ids: list[str]) -> dict[str, Any]:
         logger.error(f"paprika simple: {e}")
     return {}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_008__top_from_coinlore.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_008__top_from_coinlore.py
 from typing import Any
 
 # Auto-split part 8: _top_from_coinlore
@@ -292,10 +223,8 @@ async def _top_from_coinlore(limit: int = 20) -> list[dict[str, Any]]:
         logger.error(f"coinlore: {e}")
         return []
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_009__top_from_paprika.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_009__top_from_paprika.py
 from typing import Any
 
 # Auto-split part 9: _top_from_paprika
@@ -320,10 +249,8 @@ async def _top_from_paprika(limit: int = 20) -> list[dict[str, Any]]:
         logger.error(f"paprika top: {e}")
         return []
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_010_get_top_crypto.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_010_get_top_crypto.py
 # Auto-split part 10: get_top_crypto
 async def get_top_crypto(limit: int = 20) -> str:
     key = f"top_crypto_{limit}"
@@ -399,10 +326,8 @@ async def get_top_crypto(limit: int = 20) -> str:
     _cache_t[key] = now
     return result
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_011_get_crypto_price.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_011_get_crypto_price.py
 # Auto-split part 11: get_crypto_price
 async def get_crypto_price(symbol: str = "btc") -> str:
     """قیمت لحظه‌ای یک رمزارز با دلار و تومان، با fallbackهای موجود."""
@@ -431,10 +356,8 @@ async def get_crypto_price(symbol: str = "btc") -> str:
         lines.append(f"📊 تغییر ۲۴ساعت: {'🟢' if float(chg) >= 0 else '🔴'} {float(chg):+.2f}%")
     return "\n".join(lines)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_012_convert_crypto.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_012_convert_crypto.py
 # Auto-split part 12: convert_crypto
 async def convert_crypto(amount: float, symbol: str) -> str:
     """تبدیل هر ارز دیجیتال به دلار و تومان — پشتیبانی تقریباً همه کوین‌ها"""
@@ -491,10 +414,8 @@ async def convert_crypto(amount: float, symbol: str) -> str:
                 lines.append(f"🔁 ۱ میلیون تومان ≈ {pn(f'{per_toman * 1_000_000:,.6f}')} {symbol.upper()}")
     return "\n".join([x for x in lines if x])
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_013_full_market_prices.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_013_full_market_prices.py
 # Auto-split part 13: full_market_prices
 async def full_market_prices() -> str:
     """قیمت بازار بدون کریپتو — یک درخواست JSON (سریع)"""
@@ -542,37 +463,16 @@ async def full_market_prices() -> str:
     lines.append("\n💡 کریپتو: از دکمه «۲۰ ارز برتر» یا تبدیل / نمودار / تحلیل استفاده کنید.")
     return "\n".join(lines)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_014_rial_toman.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_014_rial_toman.py
 # Auto-split part 14: rial_toman
 def rial_toman(amount: float, to_toman: bool = True) -> str:
     if to_toman:
         return f"💵 {pn(f'{amount:,.0f}')} ریال = **{pn(f'{amount/10:,.0f}')} تومان**"
     return f"💵 {pn(f'{amount:,.0f}')} تومان = **{pn(f'{amount*10:,.0f}')} ریال**"
 
-# --- END INLINED MODULAR PART ---
-
-# نام‌های رایج فارسی برای ارز و کریپتو
-_FA_CURRENCY = {
-    "دلار": "usd", "دلارآمریکا": "usd", "usd": "usd", "dollar": "usd", "دلاری": "usd",
-    "یورو": "eur", "euro": "eur", "eur": "eur",
-    "پوند": "gbp", "pound": "gbp", "gbp": "gbp",
-    "تومان": "toman", "تومن": "toman", "tmn": "toman",
-    "ریال": "rial", "irr": "rial",
-    "درهم": "aed", "aed": "aed",
-    "لیر": "try", "try": "try",
-    "یوان": "cny", "cny": "cny",
-    "روبل": "rub", "rub": "rub",
-    "بیتکوین": "btc", "بیت‌کوین": "btc", "بیت کوین": "btc",
-    "اتریوم": "eth", "تتر": "usdt", "تون": "ton", "سولانا": "sol",
-    "کاردانو": "ada", "ریپل": "xrp", "دوج": "doge", "دوج‌کوین": "doge",
-}
-
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_015_convert_currency.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_015_convert_currency.py
 # Auto-split part 15: convert_currency
 async def convert_currency(amount: float, from_cur: str, to_cur: str = "") -> str:
     """تبدیل ارز / کریپتو هوشمند — پشتیبانی گسترده + تبدیل دوطرفه"""
@@ -650,10 +550,8 @@ async def convert_currency(amount: float, from_cur: str, to_cur: str = "") -> st
         "• `50 تتر` یا `۲ بیتکوین`"
     )
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_016_profit_loss.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_016_profit_loss.py
 # Auto-split part 16: profit_loss
 def profit_loss(buy: float, sell: float, qty: float = 1.0) -> str:
     if buy <= 0:
@@ -676,10 +574,8 @@ def profit_loss(buy: float, sell: float, qty: float = 1.0) -> str:
         f"{'✅ معامله در سود است.' if net >= 0 else '⚠️ معامله در ضرر است.'}"
     )
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_017_parse_profit.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_017_parse_profit.py
 # Auto-split part 17: parse_profit
 def parse_profit(text: str) -> tuple[float, float, float] | None:
     t = text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
@@ -689,10 +585,8 @@ def parse_profit(text: str) -> tuple[float, float, float] | None:
         return nums[0], nums[1], nums[2] if len(nums) > 2 else 1.0
     return None
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_core_parts/part_018_parse_currency_input.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_core_parts/part_018_parse_currency_input.py
 # Auto-split part 18: parse_currency_input
 def parse_currency_input(text: str) -> tuple[float, str, str] | None:
     """پارس هوشمند: عدد + ارز مبدا + ارز مقصد (فارسی/انگلیسی)"""
@@ -726,4 +620,92 @@ def parse_currency_input(text: str) -> tuple[float, str, str] | None:
 
     return None
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import asyncio
+import re
+from datetime import datetime
+from typing import Any
+
+from bs4 import BeautifulSoup
+import httpx
+
+from bot.logger import logger
+from bot.utils.http_client import pooled_async_client, request_with_retry, safe_json
+
+_cache = {}
+_cache_t = {}
+_cache_locks = {}
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"}
+
+TGJU_SLUGS = {
+    "dollar": "price_dollar_rl", "euro": "price_eur", "pound": "price_gbp",
+    "dirham": "price_aed", "lira": "price_try", "yuan": "price_cny",
+    "ruble": "price_rub", "afghani": "price_afn", "dinar_iq": "price_iqd",
+    "gold18": "geram18", "silver": "silver_999", "copper": "copper",
+    "coin_emami": "sekee", "coin_bahar": "sekeb", "coin_half": "nim",
+    "coin_quarter": "rob",
+}
+_AJAX_URLS = ("https://call1.tgju.org/ajax.json", "https://call2.tgju.org/ajax.json")
+_BULK_CACHE_KEY = "tgju_bulk"
+_BULK_TTL = 90
+
+SYMBOL_TO_ID = {
+    "btc": "bitcoin", "bitcoin": "bitcoin", "بیتکوین": "bitcoin", "بیت‌کوین": "bitcoin",
+    "eth": "ethereum", "ethereum": "ethereum", "اتریوم": "ethereum",
+    "usdt": "tether", "tether": "tether", "تتر": "tether",
+    "usdc": "usd-coin", "busd": "binance-usd", "ton": "the-open-network",
+    "toncoin": "the-open-network", "تون": "the-open-network", "bnb": "binancecoin",
+    "sol": "solana", "xrp": "ripple", "ada": "cardano", "doge": "dogecoin",
+    "dot": "polkadot", "matic": "matic-network", "polygon": "matic-network",
+    "avax": "avalanche-2", "link": "chainlink", "trx": "tron", "shib": "shiba-inu",
+    "ltc": "litecoin", "bch": "bitcoin-cash", "atom": "cosmos", "uni": "uniswap",
+    "near": "near", "apt": "aptos", "arb": "arbitrum", "op": "optimism", "fil": "filecoin",
+    "icp": "internet-computer", "vet": "vechain", "algo": "algorand", "xlm": "stellar",
+    "eos": "eos", "xtz": "tezos", "aave": "aave", "mkr": "maker",
+    "comp": "compound-governance-token", "snx": "havven", "crv": "curve-dao-token",
+    "sushi": "sushi", "1inch": "1inch", "pepe": "pepe", "floki": "floki",
+    "bonk": "bonk", "wif": "dogwifcoin", "sui": "sui", "sei": "sei-network",
+    "inj": "injective-protocol", "tia": "celestia", "render": "render-token",
+    "fet": "fetch-ai", "rndr": "render-token", "imx": "immutable-x", "gala": "gala",
+    "sand": "the-sandbox", "mana": "decentraland", "axs": "axie-infinity",
+    "theta": "theta-token", "ftm": "fantom", "hbar": "hedera-hashgraph",
+    "egld": "elrond-erd-2", "kas": "kaspa", "rune": "thorchain", "stx": "blockstack",
+    "ordi": "ordinals", "sats": "sats-ordinals",
+}
+
+# نام‌های رایج فارسی برای ارز و کریپتو
+_FA_CURRENCY = {
+    "دلار": "usd", "دلارآمریکا": "usd", "usd": "usd", "dollar": "usd", "دلاری": "usd",
+    "یورو": "eur", "euro": "eur", "eur": "eur",
+    "پوند": "gbp", "pound": "gbp", "gbp": "gbp",
+    "تومان": "toman", "تومن": "toman", "tmn": "toman",
+    "ریال": "rial", "irr": "rial",
+    "درهم": "aed", "aed": "aed",
+    "لیر": "try", "try": "try",
+    "یوان": "cny", "cny": "cny",
+    "روبل": "rub", "rub": "rub",
+    "بیتکوین": "btc", "بیت‌کوین": "btc", "بیت کوین": "btc",
+    "اتریوم": "eth", "تتر": "usdt", "تون": "ton", "سولانا": "sol",
+    "کاردانو": "ada", "ریپل": "xrp", "دوج": "doge", "دوج‌کوین": "doge",
+}
+
+
+finance_core_parts/part_001__get_usd_rial.py
+finance_core_parts/part_002_pn.py
+finance_core_parts/part_003__parse_price.py
+finance_core_parts/part_004__fetch_tgju_bulk.py
+finance_core_parts/part_005__tgju_price.py
+finance_core_parts/part_006_resolve_coin_id.py
+finance_core_parts/part_007__crypto_simple.py
+finance_core_parts/part_008__top_from_coinlore.py
+finance_core_parts/part_009__top_from_paprika.py
+finance_core_parts/part_010_get_top_crypto.py
+finance_core_parts/part_011_get_crypto_price.py
+finance_core_parts/part_012_convert_crypto.py
+finance_core_parts/part_013_full_market_prices.py
+finance_core_parts/part_014_rial_toman.py
+finance_core_parts/part_015_convert_currency.py
+finance_core_parts/part_016_profit_loss.py
+finance_core_parts/part_017_parse_profit.py
+finance_core_parts/part_018_parse_currency_input.py

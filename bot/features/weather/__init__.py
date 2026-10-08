@@ -1,4 +1,9 @@
-"""Weather package facade for the flattened build."""
 from .features_weather_weather_extra import weather_forecast, air_quality, city_distance
 from .features_weather_weather import get_weather
-__all__ = ["weather_forecast", "air_quality", "city_distance", "get_weather"]
+
+__all__ = [
+    "weather_forecast",
+    "air_quality",
+    "city_distance",
+    "get_weather",
+]

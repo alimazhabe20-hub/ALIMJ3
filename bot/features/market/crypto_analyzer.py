@@ -2,7 +2,6 @@
 
 The public finance_crypto facade remains the compatibility entry point.
 """
-from __future__ import annotations
 
 async def analyze_crypto_impl(symbol: str, ai_summary: str='', ai_guide: str='', timeframe: str='4h') -> str:
     from bot.features.market.finance_crypto import SYMBOL_TO_ID, _advanced_levels, _atr, _build_smart_summary_pair, _compute_ta, _default_guide, _demand_supply_zone, _derive_signal, _detect_candle_patterns, _f, _fetch_binance_futures, _fetch_coingecko_detail, _fetch_fear_greed, _fetch_fundamentals, _fetch_klines_interval, _fetch_orderflow_context, _format_fear_greed, _format_long_short, _market_regime, _market_structure, _mtf_bundle, _mtf_convergence, _price_action_analysis, _professional_score, _rsi_divergence, _scenarios, _signal_track_stub, _support_resistance, _volume_breakout, adaptive_profile, alert_flags, analyze_gold, backtest_directional, calibration, dedupe_alerts, fmt_p, record_signal, resolve_coin_id, risk_plan, settle_signals, walk_forward

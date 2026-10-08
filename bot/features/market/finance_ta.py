@@ -4,18 +4,8 @@ This module keeps market calculation code focused and reduces the size of the
 market facade. It lazily references runtime HTTP/logging dependencies from
 finance.py after that module is initialized.
 """
-from bot.utils import load_modular_part
-import asyncio
-from bot.features.market import finance as _f
-from bot.logger import logger
-from bot.utils.http_client import pooled_async_client, request_with_retry, safe_json
 
-# Compatibility aliases preserved from the original finance.py implementation.
-# finance_ta is loaded through the finance facade after it is initialized.
-_fetch_klines_interval = _f._fetch_klines_interval
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_001__fetch_klines_for_ta.py ---
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_001__fetch_klines_for_ta.py
 # Auto-split part 1: _fetch_klines_for_ta
 async def _fetch_klines_for_ta(pair: str, limit: int = 200) -> list:
     """OHLCV از Binance Vision برای تحلیل تکنیکال"""
@@ -44,20 +34,16 @@ async def _fetch_klines_for_ta(pair: str, limit: int = 200) -> list:
         logger.warning(f"klines ta: {e}")
     return []
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_002__sma.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_002__sma.py
 # Auto-split part 2: _sma
 def _sma(arr: list, n: int):
     if len(arr) < n:
         return None
     return sum(arr[-n:]) / n
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_003__rsi.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_003__rsi.py
 # Auto-split part 3: _rsi
 def _rsi(closes: list, period: int = 14) -> float | None:
     if len(closes) < period + 1:
@@ -74,10 +60,8 @@ def _rsi(closes: list, period: int = 14) -> float | None:
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_004__adx_approx.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_004__adx_approx.py
 # Auto-split part 4: _adx_approx
 def _adx_approx(highs: list, lows: list, closes: list, period: int = 14) -> float | None:
     """تقریب ساده ADX"""
@@ -105,10 +89,8 @@ def _adx_approx(highs: list, lows: list, closes: list, period: int = 14) -> floa
     dx = 100 * abs(di_p - di_m) / denom
     return dx
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_005__compute_ta.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_005__compute_ta.py
 # Auto-split part 5: _compute_ta
 def _compute_ta(closes, highs, lows, vols) -> dict:
     out = {}
@@ -144,10 +126,8 @@ def _compute_ta(closes, highs, lows, vols) -> dict:
                 out["trend"] = "نزولی"
     return out
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_006__atr.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_006__atr.py
 # Auto-split part 6: _atr
 def _atr(highs, lows, closes, period: int = 14) -> float | None:
     """Average True Range"""
@@ -165,10 +145,8 @@ def _atr(highs, lows, closes, period: int = 14) -> float | None:
         return None
     return sum(trs[-period:]) / period
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_007__detect_candle_patterns.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_007__detect_candle_patterns.py
 # Auto-split part 7: _detect_candle_patterns
 def _detect_candle_patterns(opens, highs, lows, closes) -> list:
     """تشخیص ساده Engulfing و Pin Bar روی آخرین کندل‌ها"""
@@ -206,10 +184,8 @@ def _detect_candle_patterns(opens, highs, lows, closes) -> list:
 
     return patterns
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_008__score_timeframe.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_008__score_timeframe.py
 # Auto-split part 8: _score_timeframe
 def _score_timeframe(ta: dict) -> tuple:
     """امتیاز 1-10 و جهت برای یک تایم‌فریم"""
@@ -254,10 +230,8 @@ def _score_timeframe(ta: dict) -> tuple:
     score = max(1, min(10, score))
     return score, direction, adx
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_009__mtf_bundle.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_009__mtf_bundle.py
 # Auto-split part 9: _mtf_bundle
 async def _mtf_bundle(pair: str) -> dict:
     """تحلیل موازی 1H / 4H / 1D + تضاد"""
@@ -323,10 +297,8 @@ async def _mtf_bundle(pair: str) -> dict:
         "daily_klines": (o_d, h_d, l_d, c_d),
     }
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_010__market_structure.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_010__market_structure.py
 # Auto-split part 10: _market_structure
 def _market_structure(highs, lows, closes) -> dict:
     """ساختار ساده: HH/HL یا LH/LL + BOS تقریبی"""
@@ -359,10 +331,8 @@ def _market_structure(highs, lows, closes) -> dict:
             bos = "تغییر ساختار محتمل"
     return {"structure": structure, "bos": bos, "last_swing_high": sh[-1][1] if sh else None, "last_swing_low": sl[-1][1] if sl else None}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_011__rsi_divergence.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_011__rsi_divergence.py
 # Auto-split part 11: _rsi_divergence
 def _rsi_divergence(closes, period: int = 14) -> str | None:
     """واگرایی ساده RSI روی ۲۰ کندل آخر"""
@@ -390,10 +360,8 @@ def _rsi_divergence(closes, period: int = 14) -> str | None:
         return "واگرایی صعودی RSI — ضعف فروش در کف"
     return None
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_012__volume_breakout.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_012__volume_breakout.py
 # Auto-split part 12: _volume_breakout
 def _volume_breakout(closes, vols, resistance, support) -> str | None:
     if not closes or not vols or len(vols) < 20:
@@ -412,10 +380,8 @@ def _volume_breakout(closes, vols, resistance, support) -> str | None:
         return "حجم ضعیف — شکست‌ها کم‌اعتبارتر"
     return None
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_013__demand_supply_zone.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_013__demand_supply_zone.py
 # Auto-split part 13: _demand_supply_zone
 def _demand_supply_zone(highs, lows, closes) -> tuple:
     """بازه تقریبی تقاضا/عرضه از ۱۰–۳۰ کندل قبل"""
@@ -429,10 +395,8 @@ def _demand_supply_zone(highs, lows, closes) -> tuple:
     supply = (sorted(seg_h)[max(0, 3*len(seg_h)//4 - 1)], max(seg_h))
     return demand, supply
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_014__detect_chart_patterns.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_014__detect_chart_patterns.py
 # Auto-split part 14: _detect_chart_patterns
 def _detect_chart_patterns(highs, lows, closes, atr=None):
     """تشخیص محافظه‌کارانه الگوهای کلاسیک قیمت و وضعیت «در حال تشکیل».
@@ -569,10 +533,8 @@ def _detect_chart_patterns(highs, lows, closes, atr=None):
             final.append(x)
     return final[:4]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_015__price_action_analysis.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_015__price_action_analysis.py
 # Auto-split part 15: _price_action_analysis
 def _price_action_analysis(opens, highs, lows, closes, vols, support=None, resistance=None, atr=None):
     """تحلیل Price Action + الگوهای کلاسیک؛ خروجی خالیِ الگو یعنی چیزی با اطمینان کافی دیده نشده."""
@@ -603,10 +565,8 @@ def _price_action_analysis(opens, highs, lows, closes, vols, support=None, resis
         'volume_ratio':vol_ratio,'score':max(1,min(10,score)),
     }
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_016__mtf_convergence.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_016__mtf_convergence.py
 # Auto-split part 16: _mtf_convergence
 def _mtf_convergence(mtf: dict) -> tuple:
     """(متن همگرایی، قدرت 1-10)"""
@@ -629,10 +589,8 @@ def _mtf_convergence(mtf: dict) -> tuple:
         return "عدم همگرایی — تضاد تایم‌فریم‌ها", max(1, int(avg - 2))
     return "همگرایی ضعیف / رنج", max(1, int(avg - 1))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_017__advanced_levels.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_017__advanced_levels.py
 # Auto-split part 17: _advanced_levels
 def _advanced_levels(closes, highs, lows, current=None):
     """محاسبه سطوح حمایت/مقاومت خوشه‌ای بدون وابستگی به finance facade."""
@@ -691,10 +649,8 @@ def _advanced_levels(closes, highs, lows, current=None):
     resistances.sort(key=lambda x: (x["price"] - c))
     return {"supports": supports[:6], "resistances": resistances[:6]}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_018__market_regime.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_018__market_regime.py
 # Auto-split part 18: _market_regime
 def _market_regime(ta=None, mtf=None, vol_ratio=None):
     """طبقه‌بندی ساده و پایدار رژیم بازار برای موتور امتیازدهی."""
@@ -718,10 +674,8 @@ def _market_regime(ta=None, mtf=None, vol_ratio=None):
         label = "انتقالی / مختلط"
     return {"label": label, "adx": round(adx, 2), "vol_ratio": round(vr, 2)}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ta_parts/part_019__professional_score.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ta_parts/part_019__professional_score.py
 # Auto-split part 19: _professional_score
 def _professional_score(ta=None, mtf=None, struct=None, derivatives=None, fg=None,
                         current=None, support=None, resistance=None, market=None):
@@ -771,4 +725,32 @@ def _professional_score(ta=None, mtf=None, struct=None, derivatives=None, fg=Non
         "adaptive": {},
     }
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import asyncio
+from bot.features.market import finance as _f
+from bot.logger import logger
+from bot.utils.http_client import pooled_async_client, request_with_retry, safe_json
+
+# Compatibility aliases preserved from the original finance.py implementation.
+# finance_ta is loaded through the finance facade after it is initialized.
+_fetch_klines_interval = _f._fetch_klines_interval
+
+finance_ta_parts/part_001__fetch_klines_for_ta.py
+finance_ta_parts/part_002__sma.py
+finance_ta_parts/part_003__rsi.py
+finance_ta_parts/part_004__adx_approx.py
+finance_ta_parts/part_005__compute_ta.py
+finance_ta_parts/part_006__atr.py
+finance_ta_parts/part_007__detect_candle_patterns.py
+finance_ta_parts/part_008__score_timeframe.py
+finance_ta_parts/part_009__mtf_bundle.py
+finance_ta_parts/part_010__market_structure.py
+finance_ta_parts/part_011__rsi_divergence.py
+finance_ta_parts/part_012__volume_breakout.py
+finance_ta_parts/part_013__demand_supply_zone.py
+finance_ta_parts/part_014__detect_chart_patterns.py
+finance_ta_parts/part_015__price_action_analysis.py
+finance_ta_parts/part_016__mtf_convergence.py
+finance_ta_parts/part_017__advanced_levels.py
+finance_ta_parts/part_018__market_regime.py
+finance_ta_parts/part_019__professional_score.py

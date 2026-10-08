@@ -4,71 +4,8 @@
 برای فروشگاه‌های هدف، اینستاگرام و کل اینترنت استفاده می‌کند و سپس صفحه را
 برای داده‌های ساختاریافته (JSON-LD Product/Offer) و الگوهای قیمت فارسی می‌خواند.
 """
-from bot.utils import load_modular_part
 
-import asyncio
-import hashlib
-import json
-import re
-import time
-from dataclasses import dataclass
-from typing import Any
-from urllib.parse import quote_plus, urlparse
-
-import httpx
-from bs4 import BeautifulSoup
-
-from bot.logger import logger
-
-UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/122.0.0.0 Safari/537.36"
-)
-SEARCH_URL = "https://html.duckduckgo.com/html/"
-CACHE: dict[str, tuple[float, str]] = {}
-CACHE_TTL = 150
-
-# لیست گسترده فروشگاه‌ها و منابع ایرانی + بین‌المللی مرتبط
-SOURCES = {
-    # مقایسه قیمت و مارکت‌پلیس‌های اصلی
-    "torob": {"label": "ترب", "domains": ["torob.com"]},
-    "digikala": {"label": "دیجی‌کالا", "domains": ["digikala.com"]},
-    "snappshop": {"label": "اسنپ‌شاپ", "domains": ["snappshop.ir"]},
-    "emalls": {"label": "ایمالز", "domains": ["emalls.ir"]},
-    "basalam": {"label": "باسلام", "domains": ["basalam.com"]},
-    # تخصصی تکنولوژی و موبایل
-    "technolife": {"label": "تکنولایف", "domains": ["technolife.ir"]},
-    "momtaz": {"label": "مقداد آی‌تی", "domains": ["meghdadit.com"]},
-    "kalaoma": {"label": "کالاوما", "domains": ["kalaoma.com"]},
-    "19kala": {"label": "۱۹کالا", "domains": ["19kala.com"]},
-    "mobile": {"label": "موبایل‌دات‌آی‌آر", "domains": ["mobile.ir"]},
-    "digistyle": {"label": "دیجی‌استایل", "domains": ["digistyle.com"]},
-    # مد و پوشاک و زیبایی
-    "modiseh": {"label": "مدیسه", "domains": ["modiseh.com"]},
-    "zanbil": {"label": "زنبیل", "domains": ["zanbil.ir"]},
-    "goldiran": {"label": "گلدیران", "domains": ["goldiran.com"]},
-    # مارکت‌پلیس و عمومی
-    "alibaba": {"label": "علی‌بابا", "domains": ["alibaba.ir"]},
-    "sheypoor": {"label": "شیپور", "domains": ["sheypoor.com"]},
-    "divar": {"label": "دیوار", "domains": ["divar.ir"]},
-    "okala": {"label": "اکالا", "domains": ["okala.com"]},
-    "takhfifan": {"label": "تخفیفان", "domains": ["takhfifan.com"]},
-    # اینستاگرام و شبکه‌های اجتماعی
-    "instagram": {"label": "اینستاگرام", "domains": ["instagram.com"]},
-    # جستجوی عمومی وب (همه‌جا)
-    "general": {"label": "وب / سایر", "domains": []},
-}
-
-# کلمات کلیدی برای تقویت جستجوی اینستاگرام و فروشگاه‌های آنلاین
-INSTA_KEYWORDS = [
-    "فروشگاه", "شاپ", "خرید", "قیمت", "فروش آنلاین", "online shop",
-    "فروشگاه اینترنتی", "خرید آنلاین",
-]
-
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_001_ProductResult.py ---
+# BEGIN MERGED LEGACY PART: shopping_parts/part_001_ProductResult.py
 from dataclasses import dataclass
 
 # Auto-split part 1: ProductResult
@@ -85,20 +22,16 @@ class ProductResult:
     image: str = ""
     match_hint: str = ""
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_002__norm_digits.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_002__norm_digits.py
 # Auto-split part 2: _norm_digits
 def _norm_digits(s: str) -> str:
     return str(s).translate(
         str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
     )
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_003__price.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_003__price.py
 from typing import Any
 
 # Auto-split part 3: _price
@@ -115,10 +48,8 @@ def _price(value: Any) -> int | None:
         return None
     return int(n)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_004__currency_and_price.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_004__currency_and_price.py
 from typing import Any
 
 # Auto-split part 4: _currency_and_price
@@ -132,10 +63,8 @@ def _currency_and_price(raw: Any, currency: str = "") -> tuple[int | None, str]:
         return p, "تومان"
     return None, "تومان"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_005__domain.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_005__domain.py
 # Auto-split part 5: _domain
 def _domain(url: str) -> str:
     try:
@@ -143,10 +72,8 @@ def _domain(url: str) -> str:
     except Exception:
         return ""
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_006__source_for_url.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_006__source_for_url.py
 # Auto-split part 6: _source_for_url
 def _source_for_url(url: str) -> str:
     d = _domain(url)
@@ -155,19 +82,15 @@ def _source_for_url(url: str) -> str:
             return key
     return "general"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_007__clean_title.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_007__clean_title.py
 # Auto-split part 7: _clean_title
 def _clean_title(title: str) -> str:
     title = re.sub(r"\s+", " ", title or "").strip()
     return title[:240]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_008__search.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_008__search.py
 # Auto-split part 8: _search
 async def _search(query: str, domain: str = "", limit: int = 8, extra: str = "") -> list[dict[str, str]]:
     """جستجوی سریع چندموتوره؛ اولین منبع معتبر برگردانده می‌شود تا Shopping روی Render timeout نشود."""
@@ -287,10 +210,8 @@ async def _search(query: str, domain: str = "", limit: int = 8, extra: str = "")
         logger.debug("shopping search failed for %s: %s", q, exc)
         return []
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_009__extract_jsonld.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_009__extract_jsonld.py
 from bs4 import BeautifulSoup
 from typing import Any
 
@@ -311,10 +232,8 @@ def _extract_jsonld(soup: BeautifulSoup) -> list[dict[str, Any]]:
                     found.append(x)
     return found
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_010__from_product.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_010__from_product.py
 from typing import Any
 
 # Auto-split part 10: _from_product
@@ -338,10 +257,8 @@ def _from_product(obj: dict[str, Any]) -> tuple[int | None, int | None, str, str
         image = image[0] if image else ""
     return price, old, str(seller or ""), availability, str(image or ""), cur
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_011__inspect.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_011__inspect.py
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from bot.features.market.shopping import ProductResult
@@ -421,10 +338,8 @@ async def _inspect(url: str, title: str, snippet: str) -> ProductResult:
         logger.debug("shopping inspect failed %s: %s", url, exc)
     return result
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_012__query_variants.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_012__query_variants.py
 # Auto-split part 12: _query_variants
 def _query_variants(query: str) -> list[str]:
     """ساخت چند جستجوی کوتاه‌تر تا نتیجه به تطابق لفظ‌به‌لفظ وابسته نباشد."""
@@ -467,10 +382,8 @@ def _query_variants(query: str) -> list[str]:
             out.append(v)
     return out[:6]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_013__score.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_013__score.py
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from bot.features.market.shopping import ProductResult
@@ -505,10 +418,8 @@ def _score(result: ProductResult, query: str | list[str]) -> float:
         score += 6
     return score
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_014__save_history.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_014__save_history.py
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from bot.features.market.shopping import ProductResult
@@ -550,10 +461,8 @@ def _save_history(results: list[ProductResult]) -> None:
     except Exception as exc:
         logger.debug("shopping history save failed: %s", exc)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_015_shopping_price_history.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_015_shopping_price_history.py
 # Auto-split part 15: shopping_price_history
 def shopping_price_history(query: str = "", days: int = 30, user_id: int = 0) -> str:
     query = (query or "").strip()
@@ -605,10 +514,8 @@ def shopping_price_history(query: str = "", days: int = 30, user_id: int = 0) ->
     except Exception as exc:
         return f"تاریخچه قیمت در دسترس نیست: {exc}"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_016_search_shopping.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: shopping_parts/part_016_search_shopping.py
 try:
     import logging as _shopping_logging
     logger = _shopping_logging.getLogger('rooze_ziba')
@@ -937,16 +844,7 @@ async def search_shopping(
 
     return "\n".join(lines)
 
-# ── LIVE IMPLEMENTATION OVERRIDE ────────────────────────────────────────────
-# The legacy implementation above is kept for backward compatibility, but the
-# public search_shopping entry point must use the standalone live engine.
-# This prevents stale DDG-only/AI-dependent behavior from winning at runtime.
-
-# --- END INLINED MODULAR PART ---
-
-# Shopping Engine v3 must be the final public implementation.
-
-# --- INLINED MODULAR PART: bot/features/market/shopping_parts/part_016_search_shopping_live.py ---
+# BEGIN MERGED LEGACY PART: shopping_parts/part_016_search_shopping_live.py
 """Shopping Engine v3 - live, multi-source, cached, ranked and alert-ready.
 
 Rules:
@@ -956,6 +854,7 @@ Rules:
 - Never invent a price, stock state, seller or URL.
 - Prefer direct live catalogs, then search engines as fallback.
 """
+
 import asyncio
 import hashlib
 import re
@@ -1396,4 +1295,83 @@ def shopping_price_history(query: str = "", days: int = 30, user_id: int = 0) ->
         return "\n".join(lines)
     except Exception as exc: return f"تاریخچه قیمت در دسترس نیست: {exc}"
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import asyncio
+import hashlib
+import json
+import re
+import time
+from dataclasses import dataclass
+from typing import Any
+from urllib.parse import quote_plus, urlparse
+
+import httpx
+from bs4 import BeautifulSoup
+
+from bot.logger import logger
+
+UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/122.0.0.0 Safari/537.36"
+)
+SEARCH_URL = "https://html.duckduckgo.com/html/"
+CACHE: dict[str, tuple[float, str]] = {}
+CACHE_TTL = 150
+
+# لیست گسترده فروشگاه‌ها و منابع ایرانی + بین‌المللی مرتبط
+SOURCES = {
+    # مقایسه قیمت و مارکت‌پلیس‌های اصلی
+    "torob": {"label": "ترب", "domains": ["torob.com"]},
+    "digikala": {"label": "دیجی‌کالا", "domains": ["digikala.com"]},
+    "snappshop": {"label": "اسنپ‌شاپ", "domains": ["snappshop.ir"]},
+    "emalls": {"label": "ایمالز", "domains": ["emalls.ir"]},
+    "basalam": {"label": "باسلام", "domains": ["basalam.com"]},
+    # تخصصی تکنولوژی و موبایل
+    "technolife": {"label": "تکنولایف", "domains": ["technolife.ir"]},
+    "momtaz": {"label": "مقداد آی‌تی", "domains": ["meghdadit.com"]},
+    "kalaoma": {"label": "کالاوما", "domains": ["kalaoma.com"]},
+    "19kala": {"label": "۱۹کالا", "domains": ["19kala.com"]},
+    "mobile": {"label": "موبایل‌دات‌آی‌آر", "domains": ["mobile.ir"]},
+    "digistyle": {"label": "دیجی‌استایل", "domains": ["digistyle.com"]},
+    # مد و پوشاک و زیبایی
+    "modiseh": {"label": "مدیسه", "domains": ["modiseh.com"]},
+    "zanbil": {"label": "زنبیل", "domains": ["zanbil.ir"]},
+    "goldiran": {"label": "گلدیران", "domains": ["goldiran.com"]},
+    # مارکت‌پلیس و عمومی
+    "alibaba": {"label": "علی‌بابا", "domains": ["alibaba.ir"]},
+    "sheypoor": {"label": "شیپور", "domains": ["sheypoor.com"]},
+    "divar": {"label": "دیوار", "domains": ["divar.ir"]},
+    "okala": {"label": "اکالا", "domains": ["okala.com"]},
+    "takhfifan": {"label": "تخفیفان", "domains": ["takhfifan.com"]},
+    # اینستاگرام و شبکه‌های اجتماعی
+    "instagram": {"label": "اینستاگرام", "domains": ["instagram.com"]},
+    # جستجوی عمومی وب (همه‌جا)
+    "general": {"label": "وب / سایر", "domains": []},
+}
+
+# کلمات کلیدی برای تقویت جستجوی اینستاگرام و فروشگاه‌های آنلاین
+INSTA_KEYWORDS = [
+    "فروشگاه", "شاپ", "خرید", "قیمت", "فروش آنلاین", "online shop",
+    "فروشگاه اینترنتی", "خرید آنلاین",
+]
+
+
+# Shopping Engine v3 must be the final public implementation.
+shopping_parts/part_001_ProductResult.py
+shopping_parts/part_002__norm_digits.py
+shopping_parts/part_003__price.py
+shopping_parts/part_004__currency_and_price.py
+shopping_parts/part_005__domain.py
+shopping_parts/part_006__source_for_url.py
+shopping_parts/part_007__clean_title.py
+shopping_parts/part_008__search.py
+shopping_parts/part_009__extract_jsonld.py
+shopping_parts/part_010__from_product.py
+shopping_parts/part_011__inspect.py
+shopping_parts/part_012__query_variants.py
+shopping_parts/part_013__score.py
+shopping_parts/part_014__save_history.py
+shopping_parts/part_015_shopping_price_history.py
+shopping_parts/part_016_search_shopping.py
+shopping_parts/part_016_search_shopping_live.py

@@ -1,6 +1,5 @@
 """Shared imports and module state for the refactored finance_ta."""
 
-from __future__ import annotations
 
 import asyncio
 

@@ -4,29 +4,8 @@
 از getterهای مشترک get_hijri_events استفاده می‌کند تا منبع حقیقت واحد باشد
 و نمایش ساختاریافته (امروز / آینده نزدیک / ماه جاری) ارائه دهد.
 """
-from bot.utils import load_modular_part
 
-from datetime import datetime, timedelta
-from typing import List, Tuple, Optional
-
-import jdatetime
-import pytz
-from hijri_converter import Gregorian
-
-from bot.config import config
-from bot.utils.utils_events import get_hijri_events
-
-tehran_tz = pytz.timezone(config.TIMEZONE)
-
-HIJRI_MONTH_NAMES = {
-    1: "محرم", 2: "صفر", 3: "ربیع‌الاول", 4: "ربیع‌الثانی",
-    5: "جمادی‌الاول", 6: "جمادی‌الثانی", 7: "رجب", 8: "شعبان",
-    9: "رمضان", 10: "شوال", 11: "ذی‌قعده", 12: "ذی‌الحجه",
-}
-
-
-
-# --- INLINED MODULAR PART: bot/features/religious/religious_events_parts/part_001__to_shamsi_str.py ---
+# BEGIN MERGED LEGACY PART: religious_events_parts/part_001__to_shamsi_str.py
 # Auto-split part 1: _to_shamsi_str
 def _to_shamsi_str(gregorian_date) -> str:
     try:
@@ -35,19 +14,15 @@ def _to_shamsi_str(gregorian_date) -> str:
     except Exception:
         return str(gregorian_date)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/religious/religious_events_parts/part_002__hijri_label.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: religious_events_parts/part_002__hijri_label.py
 # Auto-split part 2: _hijri_label
 def _hijri_label(hijri) -> str:
     month_name = HIJRI_MONTH_NAMES.get(hijri.month, str(hijri.month))
     return f"{hijri.day} {month_name} {hijri.year}"
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/religious/religious_events_parts/part_003__events_for_gregorian.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: religious_events_parts/part_003__events_for_gregorian.py
 from typing import List
 
 # Auto-split part 3: _events_for_gregorian
@@ -59,10 +34,8 @@ def _events_for_gregorian(g_date) -> List[str]:
     except Exception:
         return []
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/religious/religious_events_parts/part_004_get_today_religious_events.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: religious_events_parts/part_004_get_today_religious_events.py
 from typing import List
 from typing import Tuple
 
@@ -84,10 +57,8 @@ def get_today_religious_events() -> List[Tuple[str, str, str]]:
     shamsi = _to_shamsi_str(now)
     return [(name, q_label, shamsi) for name in names]
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/religious/religious_events_parts/part_005_get_upcoming_religious_events.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: religious_events_parts/part_005_get_upcoming_religious_events.py
 from typing import List
 from typing import Tuple
 
@@ -123,10 +94,8 @@ def get_upcoming_religious_events(days: int = 30, limit: int = 25) -> List[Tuple
                 return found
     return found
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/religious/religious_events_parts/part_006_get_month_religious_events.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: religious_events_parts/part_006_get_month_religious_events.py
 from typing import List
 from typing import Optional
 from typing import Tuple
@@ -156,10 +125,8 @@ def get_month_religious_events(hijri_year: Optional[int] = None, hijri_month: Op
             results.append((day, name, label))
     return results
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/religious/religious_events_parts/part_007_religious_countdown.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: religious_events_parts/part_007_religious_countdown.py
 # Auto-split part 7: religious_countdown
 def religious_countdown(days: int = 30) -> str:
     """
@@ -203,10 +170,8 @@ def religious_countdown(days: int = 30) -> str:
 
     return "\n".join(lines)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/religious/religious_events_parts/part_008_religious_month_view.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: religious_events_parts/part_008_religious_month_view.py
 # Auto-split part 8: religious_month_view
 def religious_month_view() -> str:
     """نمای ماه جاری قمری — شبیه تقویم ماهانه."""
@@ -237,4 +202,31 @@ def religious_month_view() -> str:
 
     return "\n".join(lines)
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+from datetime import datetime, timedelta
+from typing import List, Tuple, Optional
+
+import jdatetime
+import pytz
+from hijri_converter import Gregorian
+
+from bot.config import config
+from bot.utils.utils_events import get_hijri_events
+
+tehran_tz = pytz.timezone(config.TIMEZONE)
+
+HIJRI_MONTH_NAMES = {
+    1: "محرم", 2: "صفر", 3: "ربیع‌الاول", 4: "ربیع‌الثانی",
+    5: "جمادی‌الاول", 6: "جمادی‌الثانی", 7: "رجب", 8: "شعبان",
+    9: "رمضان", 10: "شوال", 11: "ذی‌قعده", 12: "ذی‌الحجه",
+}
+
+
+religious_events_parts/part_001__to_shamsi_str.py
+religious_events_parts/part_002__hijri_label.py
+religious_events_parts/part_003__events_for_gregorian.py
+religious_events_parts/part_004_get_today_religious_events.py
+religious_events_parts/part_005_get_upcoming_religious_events.py
+religious_events_parts/part_006_get_month_religious_events.py
+religious_events_parts/part_007_religious_countdown.py
+religious_events_parts/part_008_religious_month_view.py

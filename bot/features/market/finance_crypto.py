@@ -4,10 +4,8 @@ IMPORTANT: Keep this file small and stable. New functionality belongs in the
 secondary ``finance_crypto_parts/`` modules. The complete legacy implementation is kept
 unchanged in ``finance_crypto_parts/part_999_core_legacy.py`` for compatibility.
 """
-from bot.utils import load_modular_part
 
-
-# --- INLINED MODULAR PART: bot/features/market/finance_crypto_parts/part_999_core_legacy.py ---
+# BEGIN MERGED LEGACY PART: finance_crypto_parts/part_999_core_legacy.py
 """Crypto-analysis orchestration extracted from finance.py."""
 import asyncio
 from bot.features.market import finance as _f
@@ -924,6 +922,6 @@ def _build_smart_summary(pair, trend, ta, support, resistance, signal, score, ch
     return " ".join(parts)
 
 
-# --- END INLINED MODULAR PART ---
-
+# END MERGED LEGACY PART: 
 # JSON safety contract: safe_json
+finance_crypto_parts/part_999_core_legacy.py

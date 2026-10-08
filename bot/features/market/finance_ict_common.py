@@ -1,6 +1,5 @@
 """Shared imports and module state for the refactored finance_ict."""
 
-from __future__ import annotations
 
 from datetime import datetime, timezone
 

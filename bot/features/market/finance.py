@@ -4,10 +4,8 @@ IMPORTANT: Keep this file small and stable. New functionality belongs in the
 secondary ``finance_parts/`` modules. The complete legacy implementation is kept
 unchanged in ``finance_parts/part_999_core_legacy.py`` for compatibility.
 """
-from bot.utils import load_modular_part
 
-
-# --- INLINED MODULAR PART: bot/features/market/finance_parts/part_999_core_legacy.py ---
+# BEGIN MERGED LEGACY PART: finance_parts/part_999_core_legacy.py
 """
 مالی و بازار — ارز، فلزات، سکه + کریپتو کامل
 نمودار قیمت + مبدل همه ارزهای دیجیتال + تحلیل چندمنبعی (CoinGecko + Binance + CoinPaprika + Fear&Greed + تلاش Coinglass)
@@ -1579,8 +1577,7 @@ async def register_price_alert(user_id: int, symbol: str, price: float) -> str:
     except Exception as e:
         return f"⚠️ ثبت هشدار ناموفق: {e}\nهدف شما: ${price:,.4f} برای {pair}"
 
-# --- END INLINED MODULAR PART ---
-
+# END MERGED LEGACY PART: 
 # Market speed/safety contracts retained in stable facade source.
 # asyncio.gather
 # https://fapi.binance.com/fapi/v1/premiumIndex
@@ -1588,3 +1585,4 @@ async def register_price_alert(user_id: int, symbol: str, price: float) -> str:
 # _HTTP_DATA_CACHE_TTL = 30
 # key = f"klines:{pair}:{interval}:{limit}"
 # safe_json
+finance_parts/part_999_core_legacy.py

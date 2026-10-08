@@ -1,22 +1,14 @@
 """Advanced trading intelligence: backtesting, regime, risk, calibration and alerts.
 Pure helpers are intentionally dependency-free so they can be unit-tested offline.
 """
-from bot.utils import load_modular_part
-import math
-import time
-from statistics import mean
 
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_intelligence_parts/part_001__clamp.py ---
+# BEGIN MERGED LEGACY PART: trading_intelligence_parts/part_001__clamp.py
 # Auto-split part 1: _clamp
 def _clamp(x, lo=0.0, hi=100.0):
     return max(lo, min(hi, float(x)))
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_intelligence_parts/part_002_detect_regime.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_intelligence_parts/part_002_detect_regime.py
 # Auto-split part 2: detect_regime
 def detect_regime(ta=None, mtf=None, vol_ratio=None, closes=None) -> dict:
     ta, mtf = ta or {}, mtf or {}
@@ -38,10 +30,8 @@ def detect_regime(ta=None, mtf=None, vol_ratio=None, closes=None) -> dict:
         label = "نوسان کم"
     return {"label": label, "adx": adx, "vol_ratio": vr, "bias": bias, "high_vol": vr >= 1.8}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_intelligence_parts/part_003_dynamic_weights.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_intelligence_parts/part_003_dynamic_weights.py
 # Auto-split part 3: dynamic_weights
 def dynamic_weights(regime: dict | None = None) -> dict:
     r = (regime or {}).get("label", "")
@@ -56,10 +46,8 @@ def dynamic_weights(regime: dict | None = None) -> dict:
     s = sum(w.values()) or 1
     return {k: v / s for k, v in w.items()}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_intelligence_parts/part_004_quality_gate.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_intelligence_parts/part_004_quality_gate.py
 # Auto-split part 4: quality_gate
 def quality_gate(score: float, confidence: float, mtf=None, data_quality: float = 100, regime=None) -> dict:
     mtf = mtf or {}
@@ -73,10 +61,8 @@ def quality_gate(score: float, confidence: float, mtf=None, data_quality: float 
     blocked = bool(reasons)
     return {"allowed": not blocked, "reasons": reasons, "label": "تأیید نسبی" if not blocked else "صبر / عدم‌تأیید"}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_intelligence_parts/part_005_risk_plan.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_intelligence_parts/part_005_risk_plan.py
 # Auto-split part 5: risk_plan
 def risk_plan(entry, stop, target, equity=None, risk_pct=1.0) -> dict:
     if entry is None or stop is None or target is None or entry == stop:
@@ -93,19 +79,15 @@ def risk_plan(entry, stop, target, equity=None, risk_pct=1.0) -> dict:
         out["position_size"] = cash_risk / risk_per_unit if risk_per_unit else 0
     return out
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_intelligence_parts/part_006__forward_return.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_intelligence_parts/part_006__forward_return.py
 # Auto-split part 6: _forward_return
 def _forward_return(closes, i, horizon):
     if i + horizon >= len(closes) or closes[i] in (0, None): return None
     return (float(closes[i+horizon]) / float(closes[i]) - 1) * 100
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_intelligence_parts/part_007_backtest_directional.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_intelligence_parts/part_007_backtest_directional.py
 # Auto-split part 7: backtest_directional
 def backtest_directional(closes, scores, threshold=60, horizon=6, fee_pct=0.08) -> dict:
     """Simple non-lookahead directional backtest. scores[i] must only use data <= i."""
@@ -126,10 +108,8 @@ def backtest_directional(closes, scores, threshold=60, horizon=6, fee_pct=0.08) 
             "profit_factor": round(gross_profit/gross_loss,2) if gross_loss else (99.0 if gross_profit else 0),
             "avg_trade_pct": round(mean(trades),3) if trades else 0}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_intelligence_parts/part_008_walk_forward.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_intelligence_parts/part_008_walk_forward.py
 # Auto-split part 8: walk_forward
 def walk_forward(closes, scores, windows=(120, 60), threshold=60, horizon=6) -> dict:
     """Rolling out-of-sample evaluation; never trains on future candles."""
@@ -147,10 +127,8 @@ def walk_forward(closes, scores, windows=(120, 60), threshold=60, horizon=6) -> 
             "win_rate":round(100*wins/trades,2) if trades else 0,
             "avg_return_pct":round(mean([x.get("return_pct",0) for x in results]),2)}}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_intelligence_parts/part_009_calibration.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_intelligence_parts/part_009_calibration.py
 # Auto-split part 9: calibration
 def calibration(confidence: float, historical_win_rate: float | None, samples: int = 0) -> float:
     if historical_win_rate is None or samples < 20: return _clamp(confidence, 0, 100)
@@ -158,10 +136,8 @@ def calibration(confidence: float, historical_win_rate: float | None, samples: i
     alpha=min(0.65, samples/(samples+80))
     return round(_clamp((1-alpha)*float(confidence)+alpha*float(historical_win_rate)),1)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_intelligence_parts/part_010_alert_flags.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_intelligence_parts/part_010_alert_flags.py
 # Auto-split part 10: alert_flags
 def alert_flags(current, support=None, resistance=None, ta=None, binance=None, market=None) -> list:
     ta, binance, market = ta or {}, binance or {}, market or {}
@@ -177,10 +153,8 @@ def alert_flags(current, support=None, resistance=None, ta=None, binance=None, m
         flags.append("news_sentiment_shift")
     return flags
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_intelligence_parts/part_011_dedupe_alerts.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_intelligence_parts/part_011_dedupe_alerts.py
 # Auto-split part 11: dedupe_alerts
 def dedupe_alerts(alerts, *, key="default", ttl_seconds=900, now=None):
     """Return only newly-seen alert flags for a bounded process-local window."""
@@ -203,4 +177,20 @@ def dedupe_alerts(alerts, *, key="default", ttl_seconds=900, now=None):
     dedupe_alerts._seen = store
     return out
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import math
+import time
+from statistics import mean
+
+
+trading_intelligence_parts/part_001__clamp.py
+trading_intelligence_parts/part_002_detect_regime.py
+trading_intelligence_parts/part_003_dynamic_weights.py
+trading_intelligence_parts/part_004_quality_gate.py
+trading_intelligence_parts/part_005_risk_plan.py
+trading_intelligence_parts/part_006__forward_return.py
+trading_intelligence_parts/part_007_backtest_directional.py
+trading_intelligence_parts/part_008_walk_forward.py
+trading_intelligence_parts/part_009_calibration.py
+trading_intelligence_parts/part_010_alert_flags.py
+trading_intelligence_parts/part_011_dedupe_alerts.py

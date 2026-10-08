@@ -4,7 +4,6 @@
 از getterهای مشترک get_hijri_events استفاده می‌کند تا منبع حقیقت واحد باشد
 و نمایش ساختاریافته (امروز / آینده نزدیک / ماه جاری) ارائه دهد.
 """
-from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import List, Tuple, Optional

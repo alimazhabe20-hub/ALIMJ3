@@ -3,26 +3,16 @@
 This module learns only from recorded, settled signals. It never fabricates
 outcomes and keeps an auditable JSON ledger with bounded size.
 """
-from bot.utils import load_modular_part
-import json, os, time, uuid, math, copy
-from collections import defaultdict
-from statistics import mean
 
-_DEFAULT = {"version": 1, "signals": [], "weights": {}, "stats": {}}
-
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_adaptation_parts/part_001__path.py ---
+# BEGIN MERGED LEGACY PART: trading_adaptation_parts/part_001__path.py
 # Auto-split part 1: _path
 def _path():
     root = os.getenv("ALIMJ_DATA_DIR") or os.path.join(os.getcwd(), "data")
     os.makedirs(root, exist_ok=True)
     return os.path.join(root, "trading_adaptation.json")
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_adaptation_parts/part_002__load.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_adaptation_parts/part_002__load.py
 # Auto-split part 2: _load
 def _load():
     try:
@@ -35,10 +25,8 @@ def _load():
         pass
     return copy.deepcopy(_DEFAULT)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_adaptation_parts/part_003__save.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_adaptation_parts/part_003__save.py
 # Auto-split part 3: _save
 def _save(d):
     p = _path(); tmp = p + ".tmp"
@@ -51,10 +39,8 @@ def _save(d):
             if os.path.exists(tmp): os.remove(tmp)
         except Exception: pass
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_adaptation_parts/part_004_record_signal.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_adaptation_parts/part_004_record_signal.py
 # Auto-split part 4: record_signal
 def record_signal(symbol, direction, entry, stop=None, target=None, regime="", score=50,
                   confidence=50, factors=None, horizon_seconds=21600, setup="default",
@@ -83,10 +69,8 @@ def record_signal(symbol, direction, entry, stop=None, target=None, regime="", s
     d["signals"]=d["signals"][-500:]
     _save(d); return sid
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_adaptation_parts/part_005_settle_signals.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_adaptation_parts/part_005_settle_signals.py
 # Auto-split part 5: settle_signals
 def settle_signals(symbol, current_price, now=None):
     """Settle due signals for symbol using only the later observed price."""
@@ -103,10 +87,8 @@ def settle_signals(symbol, current_price, now=None):
         _rebuild_stats(d); _save(d)
     return changed
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_adaptation_parts/part_006__rebuild_stats.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_adaptation_parts/part_006__rebuild_stats.py
 # Auto-split part 6: _rebuild_stats
 def _rebuild_stats(d):
     groups=defaultdict(list)
@@ -119,10 +101,8 @@ def _rebuild_stats(d):
         stats[k]={"samples":len(vals),"win_rate":round(100*wins/len(vals),2),"avg_return":round(mean(vals),4)}
     d["stats"]=stats
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_adaptation_parts/part_007_adaptive_profile.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_adaptation_parts/part_007_adaptive_profile.py
 # Auto-split part 7: adaptive_profile
 def adaptive_profile(symbol, regime="", setup="default", min_samples=12) -> dict:
     d=_load(); key=f"{str(symbol).upper()}|{regime or 'نامشخص'}|{setup or 'default'}"
@@ -130,10 +110,8 @@ def adaptive_profile(symbol, regime="", setup="default", min_samples=12) -> dict
     return {"samples":n,"win_rate":st.get("win_rate"),"avg_return":st.get("avg_return"),
             "ready":n>=min_samples,"kill": n>=20 and float(st.get("win_rate",50))<35}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_adaptation_parts/part_008_adaptive_weights.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_adaptation_parts/part_008_adaptive_weights.py
 # Auto-split part 8: adaptive_weights
 def adaptive_weights(base_weights, symbol, regime="", setup="default") -> dict:
     """Small, bounded empirical adjustment; never lets learning dominate."""
@@ -154,10 +132,8 @@ def adaptive_weights(base_weights, symbol, regime="", setup="default") -> dict:
     total=sum(w.values()) or 1
     return {k:v/total for k,v in w.items()}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_adaptation_parts/part_009_adapt_score.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_adaptation_parts/part_009_adapt_score.py
 # Auto-split part 9: adapt_score
 def adapt_score(score, confidence, symbol, regime="", setup="default"):
     p=adaptive_profile(symbol,regime,setup); s=float(score); c=float(confidence)
@@ -168,20 +144,16 @@ def adapt_score(score, confidence, symbol, regime="", setup="default"):
         elif empirical>65: s=50+(s-50)*1.08
     return round(max(0,min(100,s)),1), round(max(0,min(100,c)),1), p
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_adaptation_parts/part_010_kill_switch.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_adaptation_parts/part_010_kill_switch.py
 # Auto-split part 10: kill_switch
 def kill_switch(profile, gate_allowed=True) -> tuple[bool,str]:
     if not gate_allowed: return True,"گیت کیفیت فعال است"
     if profile.get("kill"): return True,"عملکرد تاریخی این ستاپ در این رژیم ضعیف است"
     return False,""
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_adaptation_parts/part_011_performance_summary.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_adaptation_parts/part_011_performance_summary.py
 # Auto-split part 11: performance_summary
 def performance_summary(symbol=None) -> dict:
     d=_load(); rows=[s for s in d.get("signals",[]) if s.get("result") in ("win","loss","flat")]
@@ -191,10 +163,8 @@ def performance_summary(symbol=None) -> dict:
             "avg_return":round(mean(rets),4) if rets else 0,
             "max_drawdown":round(_max_dd(rets),4) if rets else 0}
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/trading_adaptation_parts/part_012__max_dd.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: trading_adaptation_parts/part_012__max_dd.py
 # Auto-split part 12: _max_dd
 def _max_dd(returns):
     eq=1.; peak=1.; maxdd=0.
@@ -202,4 +172,23 @@ def _max_dd(returns):
         eq*=1+r/100; peak=max(peak,eq); maxdd=min(maxdd,(eq/peak-1)*100)
     return maxdd
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+import json, os, time, uuid, math, copy
+from collections import defaultdict
+from statistics import mean
+
+_DEFAULT = {"version": 1, "signals": [], "weights": {}, "stats": {}}
+
+
+trading_adaptation_parts/part_001__path.py
+trading_adaptation_parts/part_002__load.py
+trading_adaptation_parts/part_003__save.py
+trading_adaptation_parts/part_004_record_signal.py
+trading_adaptation_parts/part_005_settle_signals.py
+trading_adaptation_parts/part_006__rebuild_stats.py
+trading_adaptation_parts/part_007_adaptive_profile.py
+trading_adaptation_parts/part_008_adaptive_weights.py
+trading_adaptation_parts/part_009_adapt_score.py
+trading_adaptation_parts/part_010_kill_switch.py
+trading_adaptation_parts/part_011_performance_summary.py
+trading_adaptation_parts/part_012__max_dd.py

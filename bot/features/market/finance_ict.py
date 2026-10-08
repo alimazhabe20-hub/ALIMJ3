@@ -15,18 +15,8 @@ Concepts covered (educational implementation):
 
 Not financial advice.
 """
-from bot.utils import load_modular_part
 
-from datetime import datetime, timezone
-from typing import Any
-
-from bot.logger import logger
-
-
-# ── utils ──────────────────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_001__f.py ---
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_001__f.py
 # Auto-split part 1: _f
 def _f(x, default: float = 0.0) -> float:
     try:
@@ -37,20 +27,16 @@ def _f(x, default: float = 0.0) -> float:
     except Exception:
         return default
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_002__pct.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_002__pct.py
 # Auto-split part 2: _pct
 def _pct(a: float, b: float) -> float:
     if not b:
         return 0.0
     return abs(a - b) / abs(b) * 100.0
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_003__atr.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_003__atr.py
 # Auto-split part 3: _atr
 def _atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> float | None:
     if len(closes) < period + 2:
@@ -67,28 +53,20 @@ def _atr(highs: list[float], lows: list[float], closes: list[float], period: int
         return None
     return sum(trs[-period:]) / period
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_004__body.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_004__body.py
 # Auto-split part 4: _body
 def _body(o: float, c: float) -> float:
     return abs(c - o)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_005__range.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_005__range.py
 # Auto-split part 5: _range
 def _range(h: float, l: float) -> float:
     return max(h - l, 1e-12)
 
-# --- END INLINED MODULAR PART ---
-
-# ── swings ─────────────────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_006__swings.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_006__swings.py
 # Auto-split part 6: _swings
 def _swings(
     highs: list[float],
@@ -114,10 +92,8 @@ def _swings(
                 sl.append((i, lows[i]))
     return sh, sl
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_007__swing_strength.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_007__swing_strength.py
 # Auto-split part 7: _swing_strength
 def _swing_strength(
     idx: int,
@@ -138,12 +114,8 @@ def _swing_strength(
         return max(0.0, min(100.0, (span / atr) * 35.0))
     return 50.0
 
-# --- END INLINED MODULAR PART ---
-
-# ── market structure ───────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_008__structure_from_swings.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_008__structure_from_swings.py
 from typing import Any
 
 # Auto-split part 8: _structure_from_swings
@@ -231,12 +203,8 @@ def _structure_from_swings(
         }
     return out
 
-# --- END INLINED MODULAR PART ---
-
-# ── FVG ────────────────────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_009__fair_value_gaps.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_009__fair_value_gaps.py
 # Auto-split part 9: _fair_value_gaps
 def _fair_value_gaps(
     opens: list[float],
@@ -317,12 +285,8 @@ def _fair_value_gaps(
     # return up to 8 most relevant
     return gaps[:8]
 
-# --- END INLINED MODULAR PART ---
-
-# ── Order blocks / breakers ────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_010__order_blocks.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_010__order_blocks.py
 # Auto-split part 10: _order_blocks
 def _order_blocks(
     opens: list[float],
@@ -411,12 +375,8 @@ def _order_blocks(
     blocks.sort(key=rank)
     return blocks[:8]
 
-# --- END INLINED MODULAR PART ---
-
-# ── liquidity ──────────────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_011__liquidity.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_011__liquidity.py
 from typing import Any
 
 # Auto-split part 11: _liquidity
@@ -470,12 +430,8 @@ def _liquidity(
         "sweep": sweep,
     }
 
-# --- END INLINED MODULAR PART ---
-
-# ── dealing range / premium-discount / OTE ─────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_012__dealing_range.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_012__dealing_range.py
 from typing import Any
 
 # Auto-split part 12: _dealing_range
@@ -543,12 +499,8 @@ def _dealing_range(
         "in_bear_ote": in_bear_ote,
     }
 
-# --- END INLINED MODULAR PART ---
-
-# ── displacement ───────────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_013__displacement.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_013__displacement.py
 # Auto-split part 13: _displacement
 def _displacement(
     opens: list[float],
@@ -580,12 +532,8 @@ def _displacement(
         "text": f"Displacement {'صعودی' if side == 'bullish' else 'نزولی'} (قدرت {score:.1f})",
     }
 
-# --- END INLINED MODULAR PART ---
-
-# ── killzones ──────────────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_014__killzone.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_014__killzone.py
 from datetime import datetime
 
 # Auto-split part 14: _killzone
@@ -615,12 +563,8 @@ def _killzone(now: datetime | None = None) -> dict:
         ),
     }
 
-# --- END INLINED MODULAR PART ---
-
-# ── bias engine ────────────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_015__compute_bias.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_015__compute_bias.py
 # Auto-split part 15: _compute_bias
 def _compute_bias(
     ext: dict,
@@ -739,12 +683,8 @@ def _compute_bias(
         "reasons": reasons[:8],
     }
 
-# --- END INLINED MODULAR PART ---
-
-# ── scenario notes ─────────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_016__scenarios.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_016__scenarios.py
 # Auto-split part 16: _scenarios
 def _scenarios(bias: dict, dr: dict, liq: dict, ext: dict) -> list[str]:
     notes = []
@@ -774,12 +714,8 @@ def _scenarios(bias: dict, dr: dict, liq: dict, ext: dict) -> list[str]:
         )
     return notes
 
-# --- END INLINED MODULAR PART ---
-
-# ── core ───────────────────────────────────────────────────────────────────
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_017_analyze_ict_from_ohlc.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_017_analyze_ict_from_ohlc.py
 from typing import Any
 
 # Auto-split part 17: analyze_ict_from_ohlc
@@ -840,10 +776,8 @@ def analyze_ict_from_ohlc(
         },
     }
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_018_format_ict_report.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_018_format_ict_report.py
 # Auto-split part 18: format_ict_report
 def format_ict_report(data: dict) -> str:
     if not data.get("ok"):
@@ -973,10 +907,8 @@ def format_ict_report(data: dict) -> str:
     ]
     return "\n".join(lines)
 
-# --- END INLINED MODULAR PART ---
-
-
-# --- INLINED MODULAR PART: bot/features/market/finance_ict_parts/part_019_analyze_ict.py ---
+# END MERGED LEGACY PART: 
+# BEGIN MERGED LEGACY PART: finance_ict_parts/part_019_analyze_ict.py
 # Auto-split part 19: analyze_ict
 async def analyze_ict(symbol: str, interval: str = "1h", limit: int = 250) -> str:
     """Fetch OHLCV and return professional Persian ICT report."""
@@ -1033,4 +965,53 @@ async def analyze_ict(symbol: str, interval: str = "1h", limit: int = 250) -> st
     )
     return format_ict_report(data)
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+from datetime import datetime, timezone
+from typing import Any
+
+from bot.logger import logger
+
+
+# ── utils ──────────────────────────────────────────────────────────────────
+
+# ── swings ─────────────────────────────────────────────────────────────────
+
+# ── market structure ───────────────────────────────────────────────────────
+
+# ── FVG ────────────────────────────────────────────────────────────────────
+
+# ── Order blocks / breakers ────────────────────────────────────────────────
+
+# ── liquidity ──────────────────────────────────────────────────────────────
+
+# ── dealing range / premium-discount / OTE ─────────────────────────────────
+
+# ── displacement ───────────────────────────────────────────────────────────
+
+# ── killzones ──────────────────────────────────────────────────────────────
+
+# ── bias engine ────────────────────────────────────────────────────────────
+
+# ── scenario notes ─────────────────────────────────────────────────────────
+
+# ── core ───────────────────────────────────────────────────────────────────
+
+finance_ict_parts/part_001__f.py
+finance_ict_parts/part_002__pct.py
+finance_ict_parts/part_003__atr.py
+finance_ict_parts/part_004__body.py
+finance_ict_parts/part_005__range.py
+finance_ict_parts/part_006__swings.py
+finance_ict_parts/part_007__swing_strength.py
+finance_ict_parts/part_008__structure_from_swings.py
+finance_ict_parts/part_009__fair_value_gaps.py
+finance_ict_parts/part_010__order_blocks.py
+finance_ict_parts/part_011__liquidity.py
+finance_ict_parts/part_012__dealing_range.py
+finance_ict_parts/part_013__displacement.py
+finance_ict_parts/part_014__killzone.py
+finance_ict_parts/part_015__compute_bias.py
+finance_ict_parts/part_016__scenarios.py
+finance_ict_parts/part_017_analyze_ict_from_ohlc.py
+finance_ict_parts/part_018_format_ict_report.py
+finance_ict_parts/part_019_analyze_ict.py

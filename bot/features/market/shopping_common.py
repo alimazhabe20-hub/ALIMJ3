@@ -1,6 +1,5 @@
 """Shared imports and module state for the refactored shopping."""
 
-from __future__ import annotations
 
 import asyncio
 

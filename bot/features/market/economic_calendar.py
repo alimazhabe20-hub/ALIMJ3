@@ -4,15 +4,14 @@ IMPORTANT: Keep this file small and stable. New functionality belongs in the
 secondary ``economic_calendar_parts/`` modules. The complete legacy implementation is kept
 unchanged in ``economic_calendar_parts/part_999_core_legacy.py`` for compatibility.
 """
-from bot.utils import load_modular_part
 
-
-# --- INLINED MODULAR PART: bot/features/market/economic_calendar_parts/part_999_core_legacy.py ---
+# BEGIN MERGED LEGACY PART: economic_calendar_parts/part_999_core_legacy.py
 """تقویم اقتصادی زنده برای بخش بازار.
 
 منبع پیش‌فرض: خروجی هفتگی عمومی Forex Factory/faireconomy.media.
 دریافت عمداً کم‌دفعات انجام می‌شود تا به محدودیت منبع احترام گذاشته شود.
 """
+
 import asyncio
 import hashlib
 import html
@@ -1385,4 +1384,5 @@ async def get_calendar_for_user(
     out.sort(key=lambda e: e.get("utc") or datetime.min.replace(tzinfo=timezone.utc))
     return out, tz_name
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+economic_calendar_parts/part_999_core_legacy.py

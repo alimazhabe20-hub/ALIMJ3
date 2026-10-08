@@ -4,10 +4,8 @@ IMPORTANT: Keep this file small and stable. New functionality belongs in the
 secondary ``styles_parts/`` modules. The complete legacy implementation is kept
 unchanged in ``styles_parts/part_999_core_legacy.py`` for compatibility.
 """
-from bot.utils import load_modular_part
 
-
-# --- INLINED MODULAR PART: bot/features/fonts/styles_parts/part_999_core_legacy.py ---
+# BEGIN MERGED LEGACY PART: styles_parts/part_999_core_legacy.py
 """نقشه‌های یونیکد برای فونت‌های فانتزی (انگلیسی کامل + سازگار با فارسی/عربی)"""
 
 # Base maps for A-Z a-z 0-9
@@ -290,4 +288,5 @@ PERSIAN_COMPATIBLE = [
     "moon", "sun", "flower", "rose", "diamond", "crown", "gem", "spark",
 ]
 
-# --- END INLINED MODULAR PART ---
+# END MERGED LEGACY PART: 
+styles_parts/part_999_core_legacy.py
