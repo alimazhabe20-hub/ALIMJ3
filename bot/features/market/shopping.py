@@ -1,4 +1,4 @@
-"""هوش خرید بازار — Shopping Engine v3 (نسخه یکپارچه و تمیز)
+"""هوش خرید بازار — Shopping Engine v3.1 (نسخه توسعه‌یافته)
 
 جستجوی زنده و چندفروشگاهی قیمت محصول در بازار ایران (پیش‌فرض)
 + اینستاگرام + در صورت درخواست کاربر، منابع خارجی.
@@ -8,6 +8,14 @@
 - قیمت حدسی ارائه نمی‌شود؛ فقط قیمت استخراج‌شده از API یا صفحه محصول.
 - هیچ وابستگی اجباری به AI ندارد.
 - تاریخچه قیمت و هشدار قیمت پشتیبانی می‌شود.
+
+توسعه‌های v3.1:
+- Retry با backoff نمایی (بدون وابستگی خارجی)
+- Circuit Breaker ساده برای هر منبع
+- کش دو لایه (حافظه + Redis اختیاری)
+- نرمال‌سازی قوی‌تر مدل گوشی
+- کنترل همزمانی بازرسی صفحه
+- استخراج و نرمال‌سازی وضعیت موجودی
 """
 
 from __future__ import annotations
@@ -15,11 +23,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import random
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable, Awaitable
 from urllib.parse import quote_plus, urlparse
 
 import httpx
@@ -35,6 +44,31 @@ except Exception:  # pragma: no cover
     logger = logging.getLogger("rooze_ziba")
 
 # ---------------------------------------------------------------------------
+# Optional Redis (graceful fallback)
+# ---------------------------------------------------------------------------
+_REDIS = None
+try:
+    import redis.asyncio as aioredis  # type: ignore
+
+    async def _init_redis() -> Any:
+        global _REDIS
+        try:
+            client = aioredis.from_url(
+                "redis://localhost:6379/0",
+                encoding="utf-8",
+                decode_responses=True,
+                socket_connect_timeout=1.5,
+            )
+            await client.ping()
+            _REDIS = client
+            logger.info("shopping: Redis connected")
+        except Exception:
+            _REDIS = None
+except Exception:
+    aioredis = None  # type: ignore
+
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 UA = (
@@ -43,6 +77,11 @@ UA = (
     "Chrome/128.0.0.0 Safari/537.36 RoozeZiba/5.0"
 )
 CACHE_TTL = 180
+INSPECT_CONCURRENCY = 6
+MAX_RETRIES = 3
+CIRCUIT_FAIL_THRESHOLD = 4
+CIRCUIT_COOLDOWN = 90  # seconds
+
 _CACHE: dict[str, tuple[float, list[dict]]] = {}
 _STATS = {
     "searches": 0,
@@ -51,8 +90,15 @@ _STATS = {
     "web_ok": 0,
     "empty": 0,
     "errors": 0,
+    "retries": 0,
+    "circuit_open": 0,
 }
 _SEARCH_SEM = asyncio.Semaphore(8)
+_INSPECT_SEM = asyncio.Semaphore(INSPECT_CONCURRENCY)
+
+# Circuit breaker state: source → (fail_count, open_until)
+_CIRCUIT: dict[str, tuple[int, float]] = {}
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -69,6 +115,7 @@ class ProductResult:
     availability: str = ""
     image: str = ""
     match_hint: str = ""
+    specs: dict[str, str] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +229,101 @@ INSTA_KEYWORDS = [
 ]
 
 # ---------------------------------------------------------------------------
+# Circuit Breaker
+# ---------------------------------------------------------------------------
+def _circuit_is_open(source: str) -> bool:
+    state = _CIRCUIT.get(source)
+    if not state:
+        return False
+    fails, open_until = state
+    if time.time() < open_until:
+        _STATS["circuit_open"] += 1
+        return True
+    # cooldown expired → half-open (reset)
+    if fails >= CIRCUIT_FAIL_THRESHOLD:
+        _CIRCUIT[source] = (0, 0.0)
+    return False
+
+
+def _circuit_record_success(source: str) -> None:
+    _CIRCUIT[source] = (0, 0.0)
+
+
+def _circuit_record_failure(source: str) -> None:
+    fails, _ = _CIRCUIT.get(source, (0, 0.0))
+    fails += 1
+    open_until = time.time() + CIRCUIT_COOLDOWN if fails >= CIRCUIT_FAIL_THRESHOLD else 0.0
+    _CIRCUIT[source] = (fails, open_until)
+    if open_until:
+        logger.warning("shopping circuit OPEN for %s (%d fails)", source, fails)
+
+
+# ---------------------------------------------------------------------------
+# Retry helper (no external dependency)
+# ---------------------------------------------------------------------------
+async def _with_retry(
+    coro_factory: Callable[[], Awaitable[Any]],
+    *,
+    source: str = "generic",
+    max_attempts: int = MAX_RETRIES,
+    base_delay: float = 0.6,
+) -> Any:
+    """اجرای coroutine با retry نمایی + jitter و circuit breaker."""
+    if _circuit_is_open(source):
+        return None
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            result = await coro_factory()
+            _circuit_record_success(source)
+            return result
+        except Exception as exc:
+            last_exc = exc
+            _STATS["retries"] += 1
+            _STATS["errors"] += 1
+            if attempt >= max_attempts:
+                _circuit_record_failure(source)
+                logger.debug("shopping %s failed after %d attempts: %s", source, attempt, exc)
+                break
+            delay = base_delay * (2 ** (attempt - 1)) + random.uniform(0, 0.35)
+            await asyncio.sleep(delay)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Cache (memory + optional Redis)
+# ---------------------------------------------------------------------------
+async def _cache_get(key: str) -> list[dict] | None:
+    # memory first
+    cached = _CACHE.get(key)
+    if cached and time.time() - cached[0] < CACHE_TTL:
+        _STATS["cache_hits"] += 1
+        return [dict(x) for x in cached[1]]
+    # redis
+    if _REDIS is not None:
+        try:
+            raw = await _REDIS.get(f"shop:{key}")
+            if raw:
+                data = json.loads(raw)
+                _CACHE[key] = (time.time(), data)
+                _STATS["cache_hits"] += 1
+                return [dict(x) for x in data]
+        except Exception:
+            pass
+    return None
+
+
+async def _cache_set(key: str, rows: list[dict]) -> None:
+    payload = [dict(x) for x in rows]
+    _CACHE[key] = (time.time(), payload)
+    if _REDIS is not None:
+        try:
+            await _REDIS.setex(f"shop:{key}", CACHE_TTL, json.dumps(payload, ensure_ascii=False))
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Low-level helpers
 # ---------------------------------------------------------------------------
 def _digits(text: str) -> str:
@@ -228,6 +370,25 @@ def _currency_and_price(raw: Any, currency: str = "") -> tuple[int | None, str]:
     if p is not None:
         return p, "تومان"
     return None, "تومان"
+
+
+def _normalize_availability(raw: str) -> str:
+    """نرمال‌سازی وضعیت موجودی به مقادیر استاندارد فارسی."""
+    t = str(raw or "").strip().lower()
+    if not t:
+        return ""
+    if any(x in t for x in ("instock", "in_stock", "in stock", "موجود", "available", "httpschema.org/instock")):
+        return "موجود"
+    if any(x in t for x in ("outofstock", "out_of_stock", "out of stock", "ناموجود", "sold out", "httpschema.org/outofstock")):
+        return "ناموجود"
+    if any(x in t for x in ("preorder", "pre-order", "پیش‌فروش", "پیش فروش")):
+        return "پیش‌فروش"
+    if any(x in t for x in ("limited", "محدود")):
+        return "موجودی محدود"
+    # fallback: last path segment of schema URL
+    if "/" in t:
+        return t.split("/")[-1]
+    return raw.strip()[:40]
 
 
 def _domain(url: str) -> str:
@@ -343,7 +504,7 @@ def _cache_key(query: str, source: str, max_price: int, foreign: bool) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Intent / product matching (especially strong for phones)
+# Intent / product matching
 # ---------------------------------------------------------------------------
 _PHONE_POSITIVE = {
     "گوشی", "موبایل", "smartphone", "iphone", "آیفون", "اندروید", "android",
@@ -367,7 +528,6 @@ _BRAND_WORDS = {
 
 def _shopping_intent(raw: str) -> dict:
     q = str(raw or "").strip().replace("ي", "ی").replace("ك", "ک").lower()
-    # «نه گوشی لمسی» معمولاً اصلاح پیام قبلی است
     q = re.sub(
         r"^\s*نه[،,:؛\s]+(?=(گوشی|موبایل|شیائومی|سامسونگ|پوکو|آیفون|iphone|xiaomi))",
         "",
@@ -437,29 +597,49 @@ def _shopping_product_match(row: dict, query: str, intent: dict) -> bool:
 
 
 def _shopping_model_key(title: str) -> str:
-    """کلید نسبتاً پایدار برای یکی‌کردن یک مدل در فروشگاه‌های مختلف."""
+    """کلید پایدار مدل — ظرفیت، رم، رنگ و تعداد سیم‌کارت حذف می‌شوند."""
     t = str(title or "").lower().replace("ي", "ی").replace("ك", "ک")
+    # حذف کلمات عمومی
     t = re.sub(
-        r"\b(گوشی|موبایل|mobile|phone|smartphone|شیائومی|xiaomi|سامسونگ|samsung)\b",
+        r"\b(گوشی|موبایل|mobile|phone|smartphone|اسمارت\s*فون|"
+        r"شیائومی|xiaomi|سامسونگ|samsung|اپل|apple)\b",
         " ",
         t,
     )
-    t = re.sub(r"\b\d+\s*(?:gb|گیگ|گیگابایت|گیک|مگابایت|mb|گ)\b", " ", t, flags=re.I)
-    t = re.sub(r"\b(?:رم|ram)\s*\d+\b", " ", t, flags=re.I)
-    t = re.sub(r"\b(?:دو|2)\s*سیم(?:کارت)?\b", " ", t, flags=re.I)
-    t = re.sub(r"\b(?:حافظه|storage)\s*\d+\s*(?:gb|گیگ|گیگابایت|mb|مگابایت)?\b", " ", t, flags=re.I)
+    # ظرفیت / رم / حافظه
+    t = re.sub(r"\b\d+\s*/\s*\d+\s*(?:gb|گیگ|گیگابایت)?\b", " ", t, flags=re.I)
+    t = re.sub(r"\b\d+\s*(?:gb|گیگ|گیگابایت|گیک|مگابایت|mb|گ|tb|ترابایت)\b", " ", t, flags=re.I)
+    t = re.sub(r"\b(?:رم|ram|حافظه|storage|internal)\s*\d+\b", " ", t, flags=re.I)
+    t = re.sub(r"\b\d+\s*(?:رم|ram)\b", " ", t, flags=re.I)
+    # سیم‌کارت و شبکه
+    t = re.sub(r"\b(?:دو|2|تک|یک)\s*سیم(?:\s*کارت)?\b", " ", t, flags=re.I)
+    t = re.sub(r"\b(?:4g|5g|lte|volte)\b", " ", t, flags=re.I)
+    # رنگ‌های رایج
+    t = re.sub(
+        r"\b(?:مشکی|سیاه|سفید|آبی|سبز|قرمز|صورتی|بنفش|خاکستری|طلایی|نقره‌ای|"
+        r"black|white|blue|green|red|pink|purple|gray|grey|gold|silver)\b",
+        " ",
+        t,
+        flags=re.I,
+    )
+    # رجیستری / گارانتی / نسخه
+    t = re.sub(
+        r"\b(?:رجیستر|رجیستری|گارانتی|ضمانت|نسخه|ویرایش|edition|global|china)\b",
+        " ",
+        t,
+        flags=re.I,
+    )
     t = re.sub(r"[^\wآ-ی]+", " ", t)
     stop = {
-        "مدل", "ظرفیت", "حافظه", "داخلی", "نسخه", "رجیستر", "رجیستری",
-        "تومان", "با", "و", "برای", "مشکی", "سفید", "آبی", "سبز",
-        "صورتی", "خاکستری", "رم", "ram", "رنگ",
+        "مدل", "ظرفیت", "حافظه", "داخلی", "تومان", "با", "و", "برای",
+        "رنگ", "رم", "ram", "خرید", "فروش", "جدید", "اصل",
     }
     toks = [x for x in t.split() if x not in stop and len(x) >= 2]
-    return " ".join(toks[:12])
+    return " ".join(toks[:10])
 
 
 # ---------------------------------------------------------------------------
-# JSON-LD extraction
+# JSON-LD & page inspection
 # ---------------------------------------------------------------------------
 def _extract_jsonld(soup: BeautifulSoup) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
@@ -492,7 +672,7 @@ def _from_product(obj: dict[str, Any]) -> tuple[int | None, int | None, str, str
     seller = offers.get("seller")
     if isinstance(seller, dict):
         seller = seller.get("name") or ""
-    availability = str(offers.get("availability") or "").split("/")[-1]
+    availability = _normalize_availability(str(offers.get("availability") or ""))
     image = obj.get("image") or ""
     if isinstance(image, list):
         image = image[0] if image else ""
@@ -531,6 +711,9 @@ def _jsonld_products(soup: BeautifulSoup, domain: str, limit: int) -> list[dict]
             price = _parse_price(offers.get("price") if isinstance(offers, dict) else None)
             if not price and isinstance(offers, dict):
                 price = _parse_price(offers.get("lowPrice"))
+            avail = _normalize_availability(
+                str(offers.get("availability", "")) if isinstance(offers, dict) else ""
+            )
             if not title or not url or url in seen:
                 continue
             seen.add(url)
@@ -541,11 +724,7 @@ def _jsonld_products(soup: BeautifulSoup, domain: str, limit: int) -> list[dict]
                     "price": price,
                     "seller": IRAN_SITES.get(domain, ""),
                     "source": IRAN_SITES.get(domain, domain),
-                    "availability": (
-                        str(offers.get("availability", "")).split("/")[-1]
-                        if isinstance(offers, dict)
-                        else ""
-                    ),
+                    "availability": avail,
                 }
             )
             if len(out) >= limit:
@@ -553,9 +732,6 @@ def _jsonld_products(soup: BeautifulSoup, domain: str, limit: int) -> list[dict]
     return out
 
 
-# ---------------------------------------------------------------------------
-# Page inspection (used for non-direct results)
-# ---------------------------------------------------------------------------
 async def _inspect(url: str, title: str, snippet: str) -> ProductResult:
     result = ProductResult(
         source=_source_for_url(url),
@@ -567,77 +743,91 @@ async def _inspect(url: str, title: str, snippet: str) -> ProductResult:
         result.seller = "صفحه اینستاگرامی"
         return result
 
-    try:
-        async with httpx.AsyncClient(
-            timeout=15.0, follow_redirects=True, headers={"User-Agent": UA}
-        ) as client:
-            r = await client.get(url)
-            if r.status_code >= 400:
-                return result
-            soup = BeautifulSoup(r.text, "html.parser")
+    async def _do_fetch() -> ProductResult:
+        async with _INSPECT_SEM:
+            async with httpx.AsyncClient(
+                timeout=12.0, follow_redirects=True, headers={"User-Agent": UA}
+            ) as client:
+                r = await client.get(url)
+                if r.status_code >= 400:
+                    return result
+                soup = BeautifulSoup(r.text, "html.parser")
 
-            # JSON-LD first
-            for obj in _extract_jsonld(soup):
-                typ = obj.get("@type")
-                if typ == "Product" or (isinstance(typ, list) and "Product" in typ):
-                    p, old, seller, avail, image, cur = _from_product(obj)
-                    if p is not None:
-                        result.price = p
-                    if old is not None and (result.price is None or old > result.price):
-                        result.old_price = old
-                    result.seller = seller or result.seller
-                    result.availability = avail
-                    result.image = image
-                    result.currency = cur
-                    if result.price is not None:
-                        break
+                for obj in _extract_jsonld(soup):
+                    typ = obj.get("@type")
+                    if typ == "Product" or (isinstance(typ, list) and "Product" in typ):
+                        p, old, seller, avail, image, cur = _from_product(obj)
+                        if p is not None:
+                            result.price = p
+                        if old is not None and (result.price is None or old > result.price):
+                            result.old_price = old
+                        result.seller = seller or result.seller
+                        result.availability = avail or result.availability
+                        result.image = image
+                        result.currency = cur
+                        if result.price is not None:
+                            break
 
-            # Meta tags
-            if result.price is None:
-                meta = soup.select_one(
-                    'meta[property="product:price:amount"], '
-                    'meta[itemprop="price"], '
-                    'meta[property="og:price:amount"]'
-                )
-                if meta:
-                    result.price, result.currency = _currency_and_price(
-                        meta.get("content") or meta.get("value"),
-                        meta.get("contentCurrency", "") or "تومان",
+                if result.price is None:
+                    meta = soup.select_one(
+                        'meta[property="product:price:amount"], '
+                        'meta[itemprop="price"], '
+                        'meta[property="og:price:amount"]'
                     )
+                    if meta:
+                        result.price, result.currency = _currency_and_price(
+                            meta.get("content") or meta.get("value"),
+                            meta.get("contentCurrency", "") or "تومان",
+                        )
 
-            # Persian text patterns
-            if result.price is None:
-                text = soup.get_text(" ", strip=True)
-                patterns = [
-                    r"([0-9۰-۹][0-9۰-۹,٬\.]{2,})\s*(?:تومان|تومن|ت\.?م)",
-                    r"(?:قیمت|Price|قیمت نهایی|قیمت فروش)\s*[:：]?\s*([0-9۰-۹][0-9۰-۹,٬\.]{2,})",
-                    r"([0-9۰-۹]{1,3}(?:[٬,][0-9۰-۹]{3})+)\s*(?:تومان|تومن)",
-                ]
-                for pat in patterns:
-                    m = re.search(pat, text, re.I)
-                    if m:
-                        result.price, result.currency = _currency_and_price(m.group(1), "تومان")
-                        break
+                if result.price is None:
+                    text = soup.get_text(" ", strip=True)
+                    patterns = [
+                        r"([0-9۰-۹][0-9۰-۹,٬\.]{2,})\s*(?:تومان|تومن|ت\.?م)",
+                        r"(?:قیمت|Price|قیمت نهایی|قیمت فروش)\s*[:：]?\s*([0-9۰-۹][0-9۰-۹,٬\.]{2,})",
+                        r"([0-9۰-۹]{1,3}(?:[٬,][0-9۰-۹]{3})+)\s*(?:تومان|تومن)",
+                    ]
+                    for pat in patterns:
+                        m = re.search(pat, text, re.I)
+                        if m:
+                            result.price, result.currency = _currency_and_price(
+                                m.group(1), "تومان"
+                            )
+                            break
 
-            # Better title from og:title
-            og_title = soup.select_one('meta[property="og:title"]')
-            if og_title and og_title.get("content"):
-                clean = _clean_title(og_title["content"])
-                if len(clean) > 8:
-                    result.title = clean
+                # availability from text if still empty
+                if not result.availability:
+                    text_low = soup.get_text(" ", strip=True).lower()
+                    if re.search(r"ناموجود|اتمام موجودی|out\s*of\s*stock", text_low):
+                        result.availability = "ناموجود"
+                    elif re.search(r"موجود\s*در\s*انبار|in\s*stock|آماده\s*ارسال", text_low):
+                        result.availability = "موجود"
 
+                og_title = soup.select_one('meta[property="og:title"]')
+                if og_title and og_title.get("content"):
+                    clean = _clean_title(og_title["content"])
+                    if len(clean) > 8:
+                        result.title = clean
+                return result
+
+    try:
+        res = await _with_retry(lambda: _do_fetch(), source=f"inspect:{_domain(url)}", max_attempts=2)
+        return res if isinstance(res, ProductResult) else result
     except Exception as exc:
         logger.debug("shopping inspect failed %s: %s", url, exc)
-    return result
+        return result
 
 
 # ---------------------------------------------------------------------------
 # Search engines
 # ---------------------------------------------------------------------------
 async def _bing_search(query: str, domain: str = "", limit: int = 8) -> list[dict]:
-    q = f"site:{domain} {query}" if domain else query
-    url = f"https://www.bing.com/search?q={quote_plus(q)}&setlang=fa-IR"
-    try:
+    if _circuit_is_open("bing"):
+        return []
+
+    async def _do() -> list[dict]:
+        q = f"site:{domain} {query}" if domain else query
+        url = f"https://www.bing.com/search?q={quote_plus(q)}&setlang=fa-IR"
         async with _SEARCH_SEM:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(12.0, connect=5.0),
@@ -646,7 +836,7 @@ async def _bing_search(query: str, domain: str = "", limit: int = 8) -> list[dic
             ) as client:
                 r = await client.get(url)
         if r.status_code >= 400:
-            return []
+            raise RuntimeError(f"bing status {r.status_code}")
         soup = BeautifulSoup(r.text, "html.parser")
         out: list[dict] = []
         for item in soup.select("li.b_algo")[:limit]:
@@ -662,15 +852,17 @@ async def _bing_search(query: str, domain: str = "", limit: int = 8) -> list[dic
         if out:
             _STATS["web_ok"] += 1
         return out
-    except Exception as exc:
-        _STATS["errors"] += 1
-        logger.debug("shopping bing failed: %s", exc)
-        return []
+
+    result = await _with_retry(_do, source="bing")
+    return result if isinstance(result, list) else []
 
 
 async def _ddg_search(query: str, domain: str = "", limit: int = 8) -> list[dict]:
-    q = f"site:{domain} {query}" if domain else query
-    try:
+    if _circuit_is_open("ddg"):
+        return []
+
+    async def _do() -> list[dict]:
+        q = f"site:{domain} {query}" if domain else query
         async with _SEARCH_SEM:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(12.0, connect=5.0),
@@ -679,7 +871,7 @@ async def _ddg_search(query: str, domain: str = "", limit: int = 8) -> list[dict
             ) as client:
                 r = await client.get("https://html.duckduckgo.com/html/", params={"q": q})
         if r.status_code >= 400:
-            return []
+            raise RuntimeError(f"ddg status {r.status_code}")
         soup = BeautifulSoup(r.text, "html.parser")
         out: list[dict] = []
         for item in soup.select(".result")[:limit]:
@@ -693,10 +885,9 @@ async def _ddg_search(query: str, domain: str = "", limit: int = 8) -> list[dict
             if href.startswith("http") and title:
                 out.append({"url": href, "title": title, "snippet": snippet})
         return out
-    except Exception as exc:
-        _STATS["errors"] += 1
-        logger.debug("shopping ddg failed: %s", exc)
-        return []
+
+    result = await _with_retry(_do, source="ddg")
+    return result if isinstance(result, list) else []
 
 
 async def _fetch_source(query: str, domain: str, limit: int, foreign: bool) -> list[dict]:
@@ -722,7 +913,10 @@ async def _fetch_source(query: str, domain: str, limit: int, foreign: bool) -> l
 # Direct catalog / API sources
 # ---------------------------------------------------------------------------
 async def _direct_torob(query: str, max_price: int, limit: int) -> list[dict]:
-    try:
+    if _circuit_is_open("torob"):
+        return []
+
+    async def _do() -> list[dict]:
         async with _SEARCH_SEM:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(11.0, connect=5.0),
@@ -744,7 +938,7 @@ async def _direct_torob(query: str, max_price: int, limit: int) -> list[dict]:
                     },
                 )
         if r.status_code >= 400:
-            return []
+            raise RuntimeError(f"torob status {r.status_code}")
         data = r.json()
         raw = data.get("results") if isinstance(data, dict) else None
         if not isinstance(raw, list):
@@ -762,6 +956,7 @@ async def _direct_torob(query: str, max_price: int, limit: int) -> list[dict]:
             link = str(item.get("page_url") or item.get("url") or "").strip() or (
                 f"https://torob.com/p/{key}/" if key else ""
             )
+            avail = _normalize_availability(str(item.get("availability") or ""))
             if (
                 not title
                 or not price
@@ -778,7 +973,7 @@ async def _direct_torob(query: str, max_price: int, limit: int) -> list[dict]:
                     "price": price,
                     "seller": str(item.get("seller_name") or "").strip(),
                     "source": "ترب",
-                    "availability": str(item.get("availability") or "").strip(),
+                    "availability": avail,
                 }
             )
             if len(out) >= limit:
@@ -786,14 +981,16 @@ async def _direct_torob(query: str, max_price: int, limit: int) -> list[dict]:
         if out:
             _STATS["direct_ok"] += 1
         return out
-    except Exception as exc:
-        _STATS["errors"] += 1
-        logger.debug("torob direct failed: %s", exc)
-        return []
+
+    result = await _with_retry(_do, source="torob")
+    return result if isinstance(result, list) else []
 
 
 async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]:
-    try:
+    if _circuit_is_open("digikala"):
+        return []
+
+    async def _do() -> list[dict]:
         async with _SEARCH_SEM:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(11.0, connect=5.0),
@@ -809,7 +1006,7 @@ async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]
                     params={"q": query, "page": 1},
                 )
         if r.status_code >= 400:
-            return []
+            raise RuntimeError(f"digikala status {r.status_code}")
         data = r.json()
         raw = ((data.get("data") or {}).get("products") if isinstance(data, dict) else None)
         if not isinstance(raw, list):
@@ -827,6 +1024,8 @@ async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]
                 link = "https://www.digikala.com" + link
             if not link and pid:
                 link = f"https://www.digikala.com/product/dkp-{pid}/"
+            status = str(item.get("status") or item.get("availability") or "")
+            avail = _normalize_availability(status)
             if not title or not price or not link or (max_price and price > max_price):
                 continue
             out.append(
@@ -836,7 +1035,7 @@ async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]
                     "price": price,
                     "seller": "دیجی‌کالا",
                     "source": "دیجی‌کالا",
-                    "availability": "",
+                    "availability": avail,
                 }
             )
             if len(out) >= limit:
@@ -844,19 +1043,20 @@ async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]
         if out:
             _STATS["direct_ok"] += 1
         return out
-    except Exception as exc:
-        _STATS["errors"] += 1
-        logger.debug("digikala direct failed: %s", exc)
-        return []
+
+    result = await _with_retry(_do, source="digikala")
+    return result if isinstance(result, list) else []
 
 
 async def _direct_site_search(query: str, domain: str, limit: int) -> list[dict]:
-    """Best-effort direct catalog/search-page lookup for Iranian stores."""
+    if _circuit_is_open(domain):
+        return []
     template = _SOURCE_SEARCH_URLS.get(domain)
     if not template:
         return []
-    url = template.format(q=quote_plus(query))
-    try:
+
+    async def _do() -> list[dict]:
+        url = template.format(q=quote_plus(query))
         async with _SEARCH_SEM:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(10.0, connect=4.0),
@@ -865,7 +1065,7 @@ async def _direct_site_search(query: str, domain: str, limit: int) -> list[dict]
             ) as client:
                 r = await client.get(url)
         if r.status_code >= 400:
-            return []
+            raise RuntimeError(f"{domain} status {r.status_code}")
         soup = BeautifulSoup(r.text, "html.parser")
         out = _jsonld_products(soup, domain, limit)
         if not out:
@@ -899,9 +1099,9 @@ async def _direct_site_search(query: str, domain: str, limit: int) -> list[dict]
         if out:
             _STATS["direct_ok"] += 1
         return out[:limit]
-    except Exception as exc:
-        logger.debug("direct site search failed %s: %s", domain, exc)
-        return []
+
+    result = await _with_retry(_do, source=domain, max_attempts=2)
+    return result if isinstance(result, list) else []
 
 
 # ---------------------------------------------------------------------------
@@ -940,6 +1140,10 @@ def _rank(rows: list[dict], query: str, max_price: int) -> list[dict]:
             continue
         if max_price and price and int(price) > int(max_price):
             continue
+        # ترجیح موجود بودن
+        avail = str(x.get("availability") or "")
+        if avail == "ناموجود":
+            continue
         rel = _relevance(title, query)
         if (
             rel < 15
@@ -960,6 +1164,8 @@ def _rank(rows: list[dict], query: str, max_price: int) -> list[dict]:
         )
         if x.get("_verified_direct"):
             score += 8
+        if avail == "موجود":
+            score += 4
         x["_score"] = score
         x["_model_key"] = model
         if model:
@@ -985,13 +1191,11 @@ def _rank(rows: list[dict], query: str, max_price: int) -> list[dict]:
 def _diversify_shopping_rows(
     rows: list[dict], max_results: int = 10, max_per_source: int = 2
 ) -> list[dict]:
-    """نتایج را بین منابع پخش می‌کند تا یک سایت تمام خروجی را نبلعد."""
     if not rows:
         return []
     result: list[dict] = []
     counts: dict[str, int] = {}
     used_urls: set[str] = set()
-    # دور اول: حداقل یک نتیجه از هر منبع معتبر
     for row in rows:
         url = str(row.get("url") or "").strip()
         src = str(row.get("source") or "وب")
@@ -1002,7 +1206,6 @@ def _diversify_shopping_rows(
         result.append(row)
         if len(result) >= max_results:
             return result
-    # دور دوم: پرکردن ظرفیت باقی‌مانده
     for row in rows:
         url = str(row.get("url") or "").strip()
         src = str(row.get("source") or "وب")
@@ -1235,15 +1438,18 @@ def cancel_shopping_price_alert(user_id: int, alert_id: int) -> str:
 
 
 def shopping_engine_status() -> str:
+    open_circuits = [k for k, (f, until) in _CIRCUIT.items() if time.time() < until]
     return (
-        "🛒 Shopping Engine v3 (clean)\n"
+        "🛒 Shopping Engine v3.1\n"
         + " | ".join(f"{k}={v}" for k, v in _STATS.items())
         + f" | cache={len(_CACHE)}"
+        + f" | circuits_open={open_circuits or 'none'}"
+        + f" | redis={'yes' if _REDIS else 'no'}"
     )
 
 
 # ---------------------------------------------------------------------------
-# Optional external guide (mobo.news) – only for ranking, never for price
+# Optional external guide (mobo.news)
 # ---------------------------------------------------------------------------
 async def _mobo_phone_guide(query: str) -> set[str]:
     try:
@@ -1287,7 +1493,7 @@ async def search_shopping(
     max_price: int = 0,
     user_id: int = 0,
 ) -> str:
-    """موتور خرید نهایی: چندمنبعی واقعی، فیلتر معنایی، تأیید صفحه و بررسی نهایی."""
+    """موتور خرید نهایی v3.1: چندمنبعی، فیلتر معنایی، تأیید صفحه، retry و circuit breaker."""
     raw = " ".join(str(query or "").split()).strip()
     if not raw:
         return "عبارت محصول برای جستجو مشخص نیست."
@@ -1306,11 +1512,10 @@ async def search_shopping(
         clean = raw
     intent = _shopping_intent(raw)
 
-    key = _cache_key(clean, domain or source, max_price, foreign) + ":intent-v4"
-    cached = _CACHE.get(key)
-    if cached and time.time() - cached[0] < CACHE_TTL:
-        _STATS["cache_hits"] += 1
-        rows = [dict(x) for x in cached[1]]
+    key = _cache_key(clean, domain or source, max_price, foreign) + ":v31"
+    cached = await _cache_get(key)
+    if cached is not None:
+        rows = cached
     else:
         variants = _query_variants(clean, budget)
         if intent.get("brand"):
@@ -1343,28 +1548,18 @@ async def search_shopping(
             ]
             if not domains:
                 domains = [
-                    "torob.com",
-                    "digikala.com",
-                    "technolife.ir",
-                    "snappshop.ir",
-                    "emalls.ir",
+                    "torob.com", "digikala.com", "technolife.ir",
+                    "snappshop.ir", "emalls.ir",
                 ]
         else:
             domains = [
-                "torob.com",
-                "digikala.com",
-                "technolife.ir",
-                "snappshop.ir",
-                "emalls.ir",
-                "meghdadit.com",
-                "kalaoma.com",
-                "19kala.com",
-                "mobile.ir",
+                "torob.com", "digikala.com", "technolife.ir", "snappshop.ir",
+                "emalls.ir", "meghdadit.com", "kalaoma.com", "19kala.com", "mobile.ir",
             ]
 
         rows: list[dict] = []
 
-        # Direct API sources (highest confidence)
+        # Direct API (highest confidence)
         if not foreign and not domain:
             direct_tasks = []
             for v in variants[:2]:
@@ -1379,7 +1574,7 @@ async def search_shopping(
                         x["_verified_direct"] = True
                         rows.append(x)
 
-        # Direct site search pages
+        # Direct site pages
         direct_site_tasks = []
         for v in variants[:2]:
             for d in domains:
@@ -1399,7 +1594,7 @@ async def search_shopping(
                     if _shopping_product_match(x, raw, intent):
                         rows.append(x)
 
-        # Search-engine fallback (never marked as verified)
+        # Search-engine fallback
         search_tasks = []
         for v in variants[:2]:
             for d in domains:
@@ -1430,6 +1625,8 @@ async def search_shopping(
                 continue
             if min_price and (not p or p < min_price):
                 continue
+            if str(x.get("availability") or "") == "ناموجود":
+                continue
             u = str(x.get("url") or "").strip()
             if not u or u in seen_urls:
                 continue
@@ -1438,7 +1635,7 @@ async def search_shopping(
 
         rows = _rank(filtered, clean, max_price)
 
-        # Optional mobo.news boost (ranking only)
+        # mobo.news boost
         mobo_models = await _mobo_phone_guide(raw) if intent.get("phone") else set()
         if mobo_models:
             for x in rows:
@@ -1450,13 +1647,13 @@ async def search_shopping(
                     x["_mobo_match"] = True
                     x["_score"] = float(x.get("_score", 0)) + 18
 
-        # Inspect top non-verified pages for real prices
+        # Inspect top non-verified pages (controlled concurrency)
         inspect_candidates = []
         for x in rows:
             if x.get("_verified_direct"):
                 continue
             inspect_candidates.append(x)
-            if len(inspect_candidates) >= 18:
+            if len(inspect_candidates) >= 14:
                 break
         if inspect_candidates:
             checked = await asyncio.gather(
@@ -1474,16 +1671,14 @@ async def search_shopping(
                         old["title"] = obj.title or old.get("title")
                         old["price"] = obj.price
                         old["seller"] = obj.seller or old.get("seller", "")
-                        old["availability"] = obj.availability or old.get(
-                            "availability", ""
-                        )
+                        old["availability"] = obj.availability or old.get("availability", "")
                         old["_verified_direct"] = obj.price is not None
                         if obj.source and obj.source != "general":
                             old["source"] = SOURCES.get(
                                 obj.source, {"label": obj.source}
                             ).get("label", obj.source)
 
-        # Final filter after inspection
+        # Final filter
         final: list[dict] = []
         for x in rows:
             if not _shopping_product_match(x, raw, intent):
@@ -1495,6 +1690,8 @@ async def search_shopping(
                 continue
             if min_price and (not p or p < min_price):
                 continue
+            if str(x.get("availability") or "") == "ناموجود":
+                continue
             final.append(x)
 
         final.sort(
@@ -1503,7 +1700,6 @@ async def search_shopping(
         rows = _diversify_shopping_rows(
             final, max_results=max_results, max_per_source=2
         )
-        # If only one source really worked, fill remaining slots
         distinct_sources = {str(x.get("source") or "وب") for x in final}
         if len(distinct_sources) <= 1 and len(rows) < min(max_results, len(final)):
             used = {x.get("url") for x in rows}
@@ -1514,7 +1710,7 @@ async def search_shopping(
                 if len(rows) >= max_results:
                     break
 
-        _CACHE[key] = (time.time(), [dict(x) for x in rows])
+        await _cache_set(key, rows)
         if rows:
             _save_history_rows(rows)
 
@@ -1560,7 +1756,7 @@ async def search_shopping(
         lines.append("🧩 فیلتر هوشمند محصول و برند فعال است.")
     lines += [
         "ℹ️ ✅ فقط قیمت‌هایی که از کاتالوگ/API یا صفحه محصول قابل‌استخراج و تأیید "
-        "بوده‌اند با نشان تأیید نمایش داده می‌شوند؛ قیمت snippet به‌تنهایی قطعی محسوب نمی‌شود.",
+        "بوده‌اند با نشان تأیید نمایش داده می‌شوند.",
         "",
     ]
 
@@ -1568,6 +1764,7 @@ async def search_shopping(
         price = x.get("price")
         src = x.get("source") or "وب"
         verified = " ✅" if x.get("_verified_direct") else ""
+        avail = x.get("availability") or ""
         lines.append(f"**{i}. {x.get('title') or 'محصول'}**")
         if price and not foreign:
             lines.append(f"🏪 {src}{verified} | 💰 {price:,} تومان")
@@ -1577,8 +1774,8 @@ async def search_shopping(
             lines.append(f"🏪 {src} | 💰 قیمت قابل‌تأیید نیست")
         if x.get("seller"):
             lines.append(f"👤 {x['seller']}")
-        if x.get("availability"):
-            lines.append(f"📦 {x['availability']}")
+        if avail:
+            lines.append(f"📦 {avail}")
         lines.append(f"🔗 {x['url']}")
         lines.append("")
 
@@ -1610,7 +1807,6 @@ async def search_shopping(
             )
         )
 
-    # Final recommendation
     candidates = [x for x in priced if not max_price or x["price"] <= max_price]
     if candidates:
         for x in candidates:
