@@ -79,7 +79,7 @@ class V11RegressionTests(unittest.TestCase):
             "bot.database", "bot.db_persist", "bot.scheduler",
             "bot.services.ai_service", "bot.services.ai_tools",
             "bot.features.market.finance", "bot.features.weather.weather",
-            "bot.features.weather.weather_extra", "bot.handlers.commands",
+            "bot.features.weather.features_weather_weather_extra", "bot.handlers.commands",
             "bot.handlers.callbacks", "bot.handlers.messages", "bot.main",
         ]
         heavy = {"bot.handlers.messages", "bot.main"}

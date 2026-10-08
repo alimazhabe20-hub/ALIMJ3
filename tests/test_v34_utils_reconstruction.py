@@ -44,7 +44,7 @@ class V34UtilsTests(unittest.TestCase):
         self.assertEqual(texts.get_text_for_language("en", "welcome", name="Ali"), "🌟 Hello dear Ali! 🌟")
 
     def test_event_contract_returns_copies(self):
-        events = importlib.import_module("bot.utils.events")
+        events = importlib.import_module("bot.utils.utils_events")
         first = events.get_shamsi_events(1, 1)
         self.assertTrue(first)
         first.append("MUTATION")
