@@ -897,45 +897,53 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "ai_clear_memory":
-        # اول answer تا spinner تلگرام قطع شود
+        # از logger ماژول استفاده نکن — داخل همین تابع بعداً import محلی logger هست
+        # و باعث UnboundLocalError می‌شود؛ پس این‌جا import جدا با نام _mem_log.
+        try:
+            from bot.logger import logger as _mem_log
+        except Exception:
+            _mem_log = None
+
+        def _mlog(level, msg, *args, **kwargs):
+            if _mem_log is None:
+                return
+            try:
+                getattr(_mem_log, level)(msg, *args, **kwargs)
+            except Exception:
+                pass
+
         try:
             await _safe_answer(query, "حافظه AI پاک شد ✅", show_alert=False)
         except Exception as _exc:
-            logger.debug("ai_clear_memory answer: %s", _exc)
-        # پاک‌سازی حافظه کوتاه‌مدت + بلندمدت
+            _mlog("debug", "ai_clear_memory answer: %s", _exc)
         try:
             clear_history(user_id, clear_long_term=True)
         except TypeError:
             try:
                 clear_history(user_id)
             except Exception as _exc:
-                logger.exception("ai_clear_memory clear_history: %s", _exc)
+                _mlog("exception", "ai_clear_memory clear_history: %s", _exc)
             try:
                 from bot.database import clear_ai_history_summary, delete_ai_memory
                 clear_ai_history_summary(user_id)
                 delete_ai_memory(user_id)
             except Exception as _exc:
-                logger.exception("ai_clear_memory db fallback: %s", _exc)
+                _mlog("exception", "ai_clear_memory db fallback: %s", _exc)
         except Exception as _exc:
-            logger.exception("ai_clear_memory clear_history: %s", _exc)
+            _mlog("exception", "ai_clear_memory clear_history: %s", _exc)
             try:
                 from bot.database import clear_ai_history_summary, delete_ai_memory
                 clear_ai_history_summary(user_id)
                 delete_ai_memory(user_id)
             except Exception as _exc2:
-                logger.exception("ai_clear_memory db fallback: %s", _exc2)
+                _mlog("exception", "ai_clear_memory db fallback: %s", _exc2)
         try:
             await query.edit_message_reply_markup(
                 reply_markup=get_ai_keyboard(user_id)
             )
         except Exception as _exc:
-            logger.debug("ai_clear_memory edit markup: %s", _exc)
-        confirm = (
-            "✅ حافظه AI پاک شد.\n"
-            "• تاریخچه گفت‌وگوی فعلی\n"
-            "• خلاصه گفتگوهای قبلی\n"
-            "• حافظه بلندمدت"
-        )
+            # معمولاً BadRequest: Message is not modified — بی‌ضرر است
+            _mlog("debug", "ai_clear_memory edit markup: %s", _exc)
         try:
             if query.message is not None:
                 await query.message.reply_text(
@@ -950,7 +958,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text="✅ حافظه AI پاک شد.",
                 )
         except Exception as _exc:
-            logger.debug("ai_clear_memory confirm: %s", _exc)
+            _mlog("debug", "ai_clear_memory confirm: %s", _exc)
         return
 
     if data.startswith("ai_continue:"):
@@ -1090,7 +1098,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ───────────────── بروزرسانی منوی اصلی ─────────────────
     if data == "refresh_main":
-        from bot.logger import logger
+        # logger already imported at module level (avoid UnboundLocalError)
 
         lock = _get_refresh_lock(user_id)
 
