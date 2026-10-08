@@ -6,6 +6,31 @@ agent loops are finite, destructive operations require explicit approval, and
 all persistent state is SQLite-backed through the existing DB facade.
 """
 
+import ast, asyncio, csv, hashlib, io, ipaddress, json, os, re, sqlite3, time, uuid
+from collections import defaultdict, deque
+from dataclasses import dataclass, asdict
+from pathlib import Path
+from typing import Any, Callable, Iterable
+from urllib.parse import urlparse
+
+VERSION = "76.0.0"
+MAX_STEPS = max(1, min(20, int(os.getenv("V76_MAX_STEPS", "10"))))
+MAX_CALLS = max(2, min(40, int(os.getenv("V76_MAX_CALLS", "20"))))
+MAX_JOB_QUEUE = max(50, min(5000, int(os.getenv("V76_MAX_JOB_QUEUE", "500"))))
+MAX_CACHE = max(64, min(10000, int(os.getenv("V76_CACHE_MAX", "2048"))))
+
+_SECRET = re.compile(r"(?i)(token|api[_-]?key|secret|password|authorization|cookie)\s*[:=]\s*([^\s,;]+)")
+_INJECTION = re.compile(r"(?i)(ignore\s+(all|any|previous|prior)\s+instructions|system\s+prompt|developer\s+message|reveal\s+.*prompt|نادیده\s+بگیر|دستورهای?\s+سیستم)")
+_PRIVATE_HOSTS = {"localhost", "localhost.localdomain", "metadata.google.internal", "169.254.169.254"}
+_CACHE: dict[str, tuple[float, Any]] = {}
+_PERF: deque[dict[str, Any]] = deque(maxlen=4000)
+_FAILURES: defaultdict[str, deque[float]] = defaultdict(lambda: deque(maxlen=20))
+_EVENTS: defaultdict[str, list[Callable[[dict[str, Any]], Any]]] = defaultdict(list)
+_PLUGINS: dict[str, dict[str, Any]] = {}
+_PROVIDERS: dict[str, dict[str, Any]] = {}
+
+
+
 # BEGIN MERGED LEGACY PART: v76_platform_parts/part_001__db.py
 # Auto-split part 1: _db
 def _db():
@@ -512,30 +537,6 @@ def self_test(root:str|Path=".")->dict[str,Any]:
     return {"ok":all(checks.values()),"checks":checks,"system":system_snapshot()}
 
 # END MERGED LEGACY PART: 
-import ast, asyncio, csv, hashlib, io, ipaddress, json, os, re, sqlite3, time, uuid
-from collections import defaultdict, deque
-from dataclasses import dataclass, asdict
-from pathlib import Path
-from typing import Any, Callable, Iterable
-from urllib.parse import urlparse
-
-VERSION = "76.0.0"
-MAX_STEPS = max(1, min(20, int(os.getenv("V76_MAX_STEPS", "10"))))
-MAX_CALLS = max(2, min(40, int(os.getenv("V76_MAX_CALLS", "20"))))
-MAX_JOB_QUEUE = max(50, min(5000, int(os.getenv("V76_MAX_JOB_QUEUE", "500"))))
-MAX_CACHE = max(64, min(10000, int(os.getenv("V76_CACHE_MAX", "2048"))))
-
-_SECRET = re.compile(r"(?i)(token|api[_-]?key|secret|password|authorization|cookie)\s*[:=]\s*([^\s,;]+)")
-_INJECTION = re.compile(r"(?i)(ignore\s+(all|any|previous|prior)\s+instructions|system\s+prompt|developer\s+message|reveal\s+.*prompt|نادیده\s+بگیر|دستورهای?\s+سیستم)")
-_PRIVATE_HOSTS = {"localhost", "localhost.localdomain", "metadata.google.internal", "169.254.169.254"}
-_CACHE: dict[str, tuple[float, Any]] = {}
-_PERF: deque[dict[str, Any]] = deque(maxlen=4000)
-_FAILURES: defaultdict[str, deque[float]] = defaultdict(lambda: deque(maxlen=20))
-_EVENTS: defaultdict[str, list[Callable[[dict[str, Any]], Any]]] = defaultdict(list)
-_PLUGINS: dict[str, dict[str, Any]] = {}
-_PROVIDERS: dict[str, dict[str, Any]] = {}
-
-
 # 1. Agent 4.0 + planning/verification
 # 2. Multi-agent
 # 3. Admin/observability
