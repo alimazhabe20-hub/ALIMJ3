@@ -1385,4 +1385,3 @@ async def get_calendar_for_user(
     return out, tz_name
 
 # END MERGED LEGACY PART: 
-economic_calendar_parts/part_999_core_legacy.py

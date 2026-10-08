@@ -222,11 +222,3 @@ HIJRI_MONTH_NAMES = {
 }
 
 
-religious_events_parts/part_001__to_shamsi_str.py
-religious_events_parts/part_002__hijri_label.py
-religious_events_parts/part_003__events_for_gregorian.py
-religious_events_parts/part_004_get_today_religious_events.py
-religious_events_parts/part_005_get_upcoming_religious_events.py
-religious_events_parts/part_006_get_month_religious_events.py
-religious_events_parts/part_007_religious_countdown.py
-religious_events_parts/part_008_religious_month_view.py

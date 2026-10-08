@@ -735,22 +735,3 @@ from bot.utils.http_client import pooled_async_client, request_with_retry, safe_
 # finance_ta is loaded through the finance facade after it is initialized.
 _fetch_klines_interval = _f._fetch_klines_interval
 
-finance_ta_parts/part_001__fetch_klines_for_ta.py
-finance_ta_parts/part_002__sma.py
-finance_ta_parts/part_003__rsi.py
-finance_ta_parts/part_004__adx_approx.py
-finance_ta_parts/part_005__compute_ta.py
-finance_ta_parts/part_006__atr.py
-finance_ta_parts/part_007__detect_candle_patterns.py
-finance_ta_parts/part_008__score_timeframe.py
-finance_ta_parts/part_009__mtf_bundle.py
-finance_ta_parts/part_010__market_structure.py
-finance_ta_parts/part_011__rsi_divergence.py
-finance_ta_parts/part_012__volume_breakout.py
-finance_ta_parts/part_013__demand_supply_zone.py
-finance_ta_parts/part_014__detect_chart_patterns.py
-finance_ta_parts/part_015__price_action_analysis.py
-finance_ta_parts/part_016__mtf_convergence.py
-finance_ta_parts/part_017__advanced_levels.py
-finance_ta_parts/part_018__market_regime.py
-finance_ta_parts/part_019__professional_score.py

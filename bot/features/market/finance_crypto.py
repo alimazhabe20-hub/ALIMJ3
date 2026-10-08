@@ -924,4 +924,3 @@ def _build_smart_summary(pair, trend, ta, support, resistance, signal, score, ch
 
 # END MERGED LEGACY PART: 
 # JSON safety contract: safe_json
-finance_crypto_parts/part_999_core_legacy.py

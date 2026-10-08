@@ -996,22 +996,3 @@ from bot.logger import logger
 
 # ── core ───────────────────────────────────────────────────────────────────
 
-finance_ict_parts/part_001__f.py
-finance_ict_parts/part_002__pct.py
-finance_ict_parts/part_003__atr.py
-finance_ict_parts/part_004__body.py
-finance_ict_parts/part_005__range.py
-finance_ict_parts/part_006__swings.py
-finance_ict_parts/part_007__swing_strength.py
-finance_ict_parts/part_008__structure_from_swings.py
-finance_ict_parts/part_009__fair_value_gaps.py
-finance_ict_parts/part_010__order_blocks.py
-finance_ict_parts/part_011__liquidity.py
-finance_ict_parts/part_012__dealing_range.py
-finance_ict_parts/part_013__displacement.py
-finance_ict_parts/part_014__killzone.py
-finance_ict_parts/part_015__compute_bias.py
-finance_ict_parts/part_016__scenarios.py
-finance_ict_parts/part_017_analyze_ict_from_ohlc.py
-finance_ict_parts/part_018_format_ict_report.py
-finance_ict_parts/part_019_analyze_ict.py

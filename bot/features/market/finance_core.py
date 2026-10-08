@@ -691,21 +691,3 @@ _FA_CURRENCY = {
 }
 
 
-finance_core_parts/part_001__get_usd_rial.py
-finance_core_parts/part_002_pn.py
-finance_core_parts/part_003__parse_price.py
-finance_core_parts/part_004__fetch_tgju_bulk.py
-finance_core_parts/part_005__tgju_price.py
-finance_core_parts/part_006_resolve_coin_id.py
-finance_core_parts/part_007__crypto_simple.py
-finance_core_parts/part_008__top_from_coinlore.py
-finance_core_parts/part_009__top_from_paprika.py
-finance_core_parts/part_010_get_top_crypto.py
-finance_core_parts/part_011_get_crypto_price.py
-finance_core_parts/part_012_convert_crypto.py
-finance_core_parts/part_013_full_market_prices.py
-finance_core_parts/part_014_rial_toman.py
-finance_core_parts/part_015_convert_currency.py
-finance_core_parts/part_016_profit_loss.py
-finance_core_parts/part_017_parse_profit.py
-finance_core_parts/part_018_parse_currency_input.py

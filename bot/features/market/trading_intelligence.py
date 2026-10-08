@@ -183,14 +183,3 @@ import time
 from statistics import mean
 
 
-trading_intelligence_parts/part_001__clamp.py
-trading_intelligence_parts/part_002_detect_regime.py
-trading_intelligence_parts/part_003_dynamic_weights.py
-trading_intelligence_parts/part_004_quality_gate.py
-trading_intelligence_parts/part_005_risk_plan.py
-trading_intelligence_parts/part_006__forward_return.py
-trading_intelligence_parts/part_007_backtest_directional.py
-trading_intelligence_parts/part_008_walk_forward.py
-trading_intelligence_parts/part_009_calibration.py
-trading_intelligence_parts/part_010_alert_flags.py
-trading_intelligence_parts/part_011_dedupe_alerts.py

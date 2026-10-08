@@ -408,5 +408,3 @@ from bot.features.market.shopping import search_shopping
 from bot.services.visual_search import visual_search
 from bot.utils.helpers import get_ai_keyboard
 
-media_handlers_parts/part_001_media_ai_handler.py
-media_handlers_parts/part_002_voice_ai_handler.py

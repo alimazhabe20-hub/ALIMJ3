@@ -289,4 +289,3 @@ PERSIAN_COMPATIBLE = [
 ]
 
 # END MERGED LEGACY PART: 
-styles_parts/part_999_core_legacy.py

@@ -320,4 +320,3 @@ async def _h_crypto_full(*args, **kwargs): return await _legacy_h_crypto_full(*a
 async def _h_crypto_pos(*args, **kwargs): return await _legacy_h_crypto_pos(*args, **kwargs)
 async def _h_crypto_chart(*args, **kwargs): return await _legacy_h_crypto_chart(*args, **kwargs)
 async def _h_crypto_analyze(*args, **kwargs): return await _legacy_h_crypto_analyze(*args, **kwargs)
-market_handlers_parts/part_999_core_legacy.py

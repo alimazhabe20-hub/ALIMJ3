@@ -327,15 +327,3 @@ from bot.services.v71_platform import (
 )
 from bot.services.v72_platform import format_options, record_download, update_download, normalize_download_mode, ux_text
 
-v71_handlers_parts/part_001__dl_lang.py
-v71_handlers_parts/part_002_downloader_entry_v71.py
-v71_handlers_parts/part_003__start_probe.py
-v71_handlers_parts/part_004_handle_downloader_url_v71.py
-v71_handlers_parts/part_005__download_social_direct.py
-v71_handlers_parts/part_006_download_callback.py
-v71_handlers_parts/part_007_v71_command.py
-v71_handlers_parts/part_008_v71_selftest_command.py
-v71_handlers_parts/part_009_workspace_command.py
-v71_handlers_parts/part_010_branch_command.py
-v71_handlers_parts/part_011_schedule_ai_command.py
-v71_handlers_parts/part_012_personalize_command.py

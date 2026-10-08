@@ -1358,20 +1358,3 @@ INSTA_KEYWORDS = [
 
 
 # Shopping Engine v3 must be the final public implementation.
-shopping_parts/part_001_ProductResult.py
-shopping_parts/part_002__norm_digits.py
-shopping_parts/part_003__price.py
-shopping_parts/part_004__currency_and_price.py
-shopping_parts/part_005__domain.py
-shopping_parts/part_006__source_for_url.py
-shopping_parts/part_007__clean_title.py
-shopping_parts/part_008__search.py
-shopping_parts/part_009__extract_jsonld.py
-shopping_parts/part_010__from_product.py
-shopping_parts/part_011__inspect.py
-shopping_parts/part_012__query_variants.py
-shopping_parts/part_013__score.py
-shopping_parts/part_014__save_history.py
-shopping_parts/part_015_shopping_price_history.py
-shopping_parts/part_016_search_shopping.py
-shopping_parts/part_016_search_shopping_live.py

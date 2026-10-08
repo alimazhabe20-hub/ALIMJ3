@@ -363,4 +363,3 @@ async def start(*args, **kwargs): return await _legacy_start(*args, **kwargs)
 # check_and_rate_limit(update, context)
 async def _facade_async_boundary():
     return None
-commands_parts/part_999_core_legacy.py

@@ -1300,4 +1300,3 @@ async def lens_command(*args, **kwargs): return await _legacy_lens_command(*args
 # from bot.handlers.media_handlers import media_ai_handler as _impl
 # from bot.handlers.media_handlers import voice_ai_handler as _impl
 # return answer, provider_label or "ai"
-messages_parts/part_999_core_legacy.py

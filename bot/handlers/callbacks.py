@@ -1773,4 +1773,3 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # END MERGED LEGACY PART: 
 _legacy_button_handler = button_handler
 async def button_handler(*args, **kwargs): return await _legacy_button_handler(*args, **kwargs)
-callbacks_parts/part_999_core_legacy.py
