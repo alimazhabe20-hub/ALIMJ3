@@ -454,17 +454,34 @@ def _normalize_availability(raw: str) -> str:
     t = str(raw or "").strip().lower()
     if not t:
         return ""
-    if any(x in t for x in ("instock", "in_stock", "in stock", "موجود", "available", "httpschema.org/instock")):
+    if any(
+        x in t
+        for x in (
+            "instock", "in_stock", "in stock", "موجود", "available",
+            "marketable", "httpschema.org/instock", "in_sale", "sale_on",
+        )
+    ):
         return "موجود"
-    if any(x in t for x in ("outofstock", "out_of_stock", "out of stock", "ناموجود", "sold out", "httpschema.org/outofstock")):
+    if any(
+        x in t
+        for x in (
+            "outofstock", "out_of_stock", "out of stock", "ناموجود", "sold out",
+            "httpschema.org/outofstock", "stop_production", "unavailable",
+        )
+    ):
         return "ناموجود"
     if any(x in t for x in ("preorder", "pre-order", "پیش‌فروش", "پیش فروش")):
         return "پیش‌فروش"
     if any(x in t for x in ("limited", "محدود")):
         return "موجودی محدود"
-    # fallback: last path segment of schema URL
+    # وضعیت‌های خام API را به فارسی نشکن؛ خالی برگردان
+    if t in ("marketable", "none", "null", "unknown"):
+        return "موجود" if t == "marketable" else ""
     if "/" in t:
         return t.split("/")[-1]
+    # از نمایش مقادیر انگلیسی خام خودداری کن
+    if re.fullmatch(r"[a-z0-9_\-]+", t):
+        return ""
     return raw.strip()[:40]
 
 
@@ -1308,6 +1325,52 @@ def _ensure_multi_source(rows: list[dict], pool: list[dict], max_results: int) -
     return out[:max_results]
 
 
+
+def _digikala_product_url(item: dict) -> str:
+    """ساخت URL معتبر محصول دیجی‌کالا از فیلدهای API (رشته یا dict)."""
+    if not isinstance(item, dict):
+        return ""
+    pid = item.get("id") or item.get("product_id")
+
+    def _from_value(val: Any) -> str:
+        if val is None:
+            return ""
+        if isinstance(val, dict):
+            uri = val.get("uri") or val.get("url") or val.get("path") or ""
+            if isinstance(uri, str) and uri.strip():
+                return uri.strip()
+            return ""
+        s = str(val).strip()
+        # جلوگیری از str(dict)
+        # str(dict) را پارس نکن؛ حالت dict بالاتر پوشش داده شده
+        if s.startswith("{") and "uri" in s:
+            return ""
+        return s
+
+    for key in ("url", "url_code", "page_url", "product_url"):
+        link = _from_value(item.get(key))
+        if link:
+            break
+    else:
+        link = ""
+
+    if not link and isinstance(item.get("default_variant"), dict):
+        link = _from_value(item["default_variant"].get("url"))
+
+    if link:
+        if link.startswith("http"):
+            return link.split("?")[0].rstrip("/") + "/"
+        if not link.startswith("/"):
+            link = "/" + link
+        if "/product/" not in link and pid:
+            link = f"/product/dkp-{pid}/"
+        return "https://www.digikala.com" + link
+
+    if pid:
+        return f"https://www.digikala.com/product/dkp-{pid}/"
+    return ""
+
+
 async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]:
     if _circuit_is_open("digikala"):
         return []
@@ -1363,14 +1426,7 @@ async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]
             price = (rial // 10) if rial else None
             price = _normalize_market_price(price, title) if price else None
             pid = item.get("id") or item.get("product_id")
-            link = str(item.get("url") or item.get("url_code") or "").strip()
-            if link and not link.startswith("http"):
-                if link.startswith("/"):
-                    link = "https://www.digikala.com" + link
-                else:
-                    link = f"https://www.digikala.com/product/{link}/"
-            if not link and pid:
-                link = f"https://www.digikala.com/product/dkp-{pid}/"
+            link = _digikala_product_url(item)
             status = str(
                 item.get("status")
                 or item.get("availability")
