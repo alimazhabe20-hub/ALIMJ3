@@ -1182,15 +1182,30 @@ async def _direct_site_search(query: str, domain: str, limit: int) -> list[dict]
 
 
 async def _fetch_source(query: str, domain: str, limit: int, foreign: bool) -> list[dict]:
-    batches = await asyncio.gather(_bing_search(query, domain=domain, limit=limit), _ddg_search(query, domain=domain, limit=limit), return_exceptions=True)
+    """Fallback web search for one requested store. The requested domain, not the
+    redirect/search-engine host, determines the store label."""
+    batches = await asyncio.gather(
+        _bing_search(query, domain=domain, limit=limit),
+        _ddg_search(query, domain=domain, limit=limit),
+        return_exceptions=True,
+    )
     out=[]
+    expected=(domain or "").lower().removeprefix("www.")
+    source_label=IRAN_SITES.get(expected, expected if foreign else "وب")
     for b in batches:
-        if isinstance(b,list):
-            for x in b:
-                host=urlparse(x.get("url","")).netloc.lower().replace("www.","")
-                x["source"]=IRAN_SITES.get(host, host if foreign else "وب")
-                x["price"]=_price_from_text((x.get("title") or "")+" "+(x.get("snippet") or ""))
-                out.append(x)
+        if not isinstance(b,list):
+            continue
+        for x in b:
+            url=str(x.get("url") or "").strip()
+            host=urlparse(url).netloc.lower().removeprefix("www.")
+            # Never let a search-engine/redirect result masquerade as another store.
+            if expected and expected not in host and not foreign:
+                continue
+            x["source"]=source_label
+            x["_search_domain"]=expected
+            x["_verified_direct"]=False
+            x["price"]=_price_from_text((x.get("title") or "")+" "+(x.get("snippet") or ""))
+            out.append(x)
     return out
 
 
@@ -1487,7 +1502,7 @@ async def search_shopping(query: str = "", source: str = "all", max_results: int
         clean = raw
     intent = _shopping_intent(raw)
 
-    key = _cache_key(clean, domain or source, max_price, foreign) + ":intent-v4"
+    key = _cache_key(clean, domain or source, max_price, foreign) + ":intent-v5"
     cached = _CACHE.get(key)
     if cached and time.time() - cached[0] < CACHE_TTL:
         _STATS["cache_hits"] += 1
@@ -1513,6 +1528,7 @@ async def search_shopping(query: str = "", source: str = "all", max_results: int
             # منابع اصلی موبایل؛ عمداً همه با هم بررسی می‌شوند.
             domains=["torob.com","digikala.com","technolife.ir","snappshop.ir","emalls.ir","meghdadit.com","kalaoma.com","19kala.com","mobile.ir"]
 
+        checked_domains=list(domains)
         rows=[]
         if not foreign and not domain:
             direct_tasks=[]
@@ -1614,17 +1630,30 @@ async def search_shopping(query: str = "", source: str = "all", max_results: int
                 continue
             p=x.get("price")
             if not p:
-                # نتیجه بدون قیمت فقط وقتی نگه داشته می‌شود که برای توضیح محصول مفید باشد؛ برای بودجه‌دار حذف می‌شود.
-                if max_price:
-                    continue
-            if p and max_price and p>max_price:
+                # بدون قیمت، برای جستجوی بودجه‌دار نتیجه خرید قابل استفاده نیست.
                 continue
-            if min_price and (not p or p<min_price):
+            if max_price and p>max_price:
                 continue
+            if min_price and p<min_price:
+                continue
+            # اگر قیمت فقط از snippet آمده باشد، آن را نگه می‌داریم اما صریحاً
+            # غیرتأییدشده علامت می‌زنیم. این مانع حذف کامل فروشگاه‌های دیگر می‌شود.
+            if not x.get("_verified_direct"):
+                x["_price_from_snippet"]=True
             final.append(x)
 
         # اعتبار قیمت مستقیم از صفحه بر snippet اولویت دارد.
-        final.sort(key=lambda x:(-float(x.get("_score",0)), x.get("price") or 10**30))
+        # یک مدل تکراری در یک فروشگاه حذف می‌شود؛ همان مدل در فروشگاه دیگر مجاز است.
+        unique=[]
+        seen_store_model=set()
+        for x in sorted(final, key=lambda z:(-float(z.get("_score",0)), z.get("price") or 10**30)):
+            mk=_shopping_model_key(x.get("title", "")) or _clean_title(x.get("title", "")).lower()
+            sk=(str(x.get("source") or "وب"), mk)
+            if sk in seen_store_model:
+                continue
+            seen_store_model.add(sk)
+            unique.append(x)
+        final=unique
         rows=_diversify_shopping_rows(final,max_results=max_results,max_per_source=2)
         # اگر واقعاً منبع جایگزین وجود نداشت، خروجی را فقط تا سقف با همان منبع پر کن.
         distinct_sources={str(x.get('source') or 'وب') for x in final}
@@ -1651,11 +1680,15 @@ async def search_shopping(query: str = "", source: str = "all", max_results: int
         src=str(x.get("source") or "وب")
         source_counts[src]=source_counts.get(src,0)+1
     unique_sources=len(source_counts)
+    checked_labels=[IRAN_SITES.get(d,d) for d in locals().get("checked_domains", []) if d]
+    result_labels=set(source_counts.keys())
+    missing_labels=[x for x in checked_labels if x not in result_labels]
 
     lines=[
         f"🛒 **نتایج خرید چندفروشگاهی — {raw}**",
         f"🌍 {market} | 🕒 {now}",
-        f"🔎 منابع دارای نتیجه معتبر: {', '.join(source_counts.keys())}",
+        f"🔎 منابع دارای نتیجه: {', '.join(source_counts.keys())}",
+        (f"🧪 منابع بررسی‌شده ولی بدون نتیجه نهایی: {', '.join(dict.fromkeys(missing_labels))}" if missing_labels else "🧪 همه منابع انتخاب‌شده حداقل یک نتیجه نهایی دارند."),
         f"🧩 فیلتر هوشمند: {'شیائومی' if intent.get('brand') in ('شیائومی','xiaomi') else intent.get('brand') or 'بدون برند'} | {'گوشی لمسی/هوشمند' if intent.get('touch') else 'گوشی' if intent.get('phone') else 'محصول'} | سقف {max_price:,} تومان" if max_price else "🧩 فیلتر هوشمند محصول و برند فعال است.",
         "ℹ️ ✅ فقط قیمت‌هایی که از کاتالوگ/API یا صفحه محصول قابل‌استخراج و تأیید بوده‌اند با نشان تأیید نمایش داده می‌شوند؛ قیمت snippet به‌تنهایی قطعی محسوب نمی‌شود.",
         "",
@@ -1663,9 +1696,10 @@ async def search_shopping(query: str = "", source: str = "all", max_results: int
     for i,x in enumerate(rows,1):
         price=x.get("price")
         src=x.get("source") or "وب"
-        verified=" ✅" if x.get("_verified_direct") else ""
+        verified=" ✅" if x.get("_verified_direct") else " ⚠️"
+        price_note="تأییدشده از صفحه" if x.get("_verified_direct") else "استخراج‌شده از نتیجه جستجو؛ نیازمند بررسی صفحه"
         lines.append(f"**{i}. {x.get('title') or 'محصول'}**")
-        lines.append(f"🏪 {src}{verified} | 💰 {price:,} تومان" if price and not foreign else f"🏪 {src}{verified} | 💰 {price:,}" if price else f"🏪 {src} | 💰 قیمت قابل‌تأیید نیست")
+        lines.append(f"🏪 {src}{verified} | 💰 {price:,} تومان | {price_note}" if price and not foreign else f"🏪 {src}{verified} | 💰 {price:,} | {price_note}" if price else f"🏪 {src} | 💰 قیمت قابل‌تأیید نیست")
         if x.get("seller"): lines.append(f"👤 {x['seller']}")
         if x.get("availability"): lines.append(f"📦 {x['availability']}")
         lines.append(f"🔗 {x['url']}")
