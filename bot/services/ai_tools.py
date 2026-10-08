@@ -1,34 +1,47 @@
-"""Public compatibility facade for ai_tools.
+"""Stable public facade.
 
-Semantically split into focused modules; historical imports remain stable.
+IMPORTANT: Keep this file small and stable. New functionality belongs in the
+secondary ``ai_tools_parts/`` modules. The complete legacy implementation is kept
+unchanged in ``ai_tools_parts/part_999_core_legacy.py`` for compatibility.
 """
-import importlib as _importlib
+from bot.utils.modular_loader import load_modular_part
 
-_ai_tools_common = _importlib.import_module(".ai_tools_common", __package__)
-_ai_tools_basic = _importlib.import_module(".ai_tools_basic", __package__)
-_ai_tools_market = _importlib.import_module(".ai_tools_market", __package__)
-_ai_tools_automation = _importlib.import_module(".ai_tools_automation", __package__)
-_ai_tools_agents = _importlib.import_module(".ai_tools_agents", __package__)
+load_modular_part(__file__, 'ai_tools_parts/part_999_core_legacy.py')
 
-# Wire all split modules into one compatible namespace so legacy cross-function
-# references keep resolving without duplicating implementation.
-_split_modules = [_ai_tools_common,_ai_tools_basic,_ai_tools_market,_ai_tools_automation,_ai_tools_agents]
-for _m in _split_modules:
-    for _o in _split_modules:
-        if _m is not _o:
-            for _k, _v in _o.__dict__.items():
-                if not _k.startswith("__"):
-                    _m.__dict__.setdefault(_k, _v)
+# Keyless Public API Hub bridge. Kept outside the legacy implementation.
+try:
+    from bot.services.api_hub import api_hub_ai as _api_hub_ai  # noqa: F401,E402
+except Exception:
+    pass
 
-# Execute late registrations/aliases only after every implementation module is loaded.
-_ai_tools_registration = _importlib.import_module(".ai_tools_registration", __package__)
-_split_modules.append(_ai_tools_registration)
-for _k, _v in _ai_tools_registration.__dict__.items():
-    if not _k.startswith("__"):
-        globals()[_k] = _v
+# Unified capability catalog: lets the model inspect the real tool/handler
+# surface instead of assuming that only the visible Telegram buttons exist.
+from bot.services.tool_runtime import register_tool as _register_tool
 
-# Export every historical symbol, including private helpers used by sibling modules.
-for _m in _split_modules:
-    for _k, _v in _m.__dict__.items():
-        if not _k.startswith("__") and _k not in {"_m","_o","_k","_v"}:
-            globals()[_k] = _v
+try:
+    from bot.services.ai_capability_router import ai_capability_catalog as _ai_capability_catalog
+
+    _register_tool(
+        name="ai_capability_catalog",
+        description="فهرست قابلیت‌های واقعی و متصل به دستیار هوشمند؛ فقط وقتی کاربر درباره امکانات ربات/دستیار می‌پرسد استفاده کن.",
+        parameters={"type": "object", "properties": {}},
+        handler=_ai_capability_catalog,
+        keywords=[r"قابلیت.?های? ربات", r"چه کارهایی می.?تونی", r"چه قابلیت", r"امکانات ربات", r"توانایی.?های? تو"],
+        risk="read",
+    )
+except Exception:
+    pass
+
+# Full capability bridge + auto-discovery for new features.
+# Ensures every bot feature tool is visible to the model, and future modules
+# that use @ai_tool or __ai_tools__ are picked up automatically.
+try:
+    from bot.services.capability_autoload import ensure_all_capabilities_registered
+
+    ensure_all_capabilities_registered()
+except Exception as _cap_exc:  # never break AI import path
+    try:
+        from bot.logger import logger as _lg
+        _lg.warning("capability autoload failed: %s", _cap_exc)
+    except Exception:
+        pass

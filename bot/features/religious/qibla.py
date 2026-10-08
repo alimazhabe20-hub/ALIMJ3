@@ -1,6 +1,6 @@
 """قبله‌نما — محاسبه جهت قبله از مختصات شهر"""
 import math
-from bot.features.weather.features_weather_weather_extra import CITY_COORDS
+from bot.features.weather.weather_extra import CITY_COORDS
 
 KAABA = (21.4225, 39.8262)
 

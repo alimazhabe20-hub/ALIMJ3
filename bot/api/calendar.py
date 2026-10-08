@@ -11,7 +11,7 @@ import pytz
 import requests
 from hijri_converter import Gregorian
 
-from bot.utils.utils_events import shamsi_events, hijri_events
+from bot.utils.events import shamsi_events, hijri_events
 
 HIJRI_API = "https://theshia.org/api/v1/hijri"
 

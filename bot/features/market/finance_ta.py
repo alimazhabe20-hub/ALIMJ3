@@ -1,33 +1,76 @@
-"""Public compatibility facade for finance_ta.
+"""Technical-analysis helpers extracted from finance.py.
 
-Semantically split into focused modules; historical imports remain stable.
+This module keeps market calculation code focused and reduces the size of the
+market facade. It lazily references runtime HTTP/logging dependencies from
+finance.py after that module is initialized.
 """
-import importlib as _importlib
+from __future__ import annotations
+from bot.utils.modular_loader import load_modular_part
+import asyncio
+from bot.features.market import finance as _f
+from bot.logger import logger
+from bot.utils.http_client import pooled_async_client, request_with_retry, safe_json
 
-_finance_ta_common = _importlib.import_module(".finance_ta_common", __package__)
-_finance_ta_indicators = _importlib.import_module(".finance_ta_indicators", __package__)
-_finance_ta_structure = _importlib.import_module(".finance_ta_structure", __package__)
-_finance_ta_scoring = _importlib.import_module(".finance_ta_scoring", __package__)
+# Compatibility aliases preserved from the original finance.py implementation.
+# finance_ta is loaded through the finance facade after it is initialized.
+_fetch_klines_interval = _f._fetch_klines_interval
 
-# Wire all split modules into one compatible namespace so legacy cross-function
-# references keep resolving without duplicating implementation.
-_split_modules = [_finance_ta_common,_finance_ta_indicators,_finance_ta_structure,_finance_ta_scoring]
-for _m in _split_modules:
-    for _o in _split_modules:
-        if _m is not _o:
-            for _k, _v in _o.__dict__.items():
-                if not _k.startswith("__"):
-                    _m.__dict__.setdefault(_k, _v)
+load_modular_part(__file__, 'finance_ta_parts/part_001__fetch_klines_for_ta.py')
 
-# Execute late registrations/aliases only after every implementation module is loaded.
-_finance_ta_registration = _importlib.import_module(".finance_ta_registration", __package__)
-_split_modules.append(_finance_ta_registration)
-for _k, _v in _finance_ta_registration.__dict__.items():
-    if not _k.startswith("__"):
-        globals()[_k] = _v
 
-# Export every historical symbol, including private helpers used by sibling modules.
-for _m in _split_modules:
-    for _k, _v in _m.__dict__.items():
-        if not _k.startswith("__") and _k not in {"_m","_o","_k","_v"}:
-            globals()[_k] = _v
+load_modular_part(__file__, 'finance_ta_parts/part_002__sma.py')
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_003__rsi.py')
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_004__adx_approx.py')
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_005__compute_ta.py')
+
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_006__atr.py')
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_007__detect_candle_patterns.py')
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_008__score_timeframe.py')
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_009__mtf_bundle.py')
+
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_010__market_structure.py')
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_011__rsi_divergence.py')
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_012__volume_breakout.py')
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_013__demand_supply_zone.py')
+
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_014__detect_chart_patterns.py')
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_015__price_action_analysis.py')
+
+load_modular_part(__file__, 'finance_ta_parts/part_016__mtf_convergence.py')
+
+
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_017__advanced_levels.py')
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_018__market_regime.py')
+
+
+load_modular_part(__file__, 'finance_ta_parts/part_019__professional_score.py')

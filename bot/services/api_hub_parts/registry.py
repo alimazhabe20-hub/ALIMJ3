@@ -1,13 +1,7 @@
-"""Compatibility registry API kept for older integrations/tests.
-
-The production registry lives in ``bot.services.api_hub.api_hub_registry``.
-This adapter deliberately accepts only keyless providers so the old public
-contract cannot be used to introduce API-keyed providers into the hub.
-"""
-from __future__ import annotations
+"""Compatibility registry facade for older ALIMJ3 tests."""
 from dataclasses import dataclass
-from typing import Any
-
+from typing import Iterable
+from bot.services.api_hub.api_hub_registry import APIProvider, PROVIDERS
 
 @dataclass(frozen=True)
 class ApiProvider:
@@ -16,16 +10,10 @@ class ApiProvider:
     category: str
     base_url: str
     auth: str = "No"
-    method: str = "GET"
-    timeout: float = 10.0
-    cache_ttl: float = 30.0
-    params: dict[str, Any] | None = None
-    headers: dict[str, str] | None = None
 
-
-def register_provider(provider: ApiProvider) -> ApiProvider:
-    if str(provider.auth or "No").strip().lower() not in {"no", "none", "keyless", ""}:
-        raise ValueError("API Hub accepts keyless providers only")
-    # Compatibility-only registration. Production providers remain immutable
-    # in the canonical registry to prevent accidental runtime mutation.
-    return provider
+def register_provider(provider: ApiProvider) -> None:
+    if provider.auth != "No":
+        raise ValueError("keyed providers are not allowed in the keyless API Hub")
+    if provider.key in PROVIDERS:
+        raise ValueError(f"provider already exists: {provider.key}")
+    raise ValueError("runtime registration is intentionally disabled; edit the central registry")

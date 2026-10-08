@@ -63,7 +63,7 @@ def _date_diff(
     y1: int = 0, m1: int = 0, d1: int = 0,
     y2: int = 0, m2: int = 0, d2: int = 0,
 ) -> str:
-    from bot.features.date.features_date_date_tools import date_diff, parse_shamsi
+    from bot.features.date.date_tools import date_diff, parse_shamsi
 
     def _parse(text: str, y: int, m: int, d: int):
         if y and m and d:
@@ -86,7 +86,7 @@ def _age_diff(
     y1: int = 0, m1: int = 0, d1: int = 0,
     y2: int = 0, m2: int = 0, d2: int = 0,
 ) -> str:
-    from bot.features.date.features_date_date_tools import age_diff, parse_shamsi
+    from bot.features.date.date_tools import age_diff, parse_shamsi
 
     def _parse(text: str, y: int, m: int, d: int):
         if y and m and d:
@@ -104,9 +104,9 @@ def _age_diff(
 
 
 def _custom_countdown(text: str = "") -> str:
-    from bot.features.date.features_date_date_tools import parse_countdown
+    from bot.features.date.date_tools import parse_countdown
     try:
-        from bot.features.date.features_date_date_tools import custom_countdown
+        from bot.features.date.date_tools import custom_countdown
     except Exception:
         custom_countdown = None
     parsed = parse_countdown(text or "")
@@ -292,7 +292,7 @@ def _set_azan(
 
 
 def _joke_categories() -> str:
-    from bot.features.fun.features_fun_fun_tools import get_joke_categories
+    from bot.features.fun.fun_tools import get_joke_categories
     labels = get_joke_categories() or {}
     if not labels:
         return "دسته‌بندی جوک در دسترس نیست."

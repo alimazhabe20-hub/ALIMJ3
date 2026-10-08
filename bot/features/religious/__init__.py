@@ -1,9 +1,8 @@
-"""Religious feature package exports."""
 from .qibla import qibla_direction
 from .adhkar import daily_adhkar
 from .verse_hadith import daily_verse_hadith
 from .istikhara import istikhara, istikhara_intro
-from .features_religious_events import (
+from .events import (
     religious_countdown,
     religious_month_view,
     get_today_religious_events,
@@ -11,8 +10,13 @@ from .features_religious_events import (
 )
 
 __all__ = [
-    "qibla_direction", "daily_adhkar", "daily_verse_hadith",
-    "istikhara", "istikhara_intro", "religious_countdown",
-    "religious_month_view", "get_today_religious_events",
+    "qibla_direction",
+    "daily_adhkar",
+    "daily_verse_hadith",
+    "istikhara",
+    "istikhara_intro",
+    "religious_countdown",
+    "religious_month_view",
+    "get_today_religious_events",
     "get_upcoming_religious_events",
 ]
