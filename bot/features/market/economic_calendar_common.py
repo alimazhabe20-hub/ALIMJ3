@@ -68,6 +68,21 @@ CURRENCY_NAMES = {
 
 IMPACT_FA = {"High": "زیاد", "Medium": "متوسط", "Low": "کم", "Holiday": "تعطیلی", "": "نامشخص"}
 
+
+def _to_str_num(value: Any) -> str:
+    """Normalize numeric calendar values without throwing on missing/odd input."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return str(value)
+    try:
+        text = str(value).strip()
+        if not text:
+            return ""
+        return text
+    except Exception:
+        return ""
+
 IMPACT_ICON = {"High": "🔴", "Medium": "🟠", "Low": "🟡", "Holiday": "⚪"}
 
 TITLE_MAP = {
