@@ -897,15 +897,60 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "ai_clear_memory":
-        clear_history(user_id)
-        await _safe_answer(query, "حافظه AI پاک شد ✅", show_alert=False)
+        # اول answer تا spinner تلگرام قطع شود
+        try:
+            await _safe_answer(query, "حافظه AI پاک شد ✅", show_alert=False)
+        except Exception as _exc:
+            logger.debug("ai_clear_memory answer: %s", _exc)
+        # پاک‌سازی حافظه کوتاه‌مدت + بلندمدت
+        try:
+            clear_history(user_id, clear_long_term=True)
+        except TypeError:
+            try:
+                clear_history(user_id)
+            except Exception as _exc:
+                logger.exception("ai_clear_memory clear_history: %s", _exc)
+            try:
+                from bot.database import clear_ai_history_summary, delete_ai_memory
+                clear_ai_history_summary(user_id)
+                delete_ai_memory(user_id)
+            except Exception as _exc:
+                logger.exception("ai_clear_memory db fallback: %s", _exc)
+        except Exception as _exc:
+            logger.exception("ai_clear_memory clear_history: %s", _exc)
+            try:
+                from bot.database import clear_ai_history_summary, delete_ai_memory
+                clear_ai_history_summary(user_id)
+                delete_ai_memory(user_id)
+            except Exception as _exc2:
+                logger.exception("ai_clear_memory db fallback: %s", _exc2)
         try:
             await query.edit_message_reply_markup(
                 reply_markup=get_ai_keyboard(user_id)
             )
         except Exception as _exc:
-            logger.debug("%s: %s", __name__, _exc)
-        await query.message.reply_text("✅ حافظه گفت‌وگو و خلاصه پاک شد. (حافظه بلندمدت با «پاک کردن همه حافظه» حذف می‌شود)")
+            logger.debug("ai_clear_memory edit markup: %s", _exc)
+        confirm = (
+            "✅ حافظه AI پاک شد.\n"
+            "• تاریخچه گفت‌وگوی فعلی\n"
+            "• خلاصه گفتگوهای قبلی\n"
+            "• حافظه بلندمدت"
+        )
+        try:
+            if query.message is not None:
+                await query.message.reply_text(
+                    "✅ حافظه AI پاک شد.\n"
+                    "• تاریخچه گفت‌وگوی فعلی\n"
+                    "• خلاصه گفتگوهای قبلی\n"
+                    "• حافظه بلندمدت"
+                )
+            elif update.effective_chat is not None:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="✅ حافظه AI پاک شد.",
+                )
+        except Exception as _exc:
+            logger.debug("ai_clear_memory confirm: %s", _exc)
         return
 
     if data.startswith("ai_continue:"):
