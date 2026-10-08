@@ -7,6 +7,9 @@ from .messages_common import *  # noqa: F401,F403
 from . import messages_common as _common
 globals().update({k:v for k,v in _common.__dict__.items() if not k.startswith('__')})
 
+from telegram import Update
+from telegram.ext import ContextTypes
+
 from .messages_ai_router import handle_ai_text
 from .messages_waiting_router import handle_pre_ai_waiting
 from .messages_waiting_dispatch import handle_waiting_dispatch

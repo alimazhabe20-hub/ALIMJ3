@@ -1,5 +1,6 @@
 """Late registration/compatibility actions for messages."""
 from .messages_common import *  # noqa
+from .messages import text_handler, media_ai_handler, voice_ai_handler, lens_command
 from . import messages_common as _common
 globals().update({k:v for k,v in _common.__dict__.items() if not k.startswith('__')})
 

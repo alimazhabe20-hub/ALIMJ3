@@ -40,6 +40,14 @@ async def handle_profile_menu(update, context, text, user_id, city=None, first_n
         set_user_preference(user_id, "currency", currency)
         await update.message.reply_text(f"✅ ارز پیش‌فرض: {currency}", reply_markup=get_smart_settings_keyboard())
         return
+    if text == "🔄 بررسی بروزرسانی":
+        try:
+            from bot.handlers.v78_handlers import update_center_command
+            await update_center_command(update, context)
+        except Exception as exc:
+            logger.warning("update center failed from smart settings: %s", exc, exc_info=True)
+            await update.message.reply_text("⚠️ بررسی بروزرسانی فعلاً در دسترس نیست.", reply_markup=get_smart_settings_keyboard())
+        return
     if text == "🧹 پاک‌سازی تنظیمات":
         from bot.database import clear_user_preferences
         clear_user_preferences(user_id)

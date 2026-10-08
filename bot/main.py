@@ -29,7 +29,7 @@ from bot.handlers.messages import text_handler, media_ai_handler, voice_ai_handl
 from bot.scheduler import setup_scheduler
 from bot.handlers.platform_handlers import features_command, watchlist_command, alerts_command, memory_v65_command, platform_health_command
 from bot.handlers.v70_handlers import v70_command, v70_selftest_command, v70_memory_command
-from bot.handlers.v71_handlers import downloader_entry_v71, handle_downloader_url_v71, download_callback, v71_command, v71_selftest_command, workspace_command, branch_command, schedule_ai_command, personalize_command
+from bot.handlers.v71_handlers import downloader_entry_v71, handle_downloader_url_v71, download_callback, _download_callback_router, v71_command, v71_selftest_command, workspace_command, branch_command, schedule_ai_command, personalize_command
 from bot.handlers.v72_handlers import v72_test_command
 from bot.handlers.v73_handlers import v73_test_command
 from bot.handlers.v74_handlers import v74_test_command
@@ -412,20 +412,6 @@ def main():
     app.add_handler(CommandHandler("broadcast", broadcast_command))
     app.add_handler(CommandHandler("backup", backup_command))
     app.add_handler(MessageHandler(filters.Document.ALL, restore_document_handler), group=0)
-    async def _download_callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        data = (update.callback_query.data if update.callback_query else "") or ""
-        try:
-            handled = await download_callback(update, context, data)
-            if not handled and update.callback_query:
-                await update.callback_query.answer()
-        except Exception as exc:
-            logger.exception("download callback router failed: %s", exc)
-            try:
-                if update.callback_query:
-                    await update.callback_query.answer("⚠️ خطا در دانلود", show_alert=True)
-            except Exception:
-                pass
-
     app.add_handler(CallbackQueryHandler(_download_callback_router, pattern=r"^dl:"))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(

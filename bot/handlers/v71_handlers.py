@@ -191,6 +191,22 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 # Auto-split part 6: download_callback
+async def _download_callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Safe callback adapter for downloader buttons; never lets a download exception crash the bot."""
+    data = (update.callback_query.data if update.callback_query else "") or ""
+    try:
+        handled = await download_callback(update, context, data)
+        if not handled and update.callback_query:
+            await update.callback_query.answer()
+    except Exception as exc:
+        logger.exception("download callback router failed: %s", exc)
+        try:
+            if update.callback_query:
+                await update.callback_query.answer("⚠️ خطا در دانلود", show_alert=True)
+        except Exception:
+            pass
+
+
 async def download_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str) -> bool:
     q = update.callback_query
     if data.startswith("dl:cancel:"):

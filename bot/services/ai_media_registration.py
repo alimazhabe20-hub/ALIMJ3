@@ -1,5 +1,6 @@
 """Late registration/compatibility actions for ai_media."""
 from .ai_media_common import *  # noqa
+from bot.services import ai_service as _ai
 from . import ai_media_common as _common
 globals().update({k:v for k,v in _common.__dict__.items() if not k.startswith('__')})
 
