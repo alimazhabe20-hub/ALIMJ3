@@ -881,6 +881,7 @@ IRAN_SITES = {
     "torob.com": "ترب", "digikala.com": "دیجی‌کالا", "technolife.ir": "تکنولایف",
     "snappshop.ir": "اسنپ‌شاپ", "emalls.ir": "ایمالز", "mobile.ir": "موبایل.ir",
     "basalam.com": "باسلام", "digistyle.com": "دیجی‌استایل", "modiseh.com": "مدیسه",
+    "meghdadit.com": "مقداد آی‌تی", "kalaoma.com": "کالاوما", "19kala.com": "۱۹کالا",
 }
 FOREIGN_ALIASES = {
     "amazon": "amazon.com", "آمازون": "amazon.com", "ebay": "ebay.com", "ایبی": "ebay.com",
@@ -906,7 +907,7 @@ def _digits(text: str) -> str:
 def _budget(text: str) -> int:
     t = _digits(text).replace(",", "").replace("٬", "")
     patterns = (
-        r"(?:بودجه|تا|زیر|حداکثر|حدود|حد)*(\d+(?:\.\d+)?)\s*(?:میلیون|م)\b",
+        r"(?:بودجه|تا|زیر|حداکثر|حدود|حد)\s*(\d+(?:\.\d+)?)\s*(?:میلیون|م)\b",
         r"(\d+(?:\.\d+)?)\s*(?:میلیون|م)\s*(?:تومان|تومن)?",
         r"(?:بودجه|تا|زیر|حداکثر|حدود|حد)\s*(\d{5,})\s*(?:تومان|تومن)?",
     )
@@ -995,11 +996,19 @@ def _tokens(text: str) -> set[str]:
 
 
 def _relevance(title: str, query: str) -> float:
+    # مقایسه معنایی ساده اما مقاوم در برابر تفاوت فارسی/انگلیسی برندها.
     qt = _tokens(query); tt = _tokens(title)
     if not qt: return 0.0
-    overlap = len(qt & tt) / len(qt)
-    phrase = 25.0 if _clean_query(query).lower() in title.lower() else 0.0
-    return overlap * 100 + phrase
+    aliases={
+        "شیائومی":"xiaomi", "xiaomi":"xiaomi", "ردمی":"redmi", "redmi":"redmi",
+        "پوکو":"poco", "poco":"poco", "سامسونگ":"samsung", "samsung":"samsung",
+        "اپل":"apple", "apple":"apple", "آیفون":"iphone", "iphone":"iphone",
+        "آنر":"honor", "honor":"honor",
+    }
+    nq={aliases.get(x,x) for x in qt}; nt={aliases.get(x,x) for x in tt}
+    overlap=len(nq & nt)/max(1,len(nq))
+    phrase=25.0 if _clean_query(query).lower() in title.lower() else 0.0
+    return overlap*100+phrase
 
 
 def _cache_key(query: str, source: str, max_price: int, foreign: bool) -> str:
@@ -1098,6 +1107,80 @@ async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]
         _STATS["errors"] += 1; logger.debug("digikala direct failed: %s", exc); return []
 
 
+
+_SOURCE_SEARCH_URLS = {
+    "technolife.ir": "https://www.technolife.ir/search?search={q}",
+    "snappshop.ir": "https://snappshop.ir/search/{q}",
+    "emalls.ir": "https://emalls.ir/Search.aspx?search={q}",
+    "meghdadit.com": "https://meghdadit.com/search?q={q}",
+    "kalaoma.com": "https://kalaoma.com/search?q={q}",
+    "19kala.com": "https://www.19kala.com/search/?q={q}",
+    "mobile.ir": "https://www.mobile.ir/phones/search.aspx?search={q}",
+}
+
+
+def _jsonld_products(soup: BeautifulSoup, domain: str, limit: int) -> list[dict]:
+    """Extract Product/Offer JSON-LD without assuming a site's HTML layout."""
+    out=[]; seen=set()
+    for node in soup.select('script[type="application/ld+json"]'):
+        raw=node.string or node.get_text(" ", strip=True)
+        try: data=__import__('json').loads(raw)
+        except Exception: continue
+        stack=data if isinstance(data,list) else [data]
+        expanded=[]
+        for obj in stack:
+            if isinstance(obj,dict) and isinstance(obj.get('@graph'),list): expanded.extend(obj['@graph'])
+            else: expanded.append(obj)
+        for obj in expanded:
+            if not isinstance(obj,dict) or str(obj.get('@type','')).lower() not in ('product','productgroup'):
+                continue
+            title=str(obj.get('name') or '').strip()
+            url=str(obj.get('url') or '').strip()
+            if url.startswith('/'): url=f'https://{domain}{url}'
+            offers=obj.get('offers') or {}
+            if isinstance(offers,list): offers=offers[0] if offers else {}
+            price=_parse_price(offers.get('price') if isinstance(offers,dict) else None)
+            if not price and isinstance(offers,dict): price=_parse_price(offers.get('lowPrice'))
+            if not title or not url or url in seen: continue
+            seen.add(url)
+            out.append({'title':title,'url':url,'price':price,'seller':IRAN_SITES.get(domain,''),'source':IRAN_SITES.get(domain,domain),'availability':str(offers.get('availability','')).split('/')[-1] if isinstance(offers,dict) else ''})
+            if len(out)>=limit: return out
+    return out
+
+
+async def _direct_site_search(query: str, domain: str, limit: int) -> list[dict]:
+    """Best-effort direct catalog/search-page lookup for Iranian stores."""
+    template=_SOURCE_SEARCH_URLS.get(domain)
+    if not template: return []
+    url=template.format(q=quote_plus(query))
+    try:
+        async with _SEARCH_SEM:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0,connect=4.0),follow_redirects=True,headers={'User-Agent':UA,'Accept-Language':'fa-IR,fa;q=0.9,en;q=0.7'}) as client:
+                r=await client.get(url)
+        if r.status_code>=400: return []
+        soup=BeautifulSoup(r.text,'html.parser')
+        out=_jsonld_products(soup,domain,limit)
+        # Fallback: product-like anchors with an explicit price in nearby text.
+        if not out:
+            for a in soup.select('a[href]')[:250]:
+                title=' '.join(a.get_text(' ',strip=True).split())
+                if len(title)<8 or not _shopping_product_match({'title':title,'snippet':''},query,_shopping_intent(query)):
+                    continue
+                href=str(a.get('href') or '').strip()
+                if href.startswith('/'): href=f'https://{domain}{href}'
+                if not href.startswith('http') or domain not in urlparse(href).netloc: continue
+                parent=a.parent.get_text(' ',strip=True) if a.parent else ''
+                price=_price_from_text(parent)
+                if price:
+                    out.append({'title':title[:240],'url':href,'price':price,'seller':IRAN_SITES.get(domain,''),'source':IRAN_SITES.get(domain,domain),'availability':''})
+                if len(out)>=limit: break
+        if out: _STATS['direct_ok'] += 1
+        return out[:limit]
+    except Exception as exc:
+        logger.debug('direct site search failed %s: %s',domain,exc)
+        return []
+
+
 async def _fetch_source(query: str, domain: str, limit: int, foreign: bool) -> list[dict]:
     batches = await asyncio.gather(_bing_search(query, domain=domain, limit=limit), _ddg_search(query, domain=domain, limit=limit), return_exceptions=True)
     out=[]
@@ -1190,11 +1273,13 @@ def _shopping_model_key(title: str) -> str:
     t = str(title or "").lower().replace("ي", "ی").replace("ك", "ک")
     t = re.sub(r"\b(گوشی|موبایل|mobile|phone|smartphone|شیائومی|xiaomi|سامسونگ|samsung)\b", " ", t)
     # ظرفیت/رم/رنگ/تعداد سیم‌کارت برای مقایسه کلی مدل حذف می‌شوند.
-    t = re.sub(r"\b\d+\s*(?:gb|گیگ|گیگابایت|گیک|مگابایت|mb|گ)", " ", t, flags=re.I)
+    t = re.sub(r"\b\d+\s*(?:gb|گیگ|گیگابایت|گیک|مگابایت|mb|گ)\b", " ", t, flags=re.I)
     t = re.sub(r"\b(?:رم|ram)\s*\d+\b", " ", t, flags=re.I)
     t = re.sub(r"\b(?:دو|2)\s*سیم(?:کارت)?\b", " ", t, flags=re.I)
+    t = re.sub(r"\b(?:رم|ram)\s*\d+\b", " ", t, flags=re.I)
+    t = re.sub(r"\b(?:حافظه|storage)\s*\d+\s*(?:gb|گیگ|گیگابایت|mb|مگابایت)?\b", " ", t, flags=re.I)
     t = re.sub(r"[^\wآ-ی]+", " ", t)
-    stop={"مدل","ظرفیت","حافظه","داخلی","نسخه","رجیستر","رجیستری","تومان","با","و","برای","مشکی","سفید","آبی","سبز","صورتی","خاکستری"}
+    stop={"مدل","ظرفیت","حافظه","داخلی","نسخه","رجیستر","رجیستری","تومان","با","و","برای","مشکی","سفید","آبی","سبز","صورتی","خاکستری","رم","ram","رنگ"}
     toks=[x for x in t.split() if x not in stop and len(x)>=2]
     return " ".join(toks[:12])
 
@@ -1240,7 +1325,7 @@ def _history_summary(query: str, days: int = 30) -> tuple[str, dict]:
 
 def _rank(rows: list[dict], query: str, max_price: int) -> list[dict]:
     intent=_shopping_intent(query)
-    seen_urls=set(); seen_model_source_price=set(); out=[]
+    seen_urls=set(); best_by_model_source={}; out=[]
     for x in rows:
         url=str(x.get("url") or "").strip()
         if not url or url in seen_urls: continue
@@ -1249,18 +1334,25 @@ def _rank(rows: list[dict], query: str, max_price: int) -> list[dict]:
         if not _shopping_product_match(x,query,intent): continue
         if max_price and price and int(price)>int(max_price): continue
         rel=_relevance(title,query)
-        if rel < 15: continue
+        # برای درخواست‌های برنددار، تطابق برند+دسته کافی است؛ جستجوی انگلیسی نباید حذف شود.
+        if rel < 15 and not (intent.get("phone") and intent.get("brand") and _shopping_brand_match(title, intent.get("brand"))):
+            continue
         model=_shopping_model_key(title)
         src=str(x.get("source") or "وب")
-        dedupe=(model,src,int(price or 0))
-        if model and dedupe in seen_model_source_price: continue
-        seen_model_source_price.add(dedupe)
         trust=TRUST.get(src,60)
         score=rel + trust*0.18 + (18 if price and max_price and price<=max_price else 5 if price else 0)
         if x.get("_verified_direct"): score+=8
         x["_score"]=score
         x["_model_key"]=model
-        out.append(x)
+        if model:
+            k=(model,src)
+            prev=best_by_model_source.get(k)
+            # یک مدل در یک فروشگاه فقط یک‌بار؛ قیمت تأییدشده و ارزان‌تر اولویت دارد.
+            if prev is None or (bool(x.get('_verified_direct')), -(int(price or 10**30)), float(score)) > (bool(prev.get('_verified_direct')), -(int(prev.get('price') or 10**30)), float(prev.get('_score',0))):
+                best_by_model_source[k]=x
+        else:
+            out.append(x)
+    out.extend(best_by_model_source.values())
     out.sort(key=lambda x:(-float(x.get("_score",0)), x.get("price") or 10**30))
     return out
 
@@ -1395,7 +1487,7 @@ async def search_shopping(query: str = "", source: str = "all", max_results: int
         clean = raw
     intent = _shopping_intent(raw)
 
-    key = _cache_key(clean, domain or source, max_price, foreign) + ":intent-v2"
+    key = _cache_key(clean, domain or source, max_price, foreign) + ":intent-v4"
     cached = _CACHE.get(key)
     if cached and time.time() - cached[0] < CACHE_TTL:
         _STATS["cache_hits"] += 1
@@ -1433,7 +1525,20 @@ async def search_shopping(query: str = "", source: str = "all", max_results: int
                         x["_verified_direct"]=True
                         rows.append(x)
 
-        # هر منبع حداقل یک جستجوی مستقل می‌گیرد؛ دیگر با پرشدن ترب متوقف نمی‌شویم.
+        # هر منبع حداقل یک مسیر مستقل دارد: API/کاتالوگ مستقیم اول، موتور جستجو به‌عنوان fallback.
+        direct_site_tasks=[]
+        for v in variants[:2]:
+            for d in domains:
+                if not foreign and d in _SOURCE_SEARCH_URLS:
+                    direct_site_tasks.append(_direct_site_search(v,d,max(6,max_results//2+3)))
+        direct_site_batches=await asyncio.gather(*direct_site_tasks,return_exceptions=True) if direct_site_tasks else []
+        for b in direct_site_batches:
+            if isinstance(b,list):
+                for x in b:
+                    x['_verified_direct']=bool(x.get('price'))
+                    if _shopping_product_match(x,raw,intent): rows.append(x)
+
+        # موتورهای جستجو fallback هستند؛ نتیجه snippet هرگز به‌تنهایی «تأییدشده» نیست.
         search_tasks=[]
         for v in variants[:2]:
             for d in domains:
@@ -1521,8 +1626,9 @@ async def search_shopping(query: str = "", source: str = "all", max_results: int
         # اعتبار قیمت مستقیم از صفحه بر snippet اولویت دارد.
         final.sort(key=lambda x:(-float(x.get("_score",0)), x.get("price") or 10**30))
         rows=_diversify_shopping_rows(final,max_results=max_results,max_per_source=2)
-        # اگر تنوع شدید باعث کم‌شدن خروجی شد، بهترین موارد باقی‌مانده را تا سقف پر کن.
-        if len(rows)<min(max_results,len(final)):
+        # اگر واقعاً منبع جایگزین وجود نداشت، خروجی را فقط تا سقف با همان منبع پر کن.
+        distinct_sources={str(x.get('source') or 'وب') for x in final}
+        if len(distinct_sources)<=1 and len(rows)<min(max_results,len(final)):
             used={x.get("url") for x in rows}
             for x in final:
                 if x.get("url") not in used:
@@ -1549,9 +1655,9 @@ async def search_shopping(query: str = "", source: str = "all", max_results: int
     lines=[
         f"🛒 **نتایج خرید چندفروشگاهی — {raw}**",
         f"🌍 {market} | 🕒 {now}",
-        f"🔎 منابع واقعاً بررسی‌شده: {', '.join(source_counts.keys())}",
+        f"🔎 منابع دارای نتیجه معتبر: {', '.join(source_counts.keys())}",
         f"🧩 فیلتر هوشمند: {'شیائومی' if intent.get('brand') in ('شیائومی','xiaomi') else intent.get('brand') or 'بدون برند'} | {'گوشی لمسی/هوشمند' if intent.get('touch') else 'گوشی' if intent.get('phone') else 'محصول'} | سقف {max_price:,} تومان" if max_price else "🧩 فیلتر هوشمند محصول و برند فعال است.",
-        "ℹ️ قیمت‌های تأییدشده از صفحه محصول بر snippet جستجو اولویت دارند؛ نتایج نامرتبط و خارج از بودجه حذف شده‌اند.",
+        "ℹ️ ✅ فقط قیمت‌هایی که از کاتالوگ/API یا صفحه محصول قابل‌استخراج و تأیید بوده‌اند با نشان تأیید نمایش داده می‌شوند؛ قیمت snippet به‌تنهایی قطعی محسوب نمی‌شود.",
         "",
     ]
     for i,x in enumerate(rows,1):
