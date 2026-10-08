@@ -1,4 +1,4 @@
-"""هوش خرید بازار — Shopping Engine v3.1 (نسخه توسعه‌یافته)
+"""هوش خرید بازار — Shopping Engine v3.2 (نسخه توسعه‌یافته)
 
 جستجوی زنده و چندفروشگاهی قیمت محصول در بازار ایران (پیش‌فرض)
 + اینستاگرام + در صورت درخواست کاربر، منابع خارجی.
@@ -9,13 +9,15 @@
 - هیچ وابستگی اجباری به AI ندارد.
 - تاریخچه قیمت و هشدار قیمت پشتیبانی می‌شود.
 
-توسعه‌های v3.1:
-- Retry با backoff نمایی (بدون وابستگی خارجی)
-- Circuit Breaker ساده برای هر منبع
-- کش دو لایه (حافظه + Redis اختیاری)
-- نرمال‌سازی قوی‌تر مدل گوشی
-- کنترل همزمانی بازرسی صفحه
-- استخراج و نرمال‌سازی وضعیت موجودی
+توسعه‌های v3.2:
+- Retry + Circuit Breaker + کش دو لایه
+- اولویت دیجی‌کالا، فیلتر استوک، اعتبار قیمت
+- Fallback HTML دیجی‌کالا
+- حداقل دو منبع در خروجی
+- اعتبارسنجی متقابل قیمت بین منابع
+- حالت پیشنهاد vs ارزان‌ترین
+- Value Score + اولویت رجیستری
+- خلاصه بودجه و جدول مقایسه مدل‌ها
 """
 
 from __future__ import annotations
@@ -636,11 +638,33 @@ def _shopping_intent(raw: str) -> dict:
         if b in q:
             brand = b
             break
+    # حالت: پیشنهاد هوشمند vs ارزان‌ترین
+    cheapest_mode = bool(
+        re.search(r"ارزان(?:\s*ترین)?|کمترین\s*قیمت|cheap(?:est)?", q, re.I)
+    )
+    suggest_mode = bool(
+        re.search(
+            r"بهترین|پیشنهاد|چی\s*بخر|چه\s*بخر|مناسب|ارزش\s*خرید|value|"
+            r"راهنما|کدام|کدوم",
+            q,
+            re.I,
+        )
+    )
+    if not cheapest_mode and not suggest_mode:
+        # «تا X میلیون» بدون «ارزان» → پیشنهاد
+        if re.search(r"(?:تا|زیر|بودجه|حداکثر)\s*[0-9۰-۹]", q):
+            suggest_mode = True
+    registry_pref = bool(
+        re.search(r"رجیستر|رجیستری|ثبت\s*شده|ثبت‌شده", q, re.I)
+    )
     return {
         "phone": phone,
         "touch": touch and not non_touch,
         "non_touch": non_touch,
         "brand": brand,
+        "cheapest_mode": cheapest_mode,
+        "suggest_mode": suggest_mode and not cheapest_mode,
+        "registry_pref": registry_pref,
     }
 
 
@@ -1097,6 +1121,193 @@ async def _direct_torob(query: str, max_price: int, limit: int) -> list[dict]:
     return result if isinstance(result, list) else []
 
 
+
+async def _digikala_html_fallback(query: str, max_price: int, limit: int) -> list[dict]:
+    """Fallback وقتی API دیجی‌کالا خالی/خطا است: صفحه جستجو + JSON-LD."""
+    if _circuit_is_open("digikala_html"):
+        return []
+    url = f"https://www.digikala.com/search/?q={quote_plus(query)}"
+
+    async def _do() -> list[dict]:
+        async with _SEARCH_SEM:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(12.0, connect=5.0),
+                follow_redirects=True,
+                headers={"User-Agent": UA, "Accept-Language": "fa-IR,fa;q=0.9"},
+            ) as client:
+                r = await client.get(url)
+        if r.status_code >= 400:
+            raise RuntimeError(f"digikala html {r.status_code}")
+        soup = BeautifulSoup(r.text, "html.parser")
+        out = _jsonld_products(soup, "digikala.com", limit)
+        # نرمال قیمت و فیلتر
+        cleaned: list[dict] = []
+        for x in out:
+            title = str(x.get("title") or "")
+            p = _normalize_market_price(x.get("price"), title)
+            if not p:
+                continue
+            if max_price and p > max_price:
+                continue
+            if _is_used_listing(title) and not _wants_used(query):
+                continue
+            x["price"] = p
+            x["source"] = "دیجی‌کالا"
+            x["seller"] = x.get("seller") or "دیجی‌کالا"
+            x["_verified_direct"] = True
+            cleaned.append(x)
+            if len(cleaned) >= limit:
+                break
+        if cleaned:
+            _STATS["direct_ok"] += 1
+        return cleaned
+
+    result = await _with_retry(_do, source="digikala_html", max_attempts=2)
+    return result if isinstance(result, list) else []
+
+
+def _cross_validate_prices(rows: list[dict]) -> list[dict]:
+    """اگر یک مدل در چند منبع باشد، قیمت پرت را جریمه/حذف می‌کند."""
+    by_model: dict[str, list[dict]] = {}
+    for r in rows:
+        mk = r.get("_model_key") or _shopping_model_key(str(r.get("title") or ""))
+        if not mk or not r.get("price"):
+            continue
+        by_model.setdefault(mk, []).append(r)
+    flagged: set[int] = set()
+    for mk, items in by_model.items():
+        if len(items) < 2:
+            continue
+        prices = sorted(int(x["price"]) for x in items)
+        med = prices[len(prices) // 2]
+        if med <= 0:
+            continue
+        for x in items:
+            p = int(x["price"])
+            # اختلاف بیش از ۳۵٪ از میانه → مشکوک
+            if p < med * 0.65 or p > med * 1.35:
+                x["_price_outlier"] = True
+                x["_score"] = float(x.get("_score", 0)) - 20
+            else:
+                x["_cross_validated"] = True
+                x["_score"] = float(x.get("_score", 0)) + 6
+    # حذف outlierهای خیلی بد اگر جایگزین معتبر هست
+    out: list[dict] = []
+    for r in rows:
+        if r.get("_price_outlier") and r.get("_model_key"):
+            peers = by_model.get(r["_model_key"] or "", [])
+            good = [p for p in peers if not p.get("_price_outlier")]
+            if good:
+                continue
+        out.append(r)
+    return out
+
+
+def _value_score(row: dict, max_price: int, intent: dict) -> float:
+    """امتیاز ارزش خرید: بودجه + رجیستری + تأیید + تازگی تقریبی."""
+    s = 0.0
+    title = str(row.get("title") or "").lower()
+    price = row.get("price")
+    if price and max_price and max_price > 0:
+        ratio = float(price) / float(max_price)
+        if intent.get("cheapest_mode"):
+            s += max(0, 25 * (1.0 - ratio))
+        elif intent.get("suggest_mode"):
+            if 0.35 <= ratio <= 0.92:
+                s += 28
+            elif 0.20 <= ratio < 0.35:
+                s += 12
+            elif ratio < 0.15:
+                s -= 10
+        else:
+            if 0.25 <= ratio <= 0.95:
+                s += 18
+    # رجیستری
+    if re.search(r"رجیستر(?:ی| شده)?|ثبت[\s‌]?شده", title):
+        s += 10
+        if intent.get("registry_pref"):
+            s += 8
+    if re.search(r"غیر\s*رجیستر|بدون\s*رجیستر|not\s*regist", title):
+        s -= 12
+    if row.get("_verified_direct"):
+        s += 6
+    if row.get("_cross_validated"):
+        s += 5
+    if str(row.get("source") or "") == "دیجی‌کالا":
+        s += 4
+    # تازگی تقریبی از عدد مدل
+    if re.search(r"\b(15|14|13|a7|a5|c81|c85|note\s*1[345])\b", title, re.I):
+        s += 3
+    return s
+
+
+def _budget_profile_line(max_price: int, intent: dict, rows: list[dict]) -> str:
+    if not max_price:
+        return ""
+    if max_price < 8_000_000:
+        tier = "خیلی اقتصادی"
+    elif max_price < 20_000_000:
+        tier = "اقتصادی"
+    elif max_price < 40_000_000:
+        tier = "اقتصادی رو به متوسط"
+    elif max_price <= 55_000_000:
+        tier = "اقتصادی (در بازار فعلی میان‌رده‌ها معمولاً بالاترند)"
+    elif max_price < 90_000_000:
+        tier = "میان‌رده"
+    else:
+        tier = "میان‌رده تا بالارده"
+    n = len([r for r in rows if r.get("price")])
+    brand = intent.get("brand") or "محصول"
+    mode = "پیشنهاد ارزش خرید" if intent.get("suggest_mode") else (
+        "ارزان‌ترین‌ها" if intent.get("cheapest_mode") else "بهترین تطابق قیمت"
+    )
+    return (
+        f"📌 در بودجه {max_price:,} تومان برای {brand}، بازه بازار فعلی بیشتر "
+        f"«{tier}» است | حالت: {mode} | {n} گزینه قیمت‌دار"
+    )
+
+
+def _comparison_block(rows: list[dict], max_n: int = 3) -> list[str]:
+    priced = [r for r in rows if r.get("price")]
+    if len(priced) < 2:
+        return []
+    top = priced[:max_n]
+    lines = ["", "📋 **مقایسه سریع گزینه‌های برتر**"]
+    for i, r in enumerate(top, 1):
+        title = str(r.get("title") or "")[:80]
+        price = int(r["price"])
+        src = r.get("source") or "وب"
+        reg = " | رجیستری✅" if re.search(r"رجیستر", title, re.I) else ""
+        lines.append(f"{i}. {title}")
+        lines.append(f"   💰 {price:,} تومان | 🏪 {src}{reg}")
+    return lines
+
+
+def _ensure_multi_source(rows: list[dict], pool: list[dict], max_results: int) -> list[dict]:
+    """اگر فقط یک منبع در خروجی است، از استخر نتایج منبع دوم اضافه کن."""
+    if not rows:
+        return rows
+    sources = {str(r.get("source") or "وب") for r in rows}
+    if len(sources) >= 2:
+        return rows
+    used = {r.get("url") for r in rows}
+    primary = next(iter(sources))
+    extras = [
+        r for r in pool
+        if r.get("url") not in used and str(r.get("source") or "وب") != primary
+    ]
+    extras.sort(key=lambda x: -float(x.get("_score", 0)))
+    out = list(rows)
+    for r in extras:
+        out.append(r)
+        if len(out) >= max_results:
+            break
+        if len({str(x.get("source") or "وب") for x in out}) >= 2:
+            # یک مورد از منبع دوم کافی است؛ بقیه را هم تا سقف پر کن
+            pass
+    return out[:max_results]
+
+
 async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]:
     if _circuit_is_open("digikala"):
         return []
@@ -1189,7 +1400,10 @@ async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]
         return out
 
     result = await _with_retry(_do, source="digikala", max_attempts=4, base_delay=0.8)
-    return result if isinstance(result, list) else []
+    rows = result if isinstance(result, list) else []
+    if not rows:
+        rows = await _digikala_html_fallback(query, max_price, limit)
+    return rows
 
 
 async def _direct_site_search(query: str, domain: str, limit: int) -> list[dict]:
@@ -1342,18 +1556,27 @@ def _rank(rows: list[dict], query: str, max_price: int) -> list[dict]:
         # اگر کاربر سقف ۵۰ میلیون گذاشته، مدل ۳ میلیونی «بهترین» نیست.
         if price and max_price and max_price >= 8_000_000:
             ratio = float(price) / float(max_price)
-            if 0.25 <= ratio <= 0.95:
-                score += 22  # بازه هدف
+            if intent.get("cheapest_mode"):
+                score += max(0, 20 * (1.0 - ratio))
+            elif 0.25 <= ratio <= 0.95:
+                score += 22
             elif 0.12 <= ratio < 0.25:
                 score += 8
             elif ratio < 0.08:
-                score -= 12  # خیلی ارزان نسبت به بودجه → احتمالاً نامرتبط/کهنه
-            # جریمه قیمت مشکوک خیلی پایین برای مدل‌های شناخته‌شده پرچمدار
+                score -= 12
             low = title.lower()
             if price < 6_000_000 and any(
                 k in low for k in ("13t pro", "14 pro", "14 ultra", "s23", "s24", "iphone 14", "iphone 15")
             ):
                 score -= 25
+        # Value score + رجیستری
+        score += _value_score(
+            {"title": title, "price": price, "source": src,
+             "_verified_direct": x.get("_verified_direct"),
+             "_cross_validated": x.get("_cross_validated")},
+            max_price,
+            intent,
+        )
         x["_score"] = score
         x["_model_key"] = model
         if model:
@@ -1648,7 +1871,7 @@ def cancel_shopping_price_alert(user_id: int, alert_id: int) -> str:
 def shopping_engine_status() -> str:
     open_circuits = [k for k, (f, until) in _CIRCUIT.items() if time.time() < until]
     return (
-        "🛒 Shopping Engine v3.1\n"
+        "🛒 Shopping Engine v3.2\n"
         + " | ".join(f"{k}={v}" for k, v in _STATS.items())
         + f" | cache={len(_CACHE)}"
         + f" | circuits_open={open_circuits or 'none'}"
@@ -1844,6 +2067,8 @@ async def search_shopping(
         # حذف قیمت‌های پرت (مثلاً ÷۱۰ اشتباه از ترب)
         filtered = _filter_price_outliers(filtered)
         rows = _rank(filtered, clean, max_price)
+        # اعتبارسنجی متقابل قیمت بین منابع
+        rows = _cross_validate_prices(rows)
 
         # mobo.news boost
         mobo_models = await _mobo_phone_guide(raw) if intent.get("phone") else set()
@@ -1879,10 +2104,11 @@ async def search_shopping(
                     old = by_url.get(obj.url)
                     if old is not None:
                         old["title"] = obj.title or old.get("title")
-                        old["price"] = obj.price
+                        if obj.price:
+                            old["price"] = _normalize_market_price(obj.price, obj.title or old.get("title", ""))
                         old["seller"] = obj.seller or old.get("seller", "")
                         old["availability"] = obj.availability or old.get("availability", "")
-                        old["_verified_direct"] = obj.price is not None
+                        old["_verified_direct"] = bool(old.get("price"))
                         if obj.source and obj.source != "general":
                             old["source"] = SOURCES.get(
                                 obj.source, {"label": obj.source}
@@ -1910,6 +2136,8 @@ async def search_shopping(
         rows = _diversify_shopping_rows(
             final, max_results=max_results, max_per_source=2
         )
+        # تضمین حداقل دو منبع در صورت امکان
+        rows = _ensure_multi_source(rows, final, max_results)
         distinct_sources = {str(x.get("source") or "وب") for x in final}
         if len(distinct_sources) <= 1 and len(rows) < min(max_results, len(final)):
             used = {x.get("url") for x in rows}
@@ -1940,11 +2168,14 @@ async def search_shopping(
         source_counts[src] = source_counts.get(src, 0) + 1
     unique_sources = len(source_counts)
 
+    profile = _budget_profile_line(max_price, intent, rows)
     lines = [
         f"🛒 **نتایج خرید چندفروشگاهی — {raw}**",
         f"🌍 {market} | 🕒 {now}",
         f"🔎 منابع دارای نتیجه معتبر: {', '.join(source_counts.keys())}",
     ]
+    if profile:
+        lines.append(profile)
     if max_price:
         brand_label = (
             "شیائومی"
@@ -2042,6 +2273,7 @@ async def search_shopping(
             for x in candidates
             if _shopping_model_key(x.get("title")) == model_key and model_key
         ]
+        lines += _comparison_block(rows, 3)
         lines += [
             "",
             "🧠 **بررسی نهایی**",
