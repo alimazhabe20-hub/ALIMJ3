@@ -41,12 +41,21 @@ _PRODUCT_OBJECT_RE = re.compile(
     re.I,
 )
 
-# Explicit shopping / recommendation verbs.
+# Explicit shopping / recommendation / search verbs.
 _PRODUCT_ACTION_RE = re.compile(
-    r"(?:قیمت|نرخ|چنده|چقدر|چند(?:ه|ه؟)|ارزان(?:ترین)?|اقتصادی|"
-    r"خرید|بخرم|بخریم|بخر|فروشگاه|فروشنده|لینک|موجود|موجودی|مقایسه|"
-    r"بهترین|پیشنهاد|چی\s*بخر|چه\s*بخر|buy|price|shop|seller|link|"
-    r"available|compare|cheapest|budget|best)",
+    r"(?:"
+    r"قیمت|نرخ|چنده|چقدر|چند(?:ه|ه؟)|ارزان(?:\s*ترین)?|اقتصادی|"
+    r"خرید|بخرم|بخریم|بخر|فروشگاه|فروشنده|لینک|لینک(?:ش|شون|ها)?|"
+    r"موجود|موجودی|مقایسه|"
+    r"بهترین|پیشنهاد|چی\s*بخر|چه\s*بخر|"
+    # «دنبال … می‌گردم / می‌خوام / پیدا کن»
+    r"دنبال|می\s*گردم|می‌گردم|میگردم|بگرد|بگردون|"
+    r"پیدا\s*کن|پیدا\s*کنم|جستجو|سرچ|search|"
+    r"می\s*خوام|میخوام|می‌خوام|نیاز\s*دارم|لازم\s*دارم|"
+    r"سفارش|از\s*کجا\s*بخر|"
+    r"buy|price|shop|seller|link|available|compare|cheapest|budget|best|"
+    r"looking\s*for|find\s*me"
+    r")",
     re.I,
 )
 
@@ -106,24 +115,43 @@ def is_live_product_request(text: str) -> bool:
     if has_object and has_budget:
         return True
 
+    # فقط نام محصول مشخص (مثلاً «خمیر سیلیکون» یا «آیفون ۱۵»)
+    # اگر پیام کوتاه و شیء محصول واضح باشد → جستجوی زنده
+    if has_object and not _MARKET_RE.search(s):
+        # حداقل یک شیء محصول + طول معقول، بدون اینکه جمله کاملاً غیرمرتبط باشد
+        words = [w for w in s.split() if len(w) > 1]
+        if 1 <= len(words) <= 12:
+            return True
+
     return False
 
 
 def _shopping_query(text: str) -> str:
     """Remove request verbs but preserve product/model/specs and budget numbers."""
     s = _normalize(text)
-    # Do NOT strip budget markers (تا/زیر/میلیون/تومان) so search_shopping
-    # can detect max_price via its own _budget() helper.
-    s = re.sub(
-        r"(?:لطفاً|لطفا|میشه|میشه\s*بگی|ببین|برام|برای\s*من|میخوام|می\s*خوام|"
-        r"قیمت|نرخ|چنده|چقدر|خرید|بخرم|بخریم|بخر|فروشگاه|فروشنده|لینک|محصول|"
-        r"ارزان(?:\s*ترین)?|اقتصادی|بهترین|پیشنهاد|مقایسه|موجودی|موجود|"
-        r"چی\s*بخرم|چه\s*بخرم|buy|price|shop|seller|link|cheapest|best|"
-        r"compare|available)",
-        " ",
-        s,
-        flags=re.I,
-    )
+    # فقط عبارت‌های کامل — نه حروف تکی داخل کلمات فارسی
+    patterns = [
+        r"لطفاً|لطفا",
+        r"میشه(?:\s*بگی)?",
+        r"ببین|برام|برای\s*من",
+        r"می\s*خوام|میخوام|می‌خوام|نیاز\s*دارم|لازم\s*دارم",
+        r"دنبال",
+        r"می\s*گردم|می‌گردم|میگردم|بگرد(?:ون)?",
+        r"پیدا\s*کن(?:م)?|جستجو|سرچ",
+        r"سلام|درود",
+        r"قیمت|نرخ|چنده|چقدر",
+        r"خرید|بخرم|بخریم|بخر",
+        r"فروشگاه|فروشنده",
+        r"لینک(?:ش|شون|ها)?",
+        r"محصول",
+        r"ارزان(?:\s*ترین)?|اقتصادی|بهترین|پیشنهاد|مقایسه|موجودی|موجود",
+        r"چی\s*بخرم|چه\s*بخرم",
+        r"(?<![\w\u0600-\u06FF])(?:یه|یک)(?![\w\u0600-\u06FF])",
+        r"buy|price|shop|seller|link|cheapest|best|compare|available",
+        r"looking\s*for|find\s*me",
+    ]
+    for p in patterns:
+        s = re.sub(p, " ", s, flags=re.I)
     s = re.sub(r"[؟?!,:;]+", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
     return s
