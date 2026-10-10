@@ -1,5 +1,6 @@
 """سرگرمی — فال حافظ، جوک، دانستنی، چالش"""
 import random
+import re
 import httpx
 from bot.logger import logger
 
@@ -239,6 +240,26 @@ FACTS = [
     "چشم‌های شترمرغ از مغزش بزرگ‌ترند.",
     "در هر ثانیه خورشید میلیون‌ها تن ماده را به انرژی تبدیل می‌کند.",
     "اثر انگشت حتی در دوقلوهای همسان متفاوت است.",
+    "دلفین‌ها با نام مخصوص یکدیگر را صدا می‌زنند.",
+    "قلب انسان در طول عمر حدود ۲٫۵ میلیارد بار می‌تپد.",
+    "یک روز در زهره طولانی‌تر از یک سال آن است.",
+    "گربه‌ها نمی‌توانند طعم شیرینی را حس کنند.",
+    "بیش از ۷۰ درصد سطح زمین را آب پوشانده است.",
+    "سرعت عطسه می‌تواند به بیش از ۱۵۰ کیلومتر بر ساعت برسد.",
+    "در قطب جنوب عملاً باران نمی‌بارد؛ بیشتر برف است.",
+    "مرغ‌ها بیشتر رنگ‌ها را می‌بینند — حتی فرابنفش.",
+    "استخوان ران انسان از بتن هم‌اندازه قوی‌تر است.",
+    "هر انسان حدود ۰٫۲ میلی‌گرم طلا در بدن دارد.",
+    "قورباغه اگر چشمانش بسته باشد نمی‌تواند بپرد.",
+    "کهکشان راه شیری حدود ۱۰۰ تا ۴۰۰ میلیارد ستاره دارد.",
+    "پنگوئن‌ها برای پیدا کردن جفت خود صدا را تشخیص می‌دهند.",
+    "خون بدن انسان حدود ۷ تا ۸ درصد وزن اوست.",
+    "مارها پلک ندارند و با پوست شفاف چشم را می‌پوشانند.",
+    "در ماه تقریباً یک‌ششم گرانش زمین وجود دارد.",
+    "زنبور عسل برای یک قاشق عسل از حدود ۲ میلیون گل بازدید می‌کند.",
+    "مغز در خواب هم تقریباً به‌اندازه بیداری فعال است.",
+    "تنها حرفی که در جدول تناوبی عناصر نیست J است.",
+    "صدا در آب حدود ۴ برابر سریع‌تر از هوا حرکت می‌کند.",
 ]
 
 CHALLENGES = [
@@ -263,10 +284,97 @@ async def joke_of_day(category: str = None, user_id: int = None) -> str:
 
 # ===== end merged part =====
 
-# ===== merged from bot/features/fun/fun_tools_parts/part_008_fact_of_day.py =====
-# Auto-split part 8: fact_of_day
+
+async def _translate_en_to_fa(text: str, client: httpx.AsyncClient) -> str | None:
+    """ترجمه کوتاه انگلیسی → فارسی (چند سرویس رایگان)."""
+    text = (text or "").strip()
+    if len(text) < 3:
+        return None
+    chunk = text[:450]
+
+    def _ok(tr: str) -> bool:
+        if not tr or tr.lower() == chunk.lower():
+            return False
+        u = tr.upper()
+        if any(x in u for x in ("INVALID", "QUERY LENGTH", "MYMEMORY WARNING", "USED ALL AVAILABLE")):
+            return False
+        # باید حداقل کمی فارسی داشته باشد
+        if not re.search(r"[آ-ی]", tr):
+            return False
+        return True
+
+    # ۱) Google Translate endpoint عمومی (بدون کلید)
+    try:
+        r = await client.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={"client": "gtx", "sl": "en", "tl": "fa", "dt": "t", "q": chunk},
+            timeout=6.0,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            parts = []
+            if isinstance(data, list) and data and isinstance(data[0], list):
+                for row in data[0]:
+                    if row and row[0]:
+                        parts.append(str(row[0]))
+            tr = "".join(parts).strip()
+            if _ok(tr):
+                return tr
+    except Exception as e:
+        logger.debug("fact gtx: %s", e)
+
+    # ۲) MyMemory
+    try:
+        r = await client.get(
+            "https://api.mymemory.translated.net/get",
+            params={"q": chunk, "langpair": "en|fa"},
+            timeout=6.0,
+        )
+        if r.status_code == 200:
+            tr = ((r.json().get("responseData") or {}).get("translatedText") or "").strip()
+            if _ok(tr):
+                return tr
+    except Exception as e:
+        logger.debug("fact mymemory: %s", e)
+
+    return None
+
+
+async def _fetch_useless_fact(client: httpx.AsyncClient) -> str | None:
+    """دانستنی تصادفی از Useless Facts API."""
+    try:
+        r = await client.get(
+            "https://uselessfacts.jsph.pl/api/v2/facts/random",
+            params={"language": "en"},
+            headers={"Accept": "application/json"},
+            timeout=8.0,
+        )
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        text = (data.get("text") or data.get("fact") or "").strip()
+        return text or None
+    except Exception as e:
+        logger.debug("uselessfacts: %s", e)
+        return None
+
+
 async def fact_of_day() -> str:
-    return f"🧠 **دانستنی**\n\n{random.choice(FACTS)}"
+    """دانستنی روز: API خارجی + ترجمه فارسی، در صورت خطا لیست محلی."""
+    fact_fa = None
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            eng = await _fetch_useless_fact(client)
+            if eng:
+                fact_fa = await _translate_en_to_fa(eng, client)
+    except Exception as e:
+        logger.error("fact_of_day api: %s", e)
+
+    if not fact_fa:
+        fact_fa = random.choice(FACTS)
+
+    return f"🧠 **دانستنی**\n\n{fact_fa}"
+
 
 # ===== end merged part =====
 
