@@ -106,6 +106,14 @@ _BOOK_FA = {
     "akhbar al-rida": "عیون اخبار الرضا",
     "akhbār al-riḍā": "عیون اخبار الرضا",
     "kamal": "کمال الدین",
+    "oyoun": "عیون اخبار الرضا",
+    "oyoon": "عیون اخبار الرضا",
+    "man la": "من لا یحضره الفقیه",
+    "al-faqih": "من لا یحضره الفقیه",
+    "thawab": "ثواب الاعمال",
+    "maani": "معانی الاخبار",
+    "maʿānī": "معانی الاخبار",
+    "sifat": "صفات الشیعه",
     "ilal": "علل الشرائع",
     "tawhid": "التوحید",
     "thawab": "ثواب الاعمال",
@@ -166,12 +174,11 @@ def _clean(s: str) -> str:
 
 
 def _extract_hadith_quote(eng: str) -> str:
-    """از متن انگلیسی، متن اصلی حدیث را جدا کن (بدون سند طولانی)."""
+    """متن اصلی حدیث — کامل و بدون بریدگی وسط جمله."""
     s = _clean(eng)
     if not s:
         return ""
 
-    # بعد از said: / has said the following:
     m = re.search(
         r"(?:has said|said|says|stated)(?: the following)?\s*[:：]\s*(.+)",
         s,
@@ -182,7 +189,6 @@ def _extract_hadith_quote(eng: str) -> str:
         if len(q) >= 25:
             s = q
 
-    # حذف مقدمه سند
     s = re.sub(
         r"^(?:It is narrated|Narrated|A number of our people|"
         r"Several of our companions)[^:]{0,200}:\s*",
@@ -191,22 +197,9 @@ def _extract_hadith_quote(eng: str) -> str:
         flags=re.I,
     )
     s = _clean(s)
-
-    max_len = 380
-    if len(s) > max_len:
-        cut = s[:max_len]
-        for sep in (". ", "! ", "? "):
-            idx = cut.rfind(sep)
-            if idx >= 80:
-                cut = cut[: idx + 1]
-                break
-        else:
-            idx = cut.rfind(" ")
-            if idx >= 80:
-                cut = cut[:idx]
-        s = cut.strip().rstrip(".") + "."
-
     return s
+
+
 
 
 def _looks_like_isnad(text: str) -> bool:
@@ -298,7 +291,9 @@ async def _fetch_thaqalayn(client: httpx.AsyncClient) -> Optional[Tuple[str, str
         if not eng and not ara:
             return None
         if eng and _looks_like_isnad(eng):
-            # سندخالی — رد کن تا fallback محلی بیاید
+            return None
+        # متن خیلی بلند بعد از استخراج → ترجمه ناقص می‌شود؛ رد کن
+        if eng and len(eng) > 420:
             return None
 
         fa = await _en_to_fa(eng, client) if eng else None
@@ -307,14 +302,47 @@ async def _fetch_thaqalayn(client: httpx.AsyncClient) -> Optional[Tuple[str, str
         if not fa:
             return None
 
-        # ترجمه هم نباید ناقص/سندگونه باشد
-        if fa.endswith("...") or fa.endswith("…") or _looks_like_isnad(fa):
+        # ترجمه ناقص یا سندگونه نباشد
+        if _looks_like_isnad(fa):
             return None
-        if len(fa) < 20:
+        if len(fa) < 25:
             return None
+        # پایان ناقص: سه نقطه، گیومه باز، «به نام...» و شبیه آن
+        bad_end = (
+            fa.endswith("...")
+            or fa.endswith("…")
+            or fa.endswith("«")
+            or fa.endswith('"')
+            or fa.endswith("'")
+            or ("..." in fa[-12:])
+            or ("…" in fa[-8:])
+            or fa.rstrip().endswith("به نام")
+            or (fa.count("«") > fa.count("»"))
+        )
+        if bad_end:
+            return None
+        # طول معقول برای تلگرام — اگر خیلی بلند است روی جمله تمام‌شده ببر
+        if len(fa) > 500:
+            cut = fa[:500]
+            for sep in ("؟ ", "! ", ". ", "۔ "):
+                idx = cut.rfind(sep)
+                if idx >= 100:
+                    fa = cut[: idx + 1].strip()
+                    break
+            else:
+                return None  # برش تمیز ممکن نیست → رد
+
+        # اگر نام کتاب هنوز لاتین/عمومی است، از bookId دوباره تلاش کن
+        if book in ("منابع اهل‌بیت", "") or re.search(r"[A-Za-z]{4,}", book):
+            book2 = _map_fa(str(data.get("bookId") or ""), _BOOK_FA, "")
+            if book2:
+                book = book2
+        if not book or book in ("منابع اهل‌بیت",):
+            # حداقل نویسنده را نگه دار
+            book = "احادیث اهل‌بیت (ع)"
 
         bits = [book]
-        if author:
+        if author and author not in book:
             bits.append(author)
         if grade:
             bits.append(f"درجه: {grade}")
