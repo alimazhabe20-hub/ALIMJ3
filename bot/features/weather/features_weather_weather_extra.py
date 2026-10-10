@@ -254,31 +254,152 @@ async def weather_forecast(city: str, days: int = 7, start_day: int = 0) -> str:
 
 # ===== end merged part =====
 
-# ===== merged from bot/features/weather/weather_extra_parts/part_005_air_quality.py =====
-# Auto-split part 5: air_quality
+
+# ===== smart air_quality =====
+# آستانه‌های WHO برای PM2.5 (µg/m³) — راهنمای سلامت
+_PM25_HEALTH = [
+    (0, 12, "🟢", "برای همه مناسب است؛ ورزش بیرون بلامانع."),
+    (12.1, 35.4, "🟡", "افراد حساس (آسم، قلب) فعالیت سنگین را کم کنند."),
+    (35.5, 55.4, "🟠", "کودکان و سالمندان در فضای باز محدود شوند؛ ماسک FFP2 مفید است."),
+    (55.5, 150.4, "🔴", "از خروج غیرضروری بپرهیزید؛ ماسک توصیه می‌شود."),
+    (150.5, 9999, "⚫", "فقط در اضطرار بیرون بروید؛ پنجره‌ها را ببندید."),
+]
+
+
+def _pm25_advice(pm25) -> tuple[str, str]:
+    if pm25 is None:
+        return "⚪", "داده PM2.5 در دسترس نیست."
+    try:
+        v = float(pm25)
+    except (TypeError, ValueError):
+        return "⚪", "داده PM2.5 نامعتبر."
+    for lo, hi, emoji, tip in _PM25_HEALTH:
+        if lo <= v <= hi:
+            return emoji, tip
+    return "⚪", ""
+
+
+def _trend_arrow(current, previous) -> str:
+    if current is None or previous is None:
+        return ""
+    try:
+        d = float(current) - float(previous)
+    except (TypeError, ValueError):
+        return ""
+    if d <= -5:
+        return "📉 رو به بهبود"
+    if d >= 5:
+        return "📈 رو به بدتر شدن"
+    return "➡️ تقریباً ثابت"
+
+
+async def _aqi_for_coords(lat: float, lon: float) -> dict | None:
+    """دریافت AQI فعلی + چند ساعت اخیر."""
+    url = "https://air-quality-api.open-meteo.com/v1/air-quality"
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "current": (
+            "european_aqi,us_aqi,pm10,pm2_5,carbon_monoxide,"
+            "nitrogen_dioxide,ozone,sulphur_dioxide,dust"
+        ),
+        "hourly": "european_aqi,pm2_5",
+        "past_days": 1,
+        "forecast_days": 1,
+        "timezone": "Asia/Tehran",
+    }
+    try:
+        async with pooled_async_client() as client:
+            r = await request_with_retry("GET", url, params=params)
+            r.raise_for_status()
+            return r.json()
+    except Exception as e:
+        logger.debug("aqi fetch: %s", e)
+        return None
+
+
+def _hourly_prev(data: dict, key: str, hours_ago: int = 3):
+    """مقدار hourly حدود hours_ago ساعت قبل."""
+    hourly = (data or {}).get("hourly") or {}
+    times = hourly.get("time") or []
+    values = hourly.get(key) or []
+    if not times or not values:
+        return None
+    # آخرین مقدار معتبر غیر None را پیدا کن، بعد hours_ago عقب برو
+    last_i = None
+    for i in range(len(values) - 1, -1, -1):
+        if values[i] is not None:
+            last_i = i
+            break
+    if last_i is None:
+        return None
+    j = last_i - hours_ago
+    if j < 0:
+        return None
+    return values[j]
+
+
+async def _suggest_cleaner_city(current_city: str, current_aqi, max_check: int = 6) -> str | None:
+    """اگر هوا بد است، نزدیک‌ترین شهر تمیزتر را پیشنهاد بده."""
+    if current_aqi is None:
+        return None
+    try:
+        if float(current_aqi) < 100:
+            return None  # فقط وقتی ناسالم یا بدتر
+    except (TypeError, ValueError):
+        return None
+
+    base = CITY_COORDS.get(current_city.strip()) or CITY_COORDS.get("تهران")
+    if not base:
+        return None
+    blat, blon = base
+
+    # شهرهای دیگر را بر اساس فاصله تقریبی مرتب کن
+    others = []
+    for name, (la, lo) in CITY_COORDS.items():
+        if name == current_city.strip():
+            continue
+        dist = (la - blat) ** 2 + (lo - blon) ** 2
+        others.append((dist, name, la, lo))
+    others.sort()
+
+    best = None
+    for _, name, la, lo in others[:max_check]:
+        data = await _aqi_for_coords(la, lo)
+        if not data:
+            continue
+        aqi = (data.get("current") or {}).get("european_aqi")
+        if aqi is None:
+            continue
+        try:
+            if float(aqi) + 15 < float(current_aqi):
+                if best is None or float(aqi) < float(best[1]):
+                    best = (name, aqi)
+        except (TypeError, ValueError):
+            continue
+
+    if not best:
+        return None
+    return f"🏙 پیشنهاد: هوای **{best[0]}** بهتر است (AQI {pn(best[1])})."
+
+
 async def air_quality(city: str) -> str:
-    """شاخص کیفیت هوا واقعی با Open-Meteo Air Quality API"""
-    key = f"aqi_{city}"
+    """کیفیت هوای هوشمند: AQI اروپا/آمریکا، روند، هشدار PM2.5، پیشنهاد شهر جایگزین."""
+    key = f"aqi_smart_{city}"
     now = datetime.now().timestamp()
-    if key in _cache and now - _cache_t.get(key, 0) < config.CACHE_TTL:
+    ttl = getattr(config, "CACHE_TTL", 300)
+    if key in _cache and now - _cache_t.get(key, 0) < ttl:
         return _cache[key]
 
     lat, lon = _get_coords(city)
     try:
-        url = "https://air-quality-api.open-meteo.com/v1/air-quality"
-        params = {
-            "latitude": lat,
-            "longitude": lon,
-            "current": "european_aqi,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,ozone,sulphur_dioxide,dust",
-            "timezone": "Asia/Tehran",
-        }
-        async with pooled_async_client() as client:
-            r = await request_with_retry("GET", url, params=params)
-            r.raise_for_status()
-            data = r.json()
+        data = await _aqi_for_coords(lat, lon)
+        if not data:
+            return f"❌ کیفیت هوای {city} موقتاً در دسترس نیست."
 
-        cur = data.get("current", {})
+        cur = data.get("current") or {}
         aqi = cur.get("european_aqi")
+        us_aqi = cur.get("us_aqi")
         pm25 = cur.get("pm2_5")
         pm10 = cur.get("pm10")
         no2 = cur.get("nitrogen_dioxide")
@@ -294,20 +415,50 @@ async def air_quality(city: str) -> str:
                     label, advice = lab, adv
                     break
 
+        # روند نسبت به حدود ۳ ساعت قبل
+        prev_aqi = _hourly_prev(data, "european_aqi", 3)
+        prev_pm = _hourly_prev(data, "pm2_5", 3)
+        trend = _trend_arrow(aqi, prev_aqi)
+        pm_trend = _trend_arrow(pm25, prev_pm)
+
+        pm_emoji, pm_tip = _pm25_advice(pm25)
+
         lines = [
-            f"🌫 **کیفیت هوا — {city}** (زمان واقعی)\n",
-            f"📊 **شاخص AQI (اروپایی):** {pn(aqi) if aqi is not None else '—'}  →  **{label}**\n",
-            f"💡 {advice}\n" if advice else "",
-            "━━━━━━━━━━━━━━━━━━━━",
-            f"• PM2.5: {pn(pm25) if pm25 is not None else '—'} µg/m³",
-            f"• PM10: {pn(pm10) if pm10 is not None else '—'} µg/m³",
-            f"• NO₂: {pn(no2) if no2 is not None else '—'} µg/m³",
-            f"• O₃: {pn(o3) if o3 is not None else '—'} µg/m³",
-            f"• SO₂: {pn(so2) if so2 is not None else '—'} µg/m³",
-            f"• CO: {pn(co) if co is not None else '—'} µg/m³",
+            f"🌫 **کیفیت هوا — {city}** (زنده)",
+            "",
+            f"📊 **AQI اروپا:** {pn(aqi) if aqi is not None else '—'}  →  **{label}**",
         ]
+        if us_aqi is not None:
+            lines.append(f"🇺🇸 **AQI آمریکا:** {pn(us_aqi)}")
+        if trend:
+            lines.append(f"⏱ روند (۳س ساعت اخیر): {trend}")
+        lines.append("")
+        if advice:
+            lines.append(f"💡 {advice}")
+        lines.append(f"🫁 PM2.5 {pm_emoji}: {pm_tip}")
+        lines.append("")
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+        lines.append(
+            f"• PM2.5: {pn(pm25) if pm25 is not None else '—'} µg/m³"
+            + (f"  ({pm_trend})" if pm_trend else "")
+        )
+        lines.append(f"• PM10: {pn(pm10) if pm10 is not None else '—'} µg/m³")
+        lines.append(f"• NO₂: {pn(no2) if no2 is not None else '—'} µg/m³")
+        lines.append(f"• O₃: {pn(o3) if o3 is not None else '—'} µg/m³")
+        lines.append(f"• SO₂: {pn(so2) if so2 is not None else '—'} µg/m³")
+        lines.append(f"• CO: {pn(co) if co is not None else '—'} µg/m³")
         if dust is not None:
             lines.append(f"• گردوغبار: {pn(dust)} µg/m³")
+
+        # پیشنهاد شهر تمیزتر در آلودگی بالا
+        try:
+            if aqi is not None and float(aqi) >= 100:
+                tip_city = await _suggest_cleaner_city(city, aqi)
+                if tip_city:
+                    lines.append("")
+                    lines.append(tip_city)
+        except Exception as e:
+            logger.debug("aqi suggest city: %s", e)
 
         result = "\n".join(lines)
         _cache[key] = result
@@ -317,7 +468,9 @@ async def air_quality(city: str) -> str:
         logger.error(f"aqi {city}: {e}")
         return f"❌ کیفیت هوای {city} موقتاً در دسترس نیست."
 
+
 # ===== end merged part =====
+
 
 # ===== merged from bot/features/weather/weather_extra_parts/part_006_city_distance.py =====
 # Auto-split part 6: city_distance
