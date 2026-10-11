@@ -9,6 +9,7 @@ from bot.config import config
 from bot.release import version_string
 from bot.logger import logger
 from bot.database import init_db, backup_db, _user_count, DB_PATH
+from bot.handlers.commands import amoozesh_command, about_command, apply_bot_profile_texts
 from bot.handlers.commands import (
     start, help_command, city_command, language_command,
     calendar_command, stats_command, broadcast_command,
@@ -362,6 +363,9 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("lens", lens_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("amoozesh", amoozesh_command))
+    app.add_handler(CommandHandler("tutorial", amoozesh_command))
+    app.add_handler(CommandHandler("about", about_command))
     app.add_handler(CommandHandler("city", city_command))
     app.add_handler(CommandHandler("language", language_command))
     app.add_handler(CommandHandler("calendar", calendar_command))
@@ -464,6 +468,19 @@ def main():
         logger.warning(f"signal setup: {e}")
 
     logger.info("✅ Bot ready (sync shutdown backup to admin)")
+    try:
+        # به‌روزرسانی متن «این ربات چه می‌کند؟» در پروفایل تلگرام
+        import asyncio as _aio
+        try:
+            loop = _aio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(apply_bot_profile_texts(app))
+            else:
+                loop.run_until_complete(apply_bot_profile_texts(app))
+        except Exception:
+            _aio.run(apply_bot_profile_texts(app))
+    except Exception as _desc_exc:
+        logger.warning('bot profile texts: %s', _desc_exc)
     try:
         app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
     finally:
