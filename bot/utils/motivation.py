@@ -1,8 +1,10 @@
 """جمله انگیزشی هوشمند
 
-- دسته + ساعت روز + ضدتکرار کاربر
-- API: ZenQuotes (انگلیسی) → ترجمه فارسی
-- fallback: لیست محلی فارسی
+ترتیب:
+1) ZenQuotes API (انگلیسی)
+2) ترجمه به فارسی (چند سرویس)
+3) اگر ترجمه نشد → همان انگلیسی + نویسنده (تا معلوم شود از API آمده)
+4) اگر API قطع بود → لیست محلی فارسی
 """
 
 from __future__ import annotations
@@ -24,7 +26,6 @@ except Exception:  # pragma: no cover
         def error(self, *a, **k): pass
     logger = _L()
 
-# ─── جملات محلی (دسته‌بندی) ─────────────────────────────────────────
 MOTIVATION_BY_CAT: dict[str, list[str]] = {
     "امید": [
         "🌈 رنگین‌کمان پس از باران می‌آید. صبر کن، زیبایی در راه است.",
@@ -99,8 +100,14 @@ _CAT_EMOJI = {
 }
 
 _RECENT: dict[int, list[str]] = defaultdict(list)
-_RECENT_MAX = 10
+_RECENT_MAX = 12
 last_index = -1
+
+# جملات خیلی تاریک را رد کن
+_BAD_EN = re.compile(
+    r"\b(die|suicide|kill yourself|death wish|hang yourself)\b",
+    re.I,
+)
 
 
 def _category_for_now() -> str:
@@ -129,26 +136,33 @@ async def _en_to_fa(text: str, client: httpx.AsyncClient) -> Optional[str]:
     text = _clean(text)
     if len(text) < 3:
         return None
-    chunk = text[:400]
+    chunk = text[:380]
 
     def _ok(tr: str) -> bool:
         if not tr or tr.lower() == chunk.lower():
             return False
         u = tr.upper()
-        if any(x in u for x in ("INVALID", "QUERY LENGTH", "MYMEMORY WARNING", "USED ALL AVAILABLE")):
+        if any(x in u for x in ("INVALID", "QUERY LENGTH", "MYMEMORY WARNING", "USED ALL AVAILABLE", "PLEASE SELECT")):
             return False
-        if not re.search(r"[\u0600-\u06FF]{8,}", tr):
+        # حداقل چند حرف فارسی
+        if len(re.findall(r"[\u0600-\u06FF]", tr)) < 6:
             return False
         return True
 
-    # Google gtx
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; ALIMJ3/1.0)",
+        "Accept": "application/json,text/plain,*/*",
+    }
+
+    # 1) Google gtx
     try:
         r = await client.get(
             "https://translate.googleapis.com/translate_a/single",
             params={"client": "gtx", "sl": "en", "tl": "fa", "dt": "t", "q": chunk},
-            timeout=6.0,
+            headers=headers,
+            timeout=8.0,
         )
-        if r.status_code == 200:
+        if r.status_code == 200 and r.content:
             data = r.json()
             parts = []
             if isinstance(data, list) and data and isinstance(data[0], list):
@@ -161,12 +175,13 @@ async def _en_to_fa(text: str, client: httpx.AsyncClient) -> Optional[str]:
     except Exception as e:
         logger.debug("motivation gtx: %s", e)
 
-    # MyMemory
+    # 2) MyMemory
     try:
         r = await client.get(
             "https://api.mymemory.translated.net/get",
             params={"q": chunk, "langpair": "en|fa"},
-            timeout=6.0,
+            headers=headers,
+            timeout=8.0,
         )
         if r.status_code == 200:
             tr = _clean(((r.json().get("responseData") or {}).get("translatedText") or ""))
@@ -175,34 +190,67 @@ async def _en_to_fa(text: str, client: httpx.AsyncClient) -> Optional[str]:
     except Exception as e:
         logger.debug("motivation mymemory: %s", e)
 
+    # 3) Lingva (mirrorهای عمومی)
+    for host in (
+        "https://lingva.ml",
+        "https://lingva.garudalinux.org",
+    ):
+        try:
+            r = await client.get(
+                f"{host}/api/v1/en/fa/{httpx.URL(chunk)}",
+                headers=headers,
+                timeout=8.0,
+            )
+            # path needs encoding - use proper API
+        except Exception:
+            pass
+        try:
+            from urllib.parse import quote
+            r = await client.get(
+                f"{host}/api/v1/en/fa/{quote(chunk)}",
+                headers=headers,
+                timeout=8.0,
+            )
+            if r.status_code == 200:
+                tr = _clean(str((r.json() or {}).get("translation") or ""))
+                if _ok(tr):
+                    return tr
+        except Exception as e:
+            logger.debug("motivation lingva %s: %s", host, e)
+
     return None
 
 
 async def _fetch_zenquote(client: httpx.AsyncClient) -> Optional[tuple[str, str]]:
-    """(متن انگلیسی، نویسنده) از ZenQuotes."""
-    try:
-        r = await client.get("https://zenquotes.io/api/random", timeout=8.0)
-        if r.status_code != 200:
-            return None
-        data = r.json()
-        if not isinstance(data, list) or not data:
-            return None
-        item = data[0] if isinstance(data[0], dict) else {}
-        q = _clean(str(item.get("q") or ""))
-        a = _clean(str(item.get("a") or ""))
-        if len(q) < 10:
-            return None
-        return q, a or "ناشناس"
-    except Exception as e:
-        logger.debug("zenquotes: %s", e)
-        return None
+    """تا ۳ بار تلاش برای جمله مناسب."""
+    for _ in range(3):
+        try:
+            r = await client.get(
+                "https://zenquotes.io/api/random",
+                headers={"User-Agent": "ALIMJ3/1.0", "Accept": "application/json"},
+                timeout=10.0,
+            )
+            if r.status_code != 200:
+                continue
+            data = r.json()
+            if not isinstance(data, list) or not data:
+                continue
+            item = data[0] if isinstance(data[0], dict) else {}
+            q = _clean(str(item.get("q") or ""))
+            a = _clean(str(item.get("a") or ""))
+            if len(q) < 12:
+                continue
+            if _BAD_EN.search(q):
+                continue
+            return q, a or "ناشناس"
+        except Exception as e:
+            logger.debug("zenquotes: %s", e)
+    return None
 
 
 def _pick_local(user_id: int | None = None) -> tuple[str, str]:
-    """(دسته، متن) از لیست محلی."""
     cat = _category_for_now()
     options = list(MOTIVATION_BY_CAT.get(cat) or motivation_messages)
-    recent: list[str] = []
     if user_id is not None:
         recent = _RECENT.get(int(user_id), [])
         filtered = [q for q in options if q not in recent]
@@ -229,7 +277,7 @@ def get_motivation(
     *,
     smart: bool = True,
 ) -> str:
-    """سازگاری همزمان — فقط محلی (بدون await)."""
+    """سازگاری قدیمی — فقط محلی."""
     global last_index
     if messages is not None:
         pool = list(messages)
@@ -242,62 +290,60 @@ def get_motivation(
             index = random.randint(0, len(pool) - 1)
         last_index = index
         return pool[index]
-
-    if not smart:
-        pool = motivation_messages
-        index = random.randint(0, len(pool) - 1)
-        while index == last_index and len(pool) > 1:
-            index = random.randint(0, len(pool) - 1)
-        last_index = index
-        return pool[index]
-
     _, choice = _pick_local(user_id)
     return choice
 
 
+def get_motivation_rich(user_id: int | None = None) -> str:
+    cat, choice = _pick_local(user_id)
+    emoji = _CAT_EMOJI.get(cat, "💖")
+    return (
+        f"💖 **جمله انگیزشی**\n"
+        f"{emoji} حال‌وهوا: **{cat}**\n"
+        f"📌 منبع: محلی\n\n"
+        f"{choice}"
+    )
+
+
 async def get_motivation_async(user_id: int | None = None) -> str:
-    """جمله انگیزشی: API + ترجمه، در غیر این صورت محلی."""
-    quote_fa = None
+    """اول API جهانی، بعد ترجمه؛ اگر ترجمه نبود همان انگلیسی؛ اگر API قطع بود محلی."""
+    eng = None
     author = None
+    fa = None
+
     try:
-        async with httpx.AsyncClient(timeout=12.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
             got = await _fetch_zenquote(client)
             if got:
                 eng, author = got
-                quote_fa = await _en_to_fa(eng, client)
+                fa = await _en_to_fa(eng, client)
     except Exception as e:
         logger.error("motivation api: %s", e)
 
-    if quote_fa:
-        # ثبت در recent تا با محلی قاطی نشود
+    if eng:
+        body = fa if fa else eng
         if user_id is not None:
             uid = int(user_id)
             lst = _RECENT[uid]
-            lst.append(quote_fa)
+            lst.append(body)
             if len(lst) > _RECENT_MAX:
                 _RECENT[uid] = lst[-_RECENT_MAX:]
+
         cat = _category_for_now()
         emoji = _CAT_EMOJI.get(cat, "💖")
         lines = [
             "💖 **جمله انگیزشی**",
             f"{emoji} حال‌وهوا: **{cat}**",
+            "🌐 منبع: ZenQuotes",
             "",
-            quote_fa,
+            f"«{body}»",
         ]
         if author:
             lines.append(f"— {author}")
+        if not fa:
+            lines.append("")
+            lines.append("_(ترجمه در دسترس نبود؛ متن اصلی)_")
         return "\n".join(lines)
 
-    # fallback محلی
+    # API در دسترس نیست
     return get_motivation_rich(user_id)
-
-
-def get_motivation_rich(user_id: int | None = None) -> str:
-    """خروجی کامل محلی با عنوان دسته."""
-    cat, choice = _pick_local(user_id)
-    emoji = _CAT_EMOJI.get(cat, "💖")
-    return (
-        f"💖 **جمله انگیزشی**\n"
-        f"{emoji} حال‌وهوا: **{cat}**\n\n"
-        f"{choice}"
-    )
