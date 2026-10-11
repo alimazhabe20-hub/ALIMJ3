@@ -37,7 +37,7 @@ from bot.handlers.feature_handlers import (
     _h_font_text, _h_font_all, _h_reminder_manager, _h_reminder_input,
 )
 
-from bot.utils.motivation import get_motivation
+from bot.utils.motivation import get_motivation, get_motivation_async
 
 from bot.features.date.features_date_date_tools import (
     parse_shamsi, parse_any_date, parse_two_dates, parse_countdown,
