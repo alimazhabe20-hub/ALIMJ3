@@ -418,10 +418,19 @@ def get_motivation_rich(user_id: int | None = None) -> str:
 
 
 async def get_motivation_async(user_id: int | None = None) -> str:
+    """جمله انگیزشی با اولویت مجموعه محلی و استفاده اختیاری از API.
+
+    مجموعه محلی منبع اصلی است؛ بنابراین قطعی اینترنت یا محدودیت API باعث
+    محدود شدن پیام‌ها به چند جمله نمی‌شود. API فقط برای تنوع بیشتر استفاده می‌شود.
+    """
+    # در ۸۰٪ درخواست‌ها مستقیماً از مجموعه محلی استفاده کن تا پیام سریع،
+    # فارسی و مستقل از سرویس‌های بیرونی باشد.
+    if random.random() < 0.80:
+        return get_motivation_rich(user_id)
+
     eng = None
     author = None
     fa = None
-
     try:
         async with httpx.AsyncClient(timeout=18.0, follow_redirects=True) as client:
             got = await _fetch_from_pool_or_random(client, user_id)
@@ -429,17 +438,21 @@ async def get_motivation_async(user_id: int | None = None) -> str:
                 eng, author = got
                 fa = await _en_to_fa(eng, client)
     except Exception as e:
-        logger.error("motivation api: %s", e)
+        logger.debug("motivation api unavailable; using local pool: %s", e)
 
     if eng:
         body = fa if fa else eng
+        # اگر API جمله‌ای تکراری داد، از مجموعه محلی جمله تازه انتخاب کن.
+        if user_id is not None:
+            recent = _RECENT.get(int(user_id), [])
+            if body in recent or eng in recent:
+                return get_motivation_rich(user_id)
+
         if user_id is not None:
             uid = int(user_id)
             lst = _RECENT[uid]
-            lst.append(body)
-            lst.append(eng)
-            if len(lst) > _RECENT_MAX:
-                _RECENT[uid] = lst[-_RECENT_MAX:]
+            lst.extend([body, eng])
+            _RECENT[uid] = lst[-_RECENT_MAX:]
 
         cat = _category_for_now()
         emoji = _CAT_EMOJI.get(cat, "💖")
@@ -447,15 +460,15 @@ async def get_motivation_async(user_id: int | None = None) -> str:
         lines = [
             "💖 **جمله انگیزشی**",
             f"{emoji} حال‌وهوا: **{cat}**",
-            f"🌐 منبع: ZenQuotes (مخزن {pool_n}+ جمله)",
+            f"🌐 منبع: ZenQuotes + مجموعه محلی ({len(motivation_messages)} جمله فارسی محلی)",
             "",
             f"«{body}»",
         ]
         if author:
             lines.append(f"— {author}")
         if not fa:
-            lines.append("")
-            lines.append("_(ترجمه در دسترس نبود؛ متن اصلی)_")
+            lines.extend(["", "_(ترجمه در دسترس نبود؛ متن اصلی)_"])
         return "\n".join(lines)
 
+    # هر خطای API یا ترجمه به‌صورت امن به مجموعه محلی برمی‌گردد.
     return get_motivation_rich(user_id)
