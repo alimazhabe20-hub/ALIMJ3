@@ -33,7 +33,7 @@ from bot.handlers.feature_handlers import (
     _h_crypto_analyze, _h_economic_calendar, _h_distance, _h_birth_save, _h_count_text,
     _h_font_text, _h_font_all, _h_reminder_manager, _h_reminder_input,
 )
-from bot.utils.motivation import get_motivation
+from bot.utils.motivation import get_motivation, get_motivation_async
 from bot.features.date.features_date_date_tools import (
     parse_shamsi, parse_any_date, parse_two_dates, parse_countdown,
     birthday_countdown, zodiac_animal, lunar_age, date_diff, age_diff,
@@ -1108,9 +1108,20 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("🧠 دانستنی روز", "دانستنی روز"):
         track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(), reply_markup=get_fun_keyboard()); return
     if text in ("💪 چالش امروز", "چالش امروز"):
-        track_usage(user_id, "challenge"); await update.message.reply_text(await daily_challenge(), reply_markup=get_fun_keyboard()); return
+        track_usage(user_id, "challenge")
+        try:
+            _ch = await daily_challenge(user_id=user_id)
+        except TypeError:
+            _ch = await daily_challenge()
+        await update.message.reply_text(_ch, reply_markup=get_fun_keyboard())
+        return
     if text in ("💖 جمله انگیزشی", "جمله انگیزشی"):
-        track_usage(user_id, "motivation"); await update.message.reply_text(f"💖 {get_motivation()}", reply_markup=get_fun_keyboard()); return
+        track_usage(user_id, "motivation")
+        await update.message.reply_text(
+            await get_motivation_async(user_id=user_id),
+            reply_markup=get_fun_keyboard(),
+        )
+        return
     # پروفایل
     if text in ("⏰ مدیریت یادآوری‌ها", "مدیریت یادآوری‌ها"):
         await _h_reminder_manager(update, context, user_id)
