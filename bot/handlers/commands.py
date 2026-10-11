@@ -17,6 +17,7 @@ from bot.database import (
     set_last_main_msg_id,
 )
 from bot.utils.texts import get_text
+from bot.utils.bot_about import about_text, tutorial_text, BOT_DESCRIPTION, BOT_SHORT_DESCRIPTION
 from bot.utils.helpers import (
     build_message,
     get_main_keyboard,
@@ -46,13 +47,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text(message, reply_markup=get_refresh_button())
     context.user_data["last_main_msg_id"] = msg.message_id
     set_last_main_msg_id(user_id, msg.message_id)
+    # راهنمای کوتاه برای کاربر تازه‌وارد
+    try:
+        await update.message.reply_text(
+            "👋 تازه‌واردی؟ راهنمای کامل:\n/amoozesh\n\nیا از منوها شروع کن 👇",
+            reply_markup=get_main_keyboard(user_id),
+        )
+    except Exception:
+        pass
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_and_rate_limit(update, context):
         return
     user_id = update.effective_user.id
-    await update.message.reply_text(get_text(user_id, "help"), reply_markup=get_main_keyboard(user_id))
+    # راهنمای کامل = آموزش
+    await update.message.reply_text(tutorial_text(), reply_markup=get_main_keyboard(user_id))
 
 
 async def city_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -354,6 +364,38 @@ async def restore_document_handler(update: Update, context: ContextTypes.DEFAULT
             tmp.unlink(missing_ok=True)
         except Exception:
             pass
+
+
+
+async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """معرفی کامل ربات."""
+    if not await check_and_rate_limit(update, context):
+        return
+    user_id = update.effective_user.id
+    await update.message.reply_text(about_text(), reply_markup=get_main_keyboard(user_id))
+
+
+async def amoozesh_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """آموزش قدم‌به‌قدم برای کاربران جدید."""
+    if not await check_and_rate_limit(update, context):
+        return
+    user_id = update.effective_user.id
+    await update.message.reply_text(tutorial_text(), reply_markup=get_main_keyboard(user_id))
+
+
+async def apply_bot_profile_texts(application) -> None:
+    """به‌روزرسانی توضیحات پروفایل ربات در تلگرام (همان متن «این ربات چه می‌کند»)."""
+    try:
+        bot = application.bot
+        await bot.set_my_description(BOT_DESCRIPTION[:512], language_code="fa")
+        await bot.set_my_short_description(BOT_SHORT_DESCRIPTION[:120], language_code="fa")
+        # انگلیسی هم برای کلاینت‌های غیر فارسی
+        await bot.set_my_description(BOT_DESCRIPTION[:512], language_code="en")
+        await bot.set_my_short_description(BOT_SHORT_DESCRIPTION[:120], language_code="en")
+        logger.info("bot description/short_description updated")
+    except Exception as e:
+        logger.warning("apply_bot_profile_texts failed: %s", e)
+
 
 
 # END MERGED LEGACY PART: 
