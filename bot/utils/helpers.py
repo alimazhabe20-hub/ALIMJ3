@@ -186,12 +186,23 @@ async def _build_message_inner(user_id, user_name, city):
 
     motivation = "—"
     try:
-        motivation_sets = {
-            "fa": ["🌄 افق همیشه روشن است، حتی اگر هنوز آن را نبینی. به روشنایی ایمان داشته باش.", "🌅 هر روز فرصتی تازه برای شروع دوباره است. امروز را غنیمت شمار.", "🌟 نور خودت را پیدا کن و بدرخش."],
-            "en": ["🌄 The horizon is always bright, even when you cannot see it yet. Keep faith in the light.", "🌅 Every day is a new chance to begin again. Make today count.", "🌟 Find your light and let it shine."],
-            "ar": ["🌄 الأفق مشرق دائماً، حتى إن لم تره بعد. ثق بالنور.", "🌅 كل يوم فرصة جديدة للبدء من جديد. اجعل يومك مهماً.", "🌟 ابحث عن نورك ودعه يشرق."]
-        }
-        motivation = get_motivation(motivation_sets.get(lang)) or "—"
+        import random
+        # فارسی از مجموعهٔ کامل motivation.py استفاده می‌کند؛ قبلاً فقط ۳ جمله
+        # به‌صورت ثابت تعریف شده بود و پیام خوشامدگویی را محدود می‌کرد.
+        if lang == "fa":
+            motivation = get_motivation() or "—"
+        elif lang == "en":
+            motivation = random.choice([
+                "🌄 The horizon is always bright, even when you cannot see it yet. Keep faith in the light.",
+                "🌅 Every day is a new chance to begin again. Make today count.",
+                "🌟 Find your light and let it shine."
+            ])
+        else:
+            motivation = random.choice([
+                "🌄 الأفق مشرق دائماً، حتى إن لم تره بعد. ثق بالنور.",
+                "🌅 كل يوم فرصة جديدة للبدء من جديد. اجعل يومك مهماً.",
+                "🌟 ابحث عن نورك ودعه يشرق."
+            ])
     except Exception:
         pass
 
