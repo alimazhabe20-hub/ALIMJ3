@@ -93,6 +93,15 @@ YTDLP_API_URL = (os.getenv("DOWNLOADER_YTDLP_API_URL") or os.getenv("YTDLP_API_U
 YTDLP_API_KEY = (os.getenv("DOWNLOADER_YTDLP_API_KEY") or os.getenv("YTDLP_API_KEY") or "").strip()
 EXTERNAL_TIMEOUT = max(15.0, float(os.getenv("DOWNLOADER_EXTERNAL_TIMEOUT", "90")))
 EXTERNAL_ENABLED = os.getenv("DOWNLOADER_EXTERNAL_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+ALLDL_API_URL = (os.getenv("DOWNLOADER_ALLDL_URL") or "https://ahm7xmakki.com/api/alldl").strip()
+TIKWM_API_URL = (os.getenv("DOWNLOADER_TIKWM_URL") or "https://www.tikwm.com/api/").strip()
+# آینه‌های عمومی Cobalt (به‌ترتیب امتحان می‌شوند اگر اصلی fail شد)
+COBALT_MIRRORS = [
+    x.strip().rstrip("/")
+    for x in (os.getenv("DOWNLOADER_COBALT_MIRRORS") or "").split(",")
+    if x.strip()
+]
+
 
 
 
@@ -120,8 +129,8 @@ def _quality_for_cobalt(mode: str) -> str:
 
 
 def _external_providers_configured() -> bool:
-    cobalt_on = bool(COBALT_URL) and COBALT_URL.lower() not in {"off", "0", "false", "no"}
-    return EXTERNAL_ENABLED and bool(cobalt_on or YTDLP_API_URL)
+    # tikwm + alldl بدون کلید همیشه در دسترس‌اند
+    return EXTERNAL_ENABLED
 
 
 async def _http_download_to_file(file_url: str, out: Path, *, headers: dict | None = None) -> dict:
@@ -455,13 +464,142 @@ async def _download_via_ytdlp_api(url: str, outdir: Path, mode: str = "best") ->
     raise DownloadError("failed")
 
 
+
+async def _download_via_tikwm(url: str, outdir: Path, mode: str = "best") -> dict:
+    """TikTok via tikwm.com (free, no key)."""
+    host = (urlparse(url).hostname or "").lower()
+    if "tiktok" not in host and "vt.tiktok" not in host:
+        raise DownloadError("unsupported")
+    import requests
+    loop = asyncio.get_running_loop()
+
+    def work():
+        r = requests.post(
+            TIKWM_API_URL,
+            data={"url": url, "hd": "1"},
+            headers={"User-Agent": UA},
+            timeout=min(EXTERNAL_TIMEOUT, 40),
+        )
+        if r.status_code >= 400:
+            raise DownloadError("failed")
+        data = r.json()
+        if int(data.get("code") or -1) != 0:
+            raise DownloadError("failed")
+        d = data.get("data") or {}
+        file_url = (
+            d.get("hdplay")
+            or d.get("play")
+            or d.get("wmplay")
+            or (d.get("music") if mode == "audio" else None)
+        )
+        if mode == "audio":
+            file_url = d.get("music") or file_url
+        if not file_url:
+            raise DownloadError("failed")
+        title = d.get("title") or "tiktok"
+        return {"file_url": file_url, "filename": f"{_safe_name(title)[:40]}.mp4"}
+
+    meta = await loop.run_in_executor(None, work)
+    out = outdir / _safe_name(meta["filename"])
+    result = await _http_download_to_file(meta["file_url"], out)
+    result["method"] = "tikwm"
+    result["mode"] = mode
+    result["title"] = Path(meta["filename"]).stem
+    return result
+
+
+async def _download_via_alldl(url: str, outdir: Path, mode: str = "best") -> dict:
+    """Generic multi-platform via ahm7 alldl (free, no key)."""
+    import requests
+    from urllib.parse import quote
+    loop = asyncio.get_running_loop()
+
+    def work():
+        api = ALLDL_API_URL
+        sep = "&" if "?" in api else "?"
+        r = requests.get(
+            f"{api}{sep}url={quote(url, safe='')}",
+            headers={"User-Agent": UA, "Accept": "application/json"},
+            timeout=min(EXTERNAL_TIMEOUT, 45),
+        )
+        if r.status_code >= 400:
+            raise DownloadError("failed")
+        data = r.json()
+        if not data.get("success") and not data.get("links") and not data.get("videoUrl"):
+            # sometimes success false but still has data
+            pass
+        file_url = (
+            data.get("videoUrl")
+            or data.get("download_url")
+            or data.get("url")
+            or (data.get("links") or [None])[0]
+            or ((data.get("data") or {}) if isinstance(data.get("data"), dict) else {}).get("videoUrl")
+            or ((data.get("data") or {}) if isinstance(data.get("data"), dict) else {}).get("url")
+        )
+        if isinstance(data.get("links"), list) and data["links"]:
+            # pick first http link that looks like media
+            for link in data["links"]:
+                if isinstance(link, str) and link.startswith("http") and "tinyurl" not in link:
+                    file_url = link
+                    break
+            if not file_url or "tinyurl" in str(file_url):
+                for link in data["links"]:
+                    if isinstance(link, str) and link.startswith("http"):
+                        file_url = link
+                        break
+        if not file_url or not str(file_url).startswith("http"):
+            raise DownloadError("failed")
+        ext = ".mp3" if mode == "audio" else ".mp4"
+        return {"file_url": str(file_url), "filename": f"media{ext}"}
+
+    meta = await loop.run_in_executor(None, work)
+    out = outdir / _safe_name(meta["filename"])
+    result = await _http_download_to_file(meta["file_url"], out)
+    result["method"] = "alldl"
+    result["mode"] = mode
+    return result
+
+
+async def _download_via_cobalt_mirrors(url: str, outdir: Path, mode: str = "best") -> dict:
+    """Try primary COBALT_URL then optional mirrors."""
+    global COBALT_URL
+    tried = []
+    candidates = []
+    if COBALT_URL and COBALT_URL.lower() not in {"off", "0", "false", "no"}:
+        candidates.append(COBALT_URL)
+    for m in COBALT_MIRRORS:
+        if m and m not in candidates:
+            candidates.append(m)
+    if not candidates:
+        raise DownloadError("unsupported")
+    last = None
+    original = COBALT_URL
+    for base in candidates:
+        try:
+            COBALT_URL = base
+            return await _download_via_cobalt(url, outdir, mode)
+        except Exception as e:
+            last = e
+            tried.append(f"{base}:{e}")
+            logger.warning("cobalt mirror fail %s: %s", base, e)
+    COBALT_URL = original
+    raise last or DownloadError("failed")
+
+
+
 async def _try_external_providers(url: str, outdir: Path, mode: str) -> dict | None:
     """Try configured external providers in order. Return result or None."""
     if not _external_providers_configured():
         return None
     providers = []
-    if COBALT_URL:
-        providers.append(("cobalt", _download_via_cobalt))
+    host = (urlparse(url).hostname or "").lower()
+    # ترتیب: مخصوص پلتفرم → Cobalt → alldl → ytdlp-api
+    if "tiktok" in host:
+        providers.append(("tikwm", _download_via_tikwm))
+    cobalt_on = bool(COBALT_URL) and COBALT_URL.lower() not in {"off", "0", "false", "no"}
+    if cobalt_on or COBALT_MIRRORS:
+        providers.append(("cobalt", _download_via_cobalt_mirrors))
+    providers.append(("alldl", _download_via_alldl))
     if YTDLP_API_URL:
         providers.append(("ytdlp-api", _download_via_ytdlp_api))
     for name, fn in providers:
