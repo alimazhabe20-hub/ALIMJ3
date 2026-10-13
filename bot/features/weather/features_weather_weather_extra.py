@@ -76,20 +76,21 @@ def _get_coords(city: str):
 # ===== merged from bot/features/weather/weather_extra_parts/part_004_weather_forecast.py =====
 # Auto-split part 4: weather_forecast
 async def weather_forecast(city: str, days: int = 7, start_day: int = 0) -> str:
-    """پیش‌بینی هوا با بازه انتخابی؛ پیش‌فرض همان ۷ روز قبلی است."""
+    """پیش‌بینی هوشمند: حس واقعی، احتمال باران، UV، توصیه لباس/فعالیت."""
     city = _norm_city(city) or "تهران"
     days = max(1, min(int(days or 7), 7))
     start_day = max(0, min(int(start_day or 0), 6))
-    key = f"fc7_{city}_{days}_{start_day}"
-    now = datetime.now().timestamp()
-    if key in _cache and now - _cache_t.get(key, 0) < getattr(config, "CACHE_TTL", 300):
+    key = f"fc7_smart_{city}_{days}_{start_day}"
+    now_ts = datetime.now().timestamp()
+    if key in _cache and now_ts - _cache_t.get(key, 0) < getattr(config, "CACHE_TTL", 300):
         return _cache[key]
 
     coords = _get_coords(city)
     if not coords:
         try:
             async with pooled_async_client() as client:
-                r = await request_with_retry("GET", 
+                r = await request_with_retry(
+                    "GET",
                     "https://nominatim.openstreetmap.org/search",
                     params={"q": city + ", Iran", "format": "json", "limit": 1},
                 )
@@ -102,100 +103,301 @@ async def weather_forecast(city: str, days: int = 7, start_day: int = 0) -> str:
         coords = CITY_COORDS.get("تهران")
     lat, lon = coords
 
+    weekday_fa = {
+        0: "دوشنبه", 1: "سه‌شنبه", 2: "چهارشنبه", 3: "پنج‌شنبه",
+        4: "جمعه", 5: "شنبه", 6: "یکشنبه",
+    }
+
+    def _code_desc(code: int) -> str:
+        return WEATHER_CODES.get(int(code or 0), "نامشخص")
+
+    def _uv_label(u) -> str:
+        try:
+            v = float(u)
+        except (TypeError, ValueError):
+            return ""
+        if v < 3:
+            return "کم"
+        if v < 6:
+            return "متوسط"
+        if v < 8:
+            return "زیاد — ضدآفتاب"
+        return "خیلی زیاد — ضدآفتاب و سایه"
+
+    def _smart_tips(cur_temp, tmax_today, tmin_today, precip_prob, precip_sum, uv, wind, code) -> list[str]:
+        tips = []
+        try:
+            t = float(cur_temp)
+        except (TypeError, ValueError):
+            t = None
+        try:
+            mx = float(tmax_today) if tmax_today is not None else None
+        except (TypeError, ValueError):
+            mx = None
+        try:
+            mn = float(tmin_today) if tmin_today is not None else None
+        except (TypeError, ValueError):
+            mn = None
+        try:
+            pp = float(precip_prob or 0)
+        except (TypeError, ValueError):
+            pp = 0
+        try:
+            ps = float(precip_sum or 0)
+        except (TypeError, ValueError):
+            ps = 0
+        try:
+            u = float(uv or 0)
+        except (TypeError, ValueError):
+            u = 0
+        try:
+            w = float(wind or 0)
+        except (TypeError, ValueError):
+            w = 0
+        code = int(code or 0)
+
+        if t is not None:
+            if t <= 5:
+                tips.append("🧥 هوا سرد است؛ لباس گرم بپوش.")
+            elif t <= 15:
+                tips.append("🧣 خنک است؛ یک لایه اضافه همراه داشته باش.")
+            elif t >= 33:
+                tips.append("🥵 گرم است؛ آب زیاد بنوش و در سایه بمان.")
+            elif t >= 28:
+                tips.append("☀️ نسبتاً گرم؛ لباس سبک مناسب است.")
+
+        if pp >= 60 or ps >= 3 or code in (61, 63, 65, 80, 81, 82, 95, 96):
+            tips.append("☂️ احتمال باران/رگبار — چتر یا بارانی بردار.")
+        elif pp >= 30 or ps >= 0.5:
+            tips.append("🌦 احتمال بارش کم؛ یک بارانی سبک کافی است.")
+
+        if u >= 6:
+            tips.append("🧴 UV بالاست؛ ضدآفتاب و کلاه توصیه می‌شود.")
+        if w >= 40:
+            tips.append("💨 باد شدید؛ در فضای باز احتیاط کن.")
+        elif w >= 25:
+            tips.append("🍃 باد نسبتاً تند است.")
+
+        if mx is not None and mn is not None and (mx - mn) >= 14:
+            tips.append("🌡 اختلاف شب و روز زیاد است؛ لباس لایه‌لایه بپوش.")
+
+        if not tips:
+            tips.append("✅ شرایط مناسب فعالیت روزانه است.")
+        return tips[:4]
+
     data = None
-    # چند شکل پارامتر + httpx و requests
     param_sets = [
         {
-            "latitude": lat, "longitude": lon,
-            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,uv_index_max",
-            "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
-            "timezone": "Asia/Tehran", "forecast_days": 7,
+            "latitude": lat,
+            "longitude": lon,
+            "daily": (
+                "weather_code,temperature_2m_max,temperature_2m_min,"
+                "apparent_temperature_max,apparent_temperature_min,"
+                "precipitation_sum,precipitation_probability_max,"
+                "windspeed_10m_max,uv_index_max,sunrise,sunset"
+            ),
+            "current": (
+                "temperature_2m,relative_humidity_2m,apparent_temperature,"
+                "weather_code,wind_speed_10m,precipitation"
+            ),
+            "timezone": "Asia/Tehran",
+            "forecast_days": 7,
         },
         {
-            "latitude": lat, "longitude": lon,
+            "latitude": lat,
+            "longitude": lon,
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,uv_index_max",
+            "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
+            "timezone": "Asia/Tehran",
+            "forecast_days": 7,
+        },
+        {
+            "latitude": lat,
+            "longitude": lon,
             "daily": "weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,uv_index_max",
             "current_weather": "true",
-            "timezone": "Asia/Tehran", "forecast_days": 7,
+            "timezone": "Asia/Tehran",
+            "forecast_days": 7,
         },
     ]
     for params in param_sets:
         try:
             async with pooled_async_client() as client:
                 r = await request_with_retry("GET", "https://api.open-meteo.com/v1/forecast", params=params)
-                if r.status_code == 200:
+                if r is not None and getattr(r, "status_code", 0) == 200:
                     data = r.json()
-                    break
+                    if data:
+                        break
         except Exception as e:
             logger.error(f"open-meteo httpx: {e}")
         try:
             import requests as _req
-            r = _req.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=15,
-                         headers={"User-Agent": "Mozilla/5.0"})
+            r = _req.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params=params,
+                timeout=15,
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
             if r.status_code == 200:
                 data = r.json()
-                break
+                if data:
+                    break
         except Exception as e:
             logger.error(f"open-meteo requests: {e}")
 
     if data:
-        # پشتیبانی هر دو فرمت current / current_weather
         current = data.get("current") or {}
         cw = data.get("current_weather") or {}
         daily = data.get("daily") or {}
         times = daily.get("time") or []
         tmax = daily.get("temperature_2m_max") or []
         tmin = daily.get("temperature_2m_min") or []
+        atmax = daily.get("apparent_temperature_max") or []
+        atmin = daily.get("apparent_temperature_min") or []
         codes = daily.get("weather_code") or daily.get("weathercode") or []
         precip = daily.get("precipitation_sum") or []
+        pprob = daily.get("precipitation_probability_max") or []
         wind = daily.get("windspeed_10m_max") or daily.get("wind_speed_10m_max") or []
         uv = daily.get("uv_index_max") or []
+        sunrise = daily.get("sunrise") or []
+        sunset = daily.get("sunset") or []
 
         if current:
             cur_temp = current.get("temperature_2m", "?")
             cur_hum = current.get("relative_humidity_2m", "?")
+            cur_app = current.get("apparent_temperature")
             cur_code = current.get("weather_code") or current.get("weathercode") or 0
             cur_wind = current.get("wind_speed_10m", "?")
+            cur_precip = current.get("precipitation")
         else:
             cur_temp = cw.get("temperature", "?")
             cur_hum = "?"
+            cur_app = None
             cur_code = cw.get("weathercode") or cw.get("weather_code") or 0
             cur_wind = cw.get("windspeed", cw.get("wind_speed", "?"))
+            cur_precip = None
         try:
             cur_code = int(cur_code)
         except Exception:
             cur_code = 0
-        cur_desc = WEATHER_CODES.get(cur_code, "نامشخص")
+        cur_desc = _code_desc(cur_code)
+
+        # خلاصه هوشمند امروز
+        t0_max = tmax[0] if tmax else None
+        t0_min = tmin[0] if tmin else None
+        p0 = precip[0] if precip else 0
+        pp0 = pprob[0] if pprob else 0
+        u0 = uv[0] if uv else 0
+        w0 = wind[0] if wind else cur_wind
+        c0 = codes[0] if codes else cur_code
+        tips = _smart_tips(cur_temp, t0_max, t0_min, pp0, p0, u0, w0, c0)
 
         lines = [
-            f"🌤 پیش‌بینی هوای {city}" + (" (۷ روزه)" if days == 7 and start_day == 0 else ""),
+            f"🌤 **پیش‌بینی هوای {city}**",
+            f"📅 بازه: {days} روز" + (f" (از روز {start_day + 1})" if start_day else ""),
             "",
-            f"📍 الان: {pn(cur_temp)}°C  {cur_desc}",
-            f"💧 رطوبت: {pn(cur_hum)}%  |  💨 باد: {pn(cur_wind)} km/h",
-            "━━━━━━━━━━━━━━━━━━━━",
+            f"📍 **الان:** {pn(cur_temp)}°C  ·  {cur_desc}",
         ]
+        if cur_app is not None and cur_app != cur_temp:
+            lines.append(f"🌡️ حس واقعی: {pn(cur_app)}°C")
+        hum_wind = f"💧 رطوبت: {pn(cur_hum)}%"
+        if cur_wind not in (None, "?", ""):
+            hum_wind += f"  |  💨 باد: {pn(cur_wind)} km/h"
+        lines.append(hum_wind)
+        if cur_precip not in (None, 0, 0.0, "0", "0.0"):
+            lines.append(f"🌧 بارش لحظه‌ای: {pn(cur_precip)} mm")
+
+        # طلوع/غروب امروز
+        if sunrise and sunset:
+            try:
+                sr = str(sunrise[0]).split("T")[-1][:5]
+                ss = str(sunset[0]).split("T")[-1][:5]
+                lines.append(f"🌅 طلوع {pn(sr)}  ·  🌇 غروب {pn(ss)}")
+            except Exception:
+                pass
+
+        lines.append("")
+        lines.append("💡 **توصیه هوشمند**")
+        for tip in tips:
+            lines.append(f"• {tip}")
+
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+
         day_names = ["امروز", "فردا", "پس‌فردا", "روز ۴", "روز ۵", "روز ۶", "روز ۷"]
         end_day = min(start_day + days, len(times), 7)
         for i in range(start_day, end_day):
-            d = times[i][5:] if times[i] else ""
+            date_s = times[i] if i < len(times) else ""
+            d_short = date_s[5:] if date_s else ""
+            wd = ""
+            try:
+                dt = datetime.strptime(date_s[:10], "%Y-%m-%d")
+                wd = weekday_fa.get(dt.weekday(), "")
+            except Exception:
+                pass
+            label = day_names[i] if i < len(day_names) else f"روز {i+1}"
+            if wd:
+                label = f"{label} · {wd}"
+
             mx = tmax[i] if i < len(tmax) else "?"
             mn = tmin[i] if i < len(tmin) else "?"
             try:
                 code = int(codes[i]) if i < len(codes) else 0
             except Exception:
                 code = 0
-            desc = WEATHER_CODES.get(code, "")
+            desc = _code_desc(code)
             pr = precip[i] if i < len(precip) else 0
-            wd = wind[i] if i < len(wind) else "?"
+            pp = pprob[i] if i < len(pprob) else None
+            wd_spd = wind[i] if i < len(wind) else "?"
             u = uv[i] if i < len(uv) else "?"
-            rain = f"  |  🌧 {pn(pr)}mm" if pr not in (None, 0, "0", 0.0) and str(pr) not in ("0", "0.0") else ""
-            lines.append(f"• {day_names[i]} ({d})")
-            lines.append(f"  {pn(mn)}° ~ {pn(mx)}°  {desc}")
-            lines.append(f"  💨 {pn(wd)} km/h  |  ☀️ UV {pn(u)}{rain}")
+            amx = atmax[i] if i < len(atmax) else None
+            amn = atmin[i] if i < len(atmin) else None
 
-        result = "\n".join(lines)
+            lines.append(f"**{label}** ({d_short})")
+            lines.append(f"  🌡 {pn(mn)}° ~ {pn(mx)}°  ·  {desc}")
+            extra = []
+            if amx is not None and amn is not None:
+                extra.append(f"حس {pn(amn)}°~{pn(amx)}°")
+            if pp is not None:
+                try:
+                    if float(pp) > 0:
+                        extra.append(f"احتمال باران {pn(int(float(pp)))}%")
+                except (TypeError, ValueError):
+                    pass
+            if pr not in (None, 0, 0.0, "0", "0.0") and str(pr) not in ("0", "0.0"):
+                extra.append(f"بارش {pn(pr)}mm")
+            if u not in (None, "?", ""):
+                ul = _uv_label(u)
+                extra.append(f"UV {pn(u)}" + (f" ({ul})" if ul else ""))
+            if wd_spd not in (None, "?", ""):
+                extra.append(f"باد {pn(wd_spd)} km/h")
+            if extra:
+                lines.append("  " + " · ".join(extra))
+            lines.append("")
+
+        # جمع‌بندی هفته
+        try:
+            maxs = [float(x) for x in tmax[:7] if x is not None]
+            mins = [float(x) for x in tmin[:7] if x is not None]
+            rains = [float(x or 0) for x in precip[:7]]
+            if maxs and mins:
+                lines.append("📊 **خلاصه هفته**")
+                lines.append(
+                    f"گرم‌ترین: {pn(f'{max(maxs):.0f}')}°  ·  "
+                    f"سردترین: {pn(f'{min(mins):.0f}')}°"
+                )
+                total_rain = sum(rains)
+                if total_rain > 0:
+                    lines.append(f"مجموع بارش پیش‌بینی‌شده: {pn(f'{total_rain:.1f}')} mm")
+                else:
+                    lines.append("بارش قابل‌توجهی در این بازه پیش‌بینی نشده.")
+        except Exception:
+            pass
+
+        result = "\n".join(lines).rstrip()
         _cache[key] = result
-        _cache_t[key] = now
+        _cache_t[key] = now_ts
         return result
+
 
     # ——— fallback wttr (حداکثر ۳ روز دارد) + ترجمه ———
     EN2FA = {
@@ -339,52 +541,9 @@ def _hourly_prev(data: dict, key: str, hours_ago: int = 3):
     return values[j]
 
 
-async def _suggest_cleaner_city(current_city: str, current_aqi, max_check: int = 6) -> str | None:
-    """اگر هوا بد است، نزدیک‌ترین شهر تمیزتر را پیشنهاد بده."""
-    if current_aqi is None:
-        return None
-    try:
-        if float(current_aqi) < 100:
-            return None  # فقط وقتی ناسالم یا بدتر
-    except (TypeError, ValueError):
-        return None
-
-    base = CITY_COORDS.get(current_city.strip()) or CITY_COORDS.get("تهران")
-    if not base:
-        return None
-    blat, blon = base
-
-    # شهرهای دیگر را بر اساس فاصله تقریبی مرتب کن
-    others = []
-    for name, (la, lo) in CITY_COORDS.items():
-        if name == current_city.strip():
-            continue
-        dist = (la - blat) ** 2 + (lo - blon) ** 2
-        others.append((dist, name, la, lo))
-    others.sort()
-
-    best = None
-    for _, name, la, lo in others[:max_check]:
-        data = await _aqi_for_coords(la, lo)
-        if not data:
-            continue
-        aqi = (data.get("current") or {}).get("european_aqi")
-        if aqi is None:
-            continue
-        try:
-            if float(aqi) + 15 < float(current_aqi):
-                if best is None or float(aqi) < float(best[1]):
-                    best = (name, aqi)
-        except (TypeError, ValueError):
-            continue
-
-    if not best:
-        return None
-    return f"🏙 پیشنهاد: هوای **{best[0]}** بهتر است (AQI {pn(best[1])})."
-
 
 async def air_quality(city: str) -> str:
-    """کیفیت هوای هوشمند: AQI اروپا/آمریکا، روند، هشدار PM2.5، پیشنهاد شهر جایگزین."""
+    """کیفیت هوای هوشمند: AQI اروپا/آمریکا، روند، هشدار PM2.5، بدون پیشنهاد شهر."""
     key = f"aqi_smart_{city}"
     now = datetime.now().timestamp()
     ttl = getattr(config, "CACHE_TTL", 300)
@@ -450,15 +609,6 @@ async def air_quality(city: str) -> str:
         if dust is not None:
             lines.append(f"• گردوغبار: {pn(dust)} µg/m³")
 
-        # پیشنهاد شهر تمیزتر در آلودگی بالا
-        try:
-            if aqi is not None and float(aqi) >= 100:
-                tip_city = await _suggest_cleaner_city(city, aqi)
-                if tip_city:
-                    lines.append("")
-                    lines.append(tip_city)
-        except Exception as e:
-            logger.debug("aqi suggest city: %s", e)
 
         result = "\n".join(lines)
         _cache[key] = result
