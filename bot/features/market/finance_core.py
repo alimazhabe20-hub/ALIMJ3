@@ -109,37 +109,100 @@ from typing import Optional
 
 # Auto-split part 6: resolve_coin_id
 async def resolve_coin_id(symbol: str) -> Optional[str]:
-    """پیدا کردن شناسه CoinGecko از نماد یا نام — پشتیبانی تقریباً همه ارزها"""
-    symbol = (symbol or "").lower().strip().replace(" ", "").replace("‌", "")
+    """شناسه CoinGecko از نماد/نام — تقریباً همه کوین‌ها + کش."""
+    symbol = (symbol or "").lower().strip().replace(" ", "").replace("‌", "").replace("-", "")
     if not symbol:
         return None
+
+    # نرمال‌سازی فارسی رایج
+    fa_map = {
+        "بیتکوین": "btc", "بیتکویین": "btc", "بیتكوين": "btc", "bitcoin": "btc",
+        "اتریوم": "eth", "ethereum": "eth", "تتر": "usdt", "tether": "usdt",
+        "تون": "ton", "toncoin": "ton", "سولانا": "sol", "solana": "sol",
+        "کاردانو": "ada", "ریپل": "xrp", "دوج": "doge", "دوجکوین": "doge",
+        "شیبا": "shib", "پپه": "pepe", "بیاننس": "bnb", "بایننس": "bnb",
+    }
+    symbol = fa_map.get(symbol, symbol)
+
     if symbol in SYMBOL_TO_ID:
         return SYMBOL_TO_ID[symbol]
+    # گاهی کلید با خط تیره
+    if symbol.replace("-", "") in {k.replace("-", ""): v for k, v in SYMBOL_TO_ID.items()}:
+        for k, v in SYMBOL_TO_ID.items():
+            if k.replace("-", "") == symbol.replace("-", ""):
+                return v
 
     cache_key = f"resolve_{symbol}"
     now = datetime.now().timestamp()
     if cache_key in _cache and now - _cache_t.get(cache_key, 0) < 3600:
         return _cache[cache_key]
 
+    # 1) CoinGecko search
     try:
-        async with pooled_async_client() as c:
-            r = await request_with_retry("GET", "https://api.coingecko.com/api/v3/search", params={"query": symbol})
-            if r.status_code == 200:
-                coins = safe_json(r).get("coins") or []
-                if coins:
-                    for coin in coins:
-                        if (coin.get("symbol") or "").lower() == symbol:
-                            cid = coin.get("id")
+        r = await request_with_retry(
+            "GET", "https://api.coingecko.com/api/v3/search",
+            params={"query": symbol}, retries=0,
+        )
+        if r is not None and getattr(r, "status_code", 0) == 200:
+            coins = (safe_json(r) or {}).get("coins") or []
+            if coins:
+                # اولویت: نماد دقیق
+                for coin in coins:
+                    if (coin.get("symbol") or "").lower() == symbol:
+                        cid = coin.get("id")
+                        if cid:
                             _cache[cache_key] = cid
                             _cache_t[cache_key] = now
                             return cid
-                    cid = coins[0].get("id")
+                # بعد: id دقیق
+                for coin in coins:
+                    if (coin.get("id") or "").lower() == symbol:
+                        cid = coin.get("id")
+                        if cid:
+                            _cache[cache_key] = cid
+                            _cache_t[cache_key] = now
+                            return cid
+                cid = coins[0].get("id")
+                if cid:
                     _cache[cache_key] = cid
                     _cache_t[cache_key] = now
                     return cid
     except Exception as e:
-        logger.warning(f"resolve_coin_id {symbol}: {e}")
+        logger.warning(f"resolve_coin_id gecko {symbol}: {e}")
+
+    # 2) CoinPaprika search
+    try:
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+            r = await client.get("https://api.coinpaprika.com/v1/search/", params={"q": symbol, "c": "currencies", "limit": 10})
+            if r.status_code == 200:
+                currencies = (r.json() or {}).get("currencies") or []
+                for c in currencies:
+                    if (c.get("symbol") or "").lower() == symbol:
+                        # paprika id مثل btc-bitcoin — برای gecko نیاز به map نداریم
+                        # ذخیره paprika id جدا در کش با پیشوند
+                        pid = c.get("id")
+                        if pid:
+                            _cache[cache_key] = f"paprika:{pid}"
+                            _cache_t[cache_key] = now
+                            return f"paprika:{pid}"
+                if currencies:
+                    pid = currencies[0].get("id")
+                    if pid:
+                        _cache[cache_key] = f"paprika:{pid}"
+                        _cache_t[cache_key] = now
+                        return f"paprika:{pid}"
+    except Exception as e:
+        logger.debug(f"resolve paprika {symbol}: {e}")
+
+    # 3) اگر نماد کوتاه است همان را به‌عنوان paprika نماد امتحان کن
+    if 2 <= len(symbol) <= 10 and symbol.isascii():
+        # بعداً در _crypto_simple با نماد مستقیم قیمت می‌گیریم
+        _cache[cache_key] = f"symbol:{symbol.upper()}"
+        _cache_t[cache_key] = now
+        return f"symbol:{symbol.upper()}"
+
     return None
+
 
 # END MERGED LEGACY PART: 
 # BEGIN MERGED LEGACY PART: finance_core_parts/part_007__crypto_simple.py
@@ -147,26 +210,29 @@ from typing import Any
 
 # Auto-split part 7: _crypto_simple
 async def _crypto_simple(ids: list[str]) -> dict[str, Any]:
-    """قیمت چند منبعی: CoinGecko → CoinPaprika → Coinlore → Binance-like public mirrors."""
+    """قیمت برای هر کوین: Gecko / Paprika / Coinlore / CryptoCompare / نماد مستقیم."""
     ids = [str(i).strip() for i in (ids or []) if i]
     if not ids:
         return {}
     key = "cg_" + ",".join(sorted(ids))
     now = datetime.now().timestamp()
-    if key in _cache and now - _cache_t.get(key, 0) < 60:
+    if key in _cache and now - _cache_t.get(key, 0) < 45:
         return _cache[key]
 
     out: dict[str, Any] = {}
+    gecko_ids = [i for i in ids if not i.startswith("paprika:") and not i.startswith("symbol:")]
+    paprika_ids = {i: i.split(":", 1)[1] for i in ids if i.startswith("paprika:")}
+    symbol_ids = {i: i.split(":", 1)[1] for i in ids if i.startswith("symbol:")}
 
-    # --- 1) CoinGecko ---
-    try:
-        async with pooled_async_client() as client:
+    # --- CoinGecko batch ---
+    if gecko_ids:
+        try:
             r = await request_with_retry(
                 "GET",
                 "https://api.coingecko.com/api/v3/simple/price",
                 retries=0,
                 params={
-                    "ids": ",".join(ids),
+                    "ids": ",".join(gecko_ids),
                     "vs_currencies": "usd",
                     "include_24hr_change": "true",
                     "include_market_cap": "true",
@@ -176,159 +242,188 @@ async def _crypto_simple(ids: list[str]) -> dict[str, Any]:
             if r is not None and getattr(r, "status_code", 0) == 200:
                 data = safe_json(r) or {}
                 if isinstance(data, dict):
-                    for cid in ids:
+                    for cid in gecko_ids:
                         info = data.get(cid)
                         if isinstance(info, dict) and info.get("usd") is not None:
                             out[cid] = info
-    except Exception as e:
-        logger.error(f"coingecko simple: {e}")
+        except Exception as e:
+            logger.error(f"coingecko simple: {e}")
 
-    missing = [cid for cid in ids if cid not in out]
-    if not missing:
-        _cache[key] = out
-        _cache_t[key] = now
-        return out
-
-    # --- 2) CoinPaprika ---
+    # --- Paprika by known map + explicit paprika: ids ---
     paprika_map = {
-        "bitcoin": "btc-bitcoin",
-        "ethereum": "eth-ethereum",
-        "tether": "usdt-tether",
-        "binancecoin": "bnb-binance-coin",
-        "solana": "sol-solana",
-        "ripple": "xrp-xrp",
-        "the-open-network": "ton-toncoin",
-        "dogecoin": "doge-dogecoin",
-        "cardano": "ada-cardano",
-        "tron": "trx-tron",
-        "chainlink": "link-chainlink",
-        "litecoin": "ltc-litecoin",
-        "polkadot": "dot-polkadot",
-        "avalanche-2": "avax-avalanche",
-        "shiba-inu": "shib-shiba-inu",
-        "usd-coin": "usdc-usd-coin",
-        "matic-network": "matic-polygon",
-        "near": "near-near-protocol",
-        "uniswap": "uni-uniswap",
-        "cosmos": "atom-cosmos",
-        "bitcoin-cash": "bch-bitcoin-cash",
+        "bitcoin": "btc-bitcoin", "ethereum": "eth-ethereum", "tether": "usdt-tether",
+        "binancecoin": "bnb-binance-coin", "solana": "sol-solana", "ripple": "xrp-xrp",
+        "the-open-network": "ton-toncoin", "dogecoin": "doge-dogecoin", "cardano": "ada-cardano",
+        "tron": "trx-tron", "chainlink": "link-chainlink", "litecoin": "ltc-litecoin",
+        "polkadot": "dot-polkadot", "avalanche-2": "avax-avalanche", "shiba-inu": "shib-shiba-inu",
+        "usd-coin": "usdc-usd-coin", "matic-network": "matic-polygon", "near": "near-near-protocol",
+        "uniswap": "uni-uniswap", "cosmos": "atom-cosmos", "bitcoin-cash": "bch-bitcoin-cash",
+        "pepe": "pepe-pepe", "sui": "sui-sui", "aptos": "apt-aptos", "arbitrum": "arb-arbitrum",
+        "optimism": "op-optimism", "render-token": "rndr-render", "filecoin": "fil-filecoin",
+        "stellar": "xlm-stellar", "hedera-hashgraph": "hbar-hedera-hashgraph",
+        "internet-computer": "icp-internet-computer", "kaspa": "kas-kaspa",
     }
-    try:
-        async with pooled_async_client() as client:
-            for cid in list(missing):
-                pid = paprika_map.get(cid)
-                if not pid:
-                    continue
-                try:
-                    r = await request_with_retry(
-                        "GET", f"https://api.coinpaprika.com/v1/tickers/{pid}", retries=0
-                    )
-                    if r is not None and getattr(r, "status_code", 0) == 200:
-                        q = (safe_json(r) or {}).get("quotes", {}).get("USD") or {}
-                        price = q.get("price")
-                        if price is not None:
+
+    async def _paprika_price(pid: str) -> dict | None:
+        try:
+            async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+                r = await client.get(f"https://api.coinpaprika.com/v1/tickers/{pid}")
+                if r.status_code != 200:
+                    return None
+                q = (r.json() or {}).get("quotes", {}).get("USD") or {}
+                price = q.get("price")
+                if price is None:
+                    return None
+                return {
+                    "usd": float(price),
+                    "usd_24h_change": q.get("percent_change_24h"),
+                    "usd_market_cap": q.get("market_cap"),
+                    "usd_24h_vol": q.get("volume_24h"),
+                }
+        except Exception as e:
+            logger.debug(f"paprika {pid}: {e}")
+            return None
+
+    for cid in list(gecko_ids):
+        if cid in out:
+            continue
+        pid = paprika_map.get(cid)
+        if not pid:
+            continue
+        info = await _paprika_price(pid)
+        if info:
+            out[cid] = info
+
+    for full_id, pid in paprika_ids.items():
+        if full_id in out:
+            continue
+        info = await _paprika_price(pid)
+        if info:
+            out[full_id] = info
+
+    # --- Coinlore top list match for missing gecko ids ---
+    missing_gecko = [c for c in gecko_ids if c not in out]
+    if missing_gecko:
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                r = await client.get("https://api.coinlore.net/api/tickers/?start=0&limit=100")
+                if r.status_code == 200:
+                    data = r.json() or {}
+                    rows = data.get("data") if isinstance(data, dict) else data
+                    if isinstance(rows, list):
+                        by_name = {}
+                        by_sym = {}
+                        for row in rows:
+                            nameid = (row.get("nameid") or "").lower()
+                            sym = (row.get("symbol") or "").lower()
+                            if nameid:
+                                by_name[nameid] = row
+                            if sym:
+                                by_sym[sym] = row
+                        for cid in missing_gecko:
+                            row = by_name.get(cid) or by_sym.get(cid.split("-")[0] if "-" in cid else cid)
+                            # map common gecko id to lore nameid
+                            lore_alias = {
+                                "binancecoin": "binance-coin",
+                                "matic-network": "polygon",
+                                "avalanche-2": "avalanche",
+                                "shiba-inu": "shiba-inu",
+                                "the-open-network": "toncoin",
+                            }.get(cid, cid)
+                            row = row or by_name.get(lore_alias)
+                            if not row:
+                                continue
+                            price = row.get("price_usd")
+                            if price is None:
+                                continue
                             out[cid] = {
                                 "usd": float(price),
-                                "usd_24h_change": q.get("percent_change_24h"),
-                                "usd_market_cap": q.get("market_cap"),
-                                "usd_24h_vol": q.get("volume_24h"),
+                                "usd_24h_change": float(row.get("percent_change_24h") or 0),
+                                "usd_market_cap": float(row.get("market_cap_usd") or 0) or None,
+                                "usd_24h_vol": float(row.get("volume24") or 0) or None,
                             }
-                except Exception as e:
-                    logger.debug(f"paprika {cid}: {e}")
-    except Exception as e:
-        logger.error(f"paprika simple: {e}")
+        except Exception as e:
+            logger.debug(f"coinlore batch: {e}")
 
-    missing = [cid for cid in ids if cid not in out]
+    # --- CryptoCompare / symbol-based for symbol:XXX and remaining ---
+    async def _cc_price(sym: str) -> float | None:
+        try:
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                r = await client.get(
+                    "https://min-api.cryptocompare.com/data/price",
+                    params={"fsym": sym.upper(), "tsyms": "USD"},
+                )
+                if r.status_code == 200:
+                    v = (r.json() or {}).get("USD")
+                    return float(v) if v is not None else None
+        except Exception as e:
+            logger.debug(f"cc {sym}: {e}")
+        return None
 
-    # --- 3) Coinlore (id map for majors) ---
-    lore_map = {
-        "bitcoin": "90",
-        "ethereum": "80",
-        "tether": "518",
-        "binancecoin": "2710",
-        "solana": "48543",
-        "ripple": "58",
-        "dogecoin": "2",
-        "cardano": "257",
-        "tron": "2713",
-        "litecoin": "1",
-        "polkadot": "45219",
-        "chainlink": "2751",
-        "shiba-inu": "45088",
-        "the-open-network": "54683",
-    }
-    if missing:
+    async def _paprika_by_symbol(sym: str) -> dict | None:
+        """جستجوی پاپریکا با نماد و گرفتن قیمت."""
         try:
             async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
-                for cid in list(missing):
-                    lid = lore_map.get(cid)
-                    if not lid:
-                        continue
-                    try:
-                        r = await client.get(f"https://api.coinlore.net/api/ticker/?id={lid}")
-                        if r.status_code == 200:
-                            arr = r.json()
-                            if isinstance(arr, list) and arr:
-                                row = arr[0]
-                                price = row.get("price_usd")
-                                if price is not None:
-                                    out[cid] = {
-                                        "usd": float(price),
-                                        "usd_24h_change": float(row.get("percent_change_24h") or 0),
-                                        "usd_market_cap": float(row.get("market_cap_usd") or 0) or None,
-                                        "usd_24h_vol": float(row.get("volume24") or 0) or None,
-                                    }
-                    except Exception as e:
-                        logger.debug(f"coinlore {cid}: {e}")
+                r = await client.get(
+                    "https://api.coinpaprika.com/v1/search/",
+                    params={"q": sym, "c": "currencies", "limit": 5},
+                )
+                if r.status_code != 200:
+                    return None
+                currencies = (r.json() or {}).get("currencies") or []
+                pid = None
+                for c in currencies:
+                    if (c.get("symbol") or "").lower() == sym.lower():
+                        pid = c.get("id")
+                        break
+                if not pid and currencies:
+                    pid = currencies[0].get("id")
+                if not pid:
+                    return None
+                return await _paprika_price(pid)
         except Exception as e:
-            logger.error(f"coinlore simple: {e}")
+            logger.debug(f"paprika symbol {sym}: {e}")
+            return None
 
-    missing = [cid for cid in ids if cid not in out]
-
-    # --- 4) CryptoCompare (symbol from id) ---
     id_to_sym = {
-        "bitcoin": "BTC",
-        "ethereum": "ETH",
-        "tether": "USDT",
-        "binancecoin": "BNB",
-        "solana": "SOL",
-        "ripple": "XRP",
-        "dogecoin": "DOGE",
-        "cardano": "ADA",
-        "tron": "TRX",
-        "litecoin": "LTC",
-        "polkadot": "DOT",
-        "chainlink": "LINK",
-        "shiba-inu": "SHIB",
-        "the-open-network": "TON",
-        "avalanche-2": "AVAX",
-        "usd-coin": "USDC",
-        "matic-network": "MATIC",
-        "near": "NEAR",
-        "uniswap": "UNI",
-        "cosmos": "ATOM",
-        "bitcoin-cash": "BCH",
+        "bitcoin": "BTC", "ethereum": "ETH", "tether": "USDT", "binancecoin": "BNB",
+        "solana": "SOL", "ripple": "XRP", "dogecoin": "DOGE", "cardano": "ADA",
+        "tron": "TRX", "litecoin": "LTC", "polkadot": "DOT", "chainlink": "LINK",
+        "shiba-inu": "SHIB", "the-open-network": "TON", "avalanche-2": "AVAX",
+        "usd-coin": "USDC", "matic-network": "MATIC", "near": "NEAR", "uniswap": "UNI",
+        "cosmos": "ATOM", "bitcoin-cash": "BCH", "pepe": "PEPE", "sui": "SUI",
+        "aptos": "APT", "arbitrum": "ARB", "optimism": "OP", "filecoin": "FIL",
+        "stellar": "XLM", "render-token": "RENDER",
     }
-    if missing:
-        try:
-            async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
-                for cid in list(missing):
-                    sym = id_to_sym.get(cid)
-                    if not sym:
-                        continue
-                    try:
-                        r = await client.get(
-                            "https://min-api.cryptocompare.com/data/price",
-                            params={"fsym": sym, "tsyms": "USD"},
-                        )
-                        if r.status_code == 200:
-                            price = (r.json() or {}).get("USD")
-                            if price is not None:
-                                out[cid] = {"usd": float(price)}
-                    except Exception as e:
-                        logger.debug(f"cryptocompare {cid}: {e}")
-        except Exception as e:
-            logger.error(f"cryptocompare simple: {e}")
+
+    for cid in list(gecko_ids):
+        if cid in out:
+            continue
+        sym = id_to_sym.get(cid) or (cid.upper() if len(cid) <= 6 and cid.isascii() else None)
+        if not sym:
+            # تلاش paprika با خود id به‌عنوان query
+            info = await _paprika_by_symbol(cid)
+            if info:
+                out[cid] = info
+            continue
+        price = await _cc_price(sym)
+        if price is not None:
+            out[cid] = {"usd": price}
+        else:
+            info = await _paprika_by_symbol(sym)
+            if info:
+                out[cid] = info
+
+    for full_id, sym in symbol_ids.items():
+        if full_id in out:
+            continue
+        price = await _cc_price(sym)
+        if price is not None:
+            out[full_id] = {"usd": price}
+            continue
+        info = await _paprika_by_symbol(sym)
+        if info:
+            out[full_id] = info
 
     if out:
         _cache[key] = out
@@ -520,12 +615,13 @@ async def convert_crypto(amount: float, symbol: str) -> str:
     if not coin_id:
         return (
             "❌ ارز پیدا نشد.\n\n"
+            "تقریباً همه کوین‌های بازار پشتیبانی می‌شوند.\n"
             "مثال‌ها:\n"
-            "• 1.5 btc\n"
+            "• 1.5 btc یا ۲ بیتکوین\n"
             "• 20 ton\n"
             "• 100 pepe\n"
             "• 50 sol\n"
-            "• 10 sui"
+            "• 1000 not / dogs / jup / wif"
         )
     prices = await _crypto_simple([coin_id])
     info = prices.get(coin_id) or {}
@@ -690,23 +786,11 @@ async def convert_currency(amount: float, from_cur: str, to_cur: str = "") -> st
         if from_cur in ("rial",) and to_cur in ("usd",):
             return f"{pn(f'{amount:,.0f}')} ریال = **${amount / d:,.4f}**"
 
-    # اگر from کریپتو بود (انگلیسی یا فارسی)
+    # هر نماد ناشناخته‌ای را به‌عنوان کریپتو امتحان کن (تقریباً همه کوین‌ها)
     _from_norm = (from_cur or "").lower().strip().replace(" ", "").replace("‌", "")
-    _crypto_fa = {
-        "بیتکوین", "بیتکویین", "بیتكوين", "اتریوم", "تتر", "تون", "سولانا",
-        "کاردانو", "ریپل", "دوج", "دوجکوین", "دوج‌کوین",
-    }
-    if (
-        re.match(r"^[a-zA-Z0-9\-]{2,30}$", _from_norm)
-        or _from_norm in SYMBOL_TO_ID
-        or _from_norm in _crypto_fa
-        or (
-            _from_norm in _FA_CURRENCY
-            and _FA_CURRENCY.get(_from_norm) in SYMBOL_TO_ID
-        )
-    ):
-        mapped = _FA_CURRENCY.get(_from_norm, _from_norm)
-        return await convert_crypto(amount, mapped or _from_norm)
+    _fiat = {"usd", "eur", "gbp", "toman", "rial", "irr", "aed", "try", "cny", "rub", "tmn"}
+    if _from_norm and _from_norm not in _fiat:
+        return await convert_crypto(amount, _from_norm)
 
     return (
         "❌ فرمت درست:\n"
@@ -819,13 +903,13 @@ _BULK_CACHE_KEY = "tgju_bulk"
 _BULK_TTL = 90
 
 SYMBOL_TO_ID = {
-    "btc": "bitcoin", "bitcoin": "bitcoin", "بیتکوین": "bitcoin", "بیت‌کوین": "bitcoin",
+    "btc": "bitcoin", "bitcoin": "bitcoin", "بیتکوین": "bitcoin", "بیت‌کوین": "bitcoin", "xbt": "bitcoin",
     "eth": "ethereum", "ethereum": "ethereum", "اتریوم": "ethereum",
     "usdt": "tether", "tether": "tether", "تتر": "tether",
-    "usdc": "usd-coin", "busd": "binance-usd", "ton": "the-open-network",
-    "toncoin": "the-open-network", "تون": "the-open-network", "bnb": "binancecoin",
-    "sol": "solana", "xrp": "ripple", "ada": "cardano", "doge": "dogecoin",
-    "dot": "polkadot", "matic": "matic-network", "polygon": "matic-network",
+    "usdc": "usd-coin", "busd": "binance-usd", "dai": "dai", "tusd": "true-usd", "fdusd": "first-digital-usd",
+    "ton": "the-open-network", "toncoin": "the-open-network", "تون": "the-open-network",
+    "bnb": "binancecoin", "sol": "solana", "xrp": "ripple", "ada": "cardano", "doge": "dogecoin",
+    "dot": "polkadot", "matic": "matic-network", "polygon": "matic-network", "pol": "matic-network",
     "avax": "avalanche-2", "link": "chainlink", "trx": "tron", "shib": "shiba-inu",
     "ltc": "litecoin", "bch": "bitcoin-cash", "atom": "cosmos", "uni": "uniswap",
     "near": "near", "apt": "aptos", "arb": "arbitrum", "op": "optimism", "fil": "filecoin",
@@ -840,6 +924,28 @@ SYMBOL_TO_ID = {
     "theta": "theta-token", "ftm": "fantom", "hbar": "hedera-hashgraph",
     "egld": "elrond-erd-2", "kas": "kaspa", "rune": "thorchain", "stx": "blockstack",
     "ordi": "ordinals", "sats": "sats-ordinals",
+    "wbtc": "wrapped-bitcoin", "steth": "staked-ether", "weeth": "wrapped-eeth",
+    "leo": "leo-token", "okb": "okb", "cro": "crypto-com-chain", "mnt": "mantle",
+    "tao": "bittensor", "ftt": "ftx-token", "bsv": "bitcoin-cash-sv",
+    "etc": "ethereum-classic", "xmr": "monero", "zec": "zcash", "dash": "dash",
+    "neo": "neo", "waves": "waves", "qtum": "qtum", "iota": "iota", "miota": "iota",
+    "cake": "pancakeswap-token", "ldo": "lido-dao", "ens": "ethereum-name-service",
+    "grt": "the-graph", "sand": "the-sandbox", "chz": "chiliz", "flow": "flow",
+    "egld": "elrond-erd-2", "kava": "kava", "zil": "zilliqa", "bat": "basic-attention-token",
+    "zrx": "0x", "enj": "enjincoin", "ankr": "ankr", "one": "harmony",
+    "cfx": "conflux-token", "rose": "oasis-network", "ksm": "kusama",
+    "twt": "trust-wallet-token", "gmx": "gmx", "dydx": "dydx-chain",
+    "blur": "blur", "ape": "apecoin", "lrc": "loopring", "crv": "curve-dao-token",
+    "jup": "jupiter-exchange-solana", "pyth": "pyth-network", "jto": "jito-governance-token",
+    "wif": "dogwifcoin", "bome": "book-of-meme", "mew": "cat-in-a-dogs-world",
+    "not": "notcoin", "dogs": "dogs-2", "hmstr": "hamster-kombat",
+    "trump": "official-trump", "melania": "melania-meme", "pnut": "peanut-the-squirrel",
+    "act": "act-i-the-ai-prophecy", "ai16z": "ai16z", "virtual": "virtual-protocol",
+    "ondo": "ondo-finance", "ena": "ethena", "wld": "worldcoin-wld",
+    "strk": "starknet", "zk": "zksync", "scroll": "scroll", "blast": "blast",
+    "manta": "manta-network", "alt": "altlayer", "pendle": "pendle",
+    "eigen": "eigenlayer", "ethfi": "ether-fi", "reth": "rocket-pool-eth",
+    "arb": "arbitrum", "op": "optimism", "base": "base",
 }
 
 # نام‌های رایج فارسی برای ارز و کریپتو
