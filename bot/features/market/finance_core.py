@@ -808,33 +808,59 @@ async def convert_currency(amount: float, from_cur: str, to_cur: str = "") -> st
 def profit_loss(buy: float, sell: float, qty: float = 1.0) -> str:
     if buy <= 0:
         return "❌ قیمت خرید باید بزرگ‌تر از صفر باشد."
+    if qty <= 0:
+        return "❌ تعداد / حجم باید بزرگ‌تر از صفر باشد."
     gross = (sell - buy) * qty
     pct = (sell - buy) / buy * 100
     emoji = "📈" if gross >= 0 else "📉"
     status = "سود" if gross >= 0 else "ضرر"
     fee_est = (buy + sell) * qty * 0.005 / 2
     net = gross - fee_est
-    return (
-        f"{emoji} **محاسبه سود / ضرر**\n\n"
-        f"قیمت خرید: {pn(f'{buy:,.0f}')}\n"
-        f"قیمت فروش: {pn(f'{sell:,.0f}')}\n"
-        f"تعداد / حجم: {pn(qty)}\n\n"
-        f"**{status} ناخالص:** {pn(f'{abs(gross):,.0f}')}\n"
-        f"**درصد:** {pct:+.2f}%\n"
-        f"کارمزد تقریبی (۰.۵٪): {pn(f'{fee_est:,.0f}')}\n"
-        f"**{status} تقریبی خالص:** {pn(f'{abs(net):,.0f}')}\n\n"
-        f"{'✅ معامله در سود است.' if net >= 0 else '⚠️ معامله در ضرر است.'}"
-    )
+    per_unit = sell - buy
+
+    def fmt(x: float) -> str:
+        if abs(x) >= 1000:
+            return pn(f"{x:,.0f}")
+        if abs(x) >= 1:
+            return pn(f"{x:,.2f}")
+        return pn(f"{x:,.6f}".rstrip("0").rstrip("."))
+
+    lines = [
+        f"{emoji} **نتیجه محاسبه سود / ضرر**",
+        "────────────────────",
+        f"🛒 قیمت خرید: **{fmt(buy)}**",
+        f"🏷 قیمت فروش: **{fmt(sell)}**",
+        f"📦 تعداد / حجم: **{pn(qty)}**",
+        "────────────────────",
+        f"➕ اختلاف هر واحد: **{fmt(per_unit)}**",
+        f"{emoji} **{status} ناخالص:** {fmt(abs(gross))}",
+        f"📊 **درصد تغییر:** {pct:+.2f}%",
+        f"💳 کارمزد تقریبی (۰٫۵٪): {fmt(fee_est)}",
+        f"✨ **{status} تقریبی خالص:** {fmt(abs(net))}",
+        "────────────────────",
+        "✅ معامله در سود است." if net >= 0 else "⚠️ معامله در ضرر است.",
+        "",
+        "💡 دوباره بفرست: `خرید فروش` یا `خرید فروش تعداد`",
+    ]
+    return chr(10).join(lines)
+
 
 # END MERGED LEGACY PART: 
 # BEGIN MERGED LEGACY PART: finance_core_parts/part_017_parse_profit.py
 # Auto-split part 17: parse_profit
 def parse_profit(text: str) -> tuple[float, float, float] | None:
-    t = text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
-    nums = re.findall(r"[\d]+(?:\.\d+)?", t)
+    """پارس: خرید فروش [تعداد] — اعداد فارسی/انگلیسی."""
+    if not text:
+        return None
+    t = text.strip().translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+    t = t.replace("،", "").replace(",", "")
+    nums = re.findall(r"[\d]+(?:\.[\d]+)?", t)
     nums = [float(n) for n in nums]
     if len(nums) >= 2:
-        return nums[0], nums[1], nums[2] if len(nums) > 2 else 1.0
+        buy, sell = nums[0], nums[1]
+        qty = nums[2] if len(nums) > 2 else 1.0
+        if buy > 0 and qty > 0:
+            return buy, sell, qty
     return None
 
 # END MERGED LEGACY PART: 
