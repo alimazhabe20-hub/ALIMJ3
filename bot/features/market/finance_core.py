@@ -147,15 +147,24 @@ from typing import Any
 
 # Auto-split part 7: _crypto_simple
 async def _crypto_simple(ids: list[str]) -> dict[str, Any]:
+    """قیمت چند منبعی: CoinGecko → CoinPaprika → Coinlore → Binance-like public mirrors."""
+    ids = [str(i).strip() for i in (ids or []) if i]
+    if not ids:
+        return {}
     key = "cg_" + ",".join(sorted(ids))
     now = datetime.now().timestamp()
     if key in _cache and now - _cache_t.get(key, 0) < 60:
         return _cache[key]
-    headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+
+    out: dict[str, Any] = {}
+
+    # --- 1) CoinGecko ---
     try:
         async with pooled_async_client() as client:
-            r = await request_with_retry("GET", 
-                "https://api.coingecko.com/api/v3/simple/price", retries=0,
+            r = await request_with_retry(
+                "GET",
+                "https://api.coingecko.com/api/v3/simple/price",
+                retries=0,
                 params={
                     "ids": ",".join(ids),
                     "vs_currencies": "usd",
@@ -164,40 +173,168 @@ async def _crypto_simple(ids: list[str]) -> dict[str, Any]:
                     "include_24hr_vol": "true",
                 },
             )
-            if r.status_code == 200:
-                data = safe_json(r)
-                _cache[key] = data
-                _cache_t[key] = now
-                return data
+            if r is not None and getattr(r, "status_code", 0) == 200:
+                data = safe_json(r) or {}
+                if isinstance(data, dict):
+                    for cid in ids:
+                        info = data.get(cid)
+                        if isinstance(info, dict) and info.get("usd") is not None:
+                            out[cid] = info
     except Exception as e:
         logger.error(f"coingecko simple: {e}")
 
-    mapping = {
-        "bitcoin": "btc-bitcoin", "ethereum": "eth-ethereum", "tether": "usdt-tether",
-        "binancecoin": "bnb-binance-coin", "solana": "sol-solana", "ripple": "xrp-xrp",
-        "the-open-network": "ton-toncoin", "dogecoin": "doge-dogecoin", "cardano": "ada-cardano",
-        "tron": "trx-tron", "chainlink": "link-chainlink", "litecoin": "ltc-litecoin",
-        "polkadot": "dot-polkadot", "avalanche-2": "avax-avalanche", "shiba-inu": "shib-shiba-inu",
+    missing = [cid for cid in ids if cid not in out]
+    if not missing:
+        _cache[key] = out
+        _cache_t[key] = now
+        return out
+
+    # --- 2) CoinPaprika ---
+    paprika_map = {
+        "bitcoin": "btc-bitcoin",
+        "ethereum": "eth-ethereum",
+        "tether": "usdt-tether",
+        "binancecoin": "bnb-binance-coin",
+        "solana": "sol-solana",
+        "ripple": "xrp-xrp",
+        "the-open-network": "ton-toncoin",
+        "dogecoin": "doge-dogecoin",
+        "cardano": "ada-cardano",
+        "tron": "trx-tron",
+        "chainlink": "link-chainlink",
+        "litecoin": "ltc-litecoin",
+        "polkadot": "dot-polkadot",
+        "avalanche-2": "avax-avalanche",
+        "shiba-inu": "shib-shiba-inu",
+        "usd-coin": "usdc-usd-coin",
+        "matic-network": "matic-polygon",
+        "near": "near-near-protocol",
+        "uniswap": "uni-uniswap",
+        "cosmos": "atom-cosmos",
+        "bitcoin-cash": "bch-bitcoin-cash",
     }
-    out = {}
     try:
         async with pooled_async_client() as client:
-            for cid in ids:
-                pid = mapping.get(cid)
+            for cid in list(missing):
+                pid = paprika_map.get(cid)
                 if not pid:
                     continue
-                r = await request_with_retry("GET", f"https://api.coinpaprika.com/v1/tickers/{pid}", retries=0)
-                if r.status_code == 200:
-                    price = safe_json(r).get("quotes", {}).get("USD", {}).get("price")
-                    if price:
-                        out[cid] = {"usd": float(price)}
-        if out:
-            _cache[key] = out
-            _cache_t[key] = now
-            return out
+                try:
+                    r = await request_with_retry(
+                        "GET", f"https://api.coinpaprika.com/v1/tickers/{pid}", retries=0
+                    )
+                    if r is not None and getattr(r, "status_code", 0) == 200:
+                        q = (safe_json(r) or {}).get("quotes", {}).get("USD") or {}
+                        price = q.get("price")
+                        if price is not None:
+                            out[cid] = {
+                                "usd": float(price),
+                                "usd_24h_change": q.get("percent_change_24h"),
+                                "usd_market_cap": q.get("market_cap"),
+                                "usd_24h_vol": q.get("volume_24h"),
+                            }
+                except Exception as e:
+                    logger.debug(f"paprika {cid}: {e}")
     except Exception as e:
         logger.error(f"paprika simple: {e}")
-    return {}
+
+    missing = [cid for cid in ids if cid not in out]
+
+    # --- 3) Coinlore (id map for majors) ---
+    lore_map = {
+        "bitcoin": "90",
+        "ethereum": "80",
+        "tether": "518",
+        "binancecoin": "2710",
+        "solana": "48543",
+        "ripple": "58",
+        "dogecoin": "2",
+        "cardano": "257",
+        "tron": "2713",
+        "litecoin": "1",
+        "polkadot": "45219",
+        "chainlink": "2751",
+        "shiba-inu": "45088",
+        "the-open-network": "54683",
+    }
+    if missing:
+        try:
+            async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+                for cid in list(missing):
+                    lid = lore_map.get(cid)
+                    if not lid:
+                        continue
+                    try:
+                        r = await client.get(f"https://api.coinlore.net/api/ticker/?id={lid}")
+                        if r.status_code == 200:
+                            arr = r.json()
+                            if isinstance(arr, list) and arr:
+                                row = arr[0]
+                                price = row.get("price_usd")
+                                if price is not None:
+                                    out[cid] = {
+                                        "usd": float(price),
+                                        "usd_24h_change": float(row.get("percent_change_24h") or 0),
+                                        "usd_market_cap": float(row.get("market_cap_usd") or 0) or None,
+                                        "usd_24h_vol": float(row.get("volume24") or 0) or None,
+                                    }
+                    except Exception as e:
+                        logger.debug(f"coinlore {cid}: {e}")
+        except Exception as e:
+            logger.error(f"coinlore simple: {e}")
+
+    missing = [cid for cid in ids if cid not in out]
+
+    # --- 4) CryptoCompare (symbol from id) ---
+    id_to_sym = {
+        "bitcoin": "BTC",
+        "ethereum": "ETH",
+        "tether": "USDT",
+        "binancecoin": "BNB",
+        "solana": "SOL",
+        "ripple": "XRP",
+        "dogecoin": "DOGE",
+        "cardano": "ADA",
+        "tron": "TRX",
+        "litecoin": "LTC",
+        "polkadot": "DOT",
+        "chainlink": "LINK",
+        "shiba-inu": "SHIB",
+        "the-open-network": "TON",
+        "avalanche-2": "AVAX",
+        "usd-coin": "USDC",
+        "matic-network": "MATIC",
+        "near": "NEAR",
+        "uniswap": "UNI",
+        "cosmos": "ATOM",
+        "bitcoin-cash": "BCH",
+    }
+    if missing:
+        try:
+            async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+                for cid in list(missing):
+                    sym = id_to_sym.get(cid)
+                    if not sym:
+                        continue
+                    try:
+                        r = await client.get(
+                            "https://min-api.cryptocompare.com/data/price",
+                            params={"fsym": sym, "tsyms": "USD"},
+                        )
+                        if r.status_code == 200:
+                            price = (r.json() or {}).get("USD")
+                            if price is not None:
+                                out[cid] = {"usd": float(price)}
+                    except Exception as e:
+                        logger.debug(f"cryptocompare {cid}: {e}")
+        except Exception as e:
+            logger.error(f"cryptocompare simple: {e}")
+
+    if out:
+        _cache[key] = out
+        _cache_t[key] = now
+    return out
+
 
 # END MERGED LEGACY PART: 
 # BEGIN MERGED LEGACY PART: finance_core_parts/part_008__top_from_coinlore.py
@@ -334,9 +471,16 @@ async def get_crypto_price(symbol: str = "btc") -> str:
     symbol = (symbol or "btc").lower().strip().replace(" ", "").replace("‌", "")
     aliases = {
         "بیتکوین": "btc", "بیتکویین": "btc", "بیتكوين": "btc", "bitcoin": "btc",
-        "اتریوم": "eth", "ethereum": "eth", "تتر": "usdt", "سولانا": "sol",
+        "btc": "btc", "xbt": "btc",
+        "اتریوم": "eth", "ethereum": "eth", "eth": "eth",
+        "تتر": "usdt", "tether": "usdt", "usdt": "usdt",
+        "سولانا": "sol", "solana": "sol", "sol": "sol",
+        "تون": "ton", "toncoin": "ton", "ton": "ton",
     }
     symbol = aliases.get(symbol, symbol)
+    if symbol in SYMBOL_TO_ID and symbol not in ("btc", "eth", "usdt", "sol", "ton"):
+        # keep as-is; resolve_coin_id handles SYMBOL_TO_ID
+        pass
     coin_id = await resolve_coin_id(symbol)
     if not coin_id:
         return f"❌ ارز «{symbol}» پیدا نشد."
@@ -361,7 +505,17 @@ async def get_crypto_price(symbol: str = "btc") -> str:
 # Auto-split part 12: convert_crypto
 async def convert_crypto(amount: float, symbol: str) -> str:
     """تبدیل هر ارز دیجیتال به دلار و تومان — پشتیبانی تقریباً همه کوین‌ها"""
-    symbol = symbol.lower().strip().replace(" ", "").replace("‌", "")
+    symbol = (symbol or "").lower().strip().replace(" ", "").replace("‌", "")
+    # نرمال‌سازی نام فارسی → نماد
+    _fa_sym = {
+        "بیتکوین": "btc", "بیتکویین": "btc", "بیتكوين": "btc", "bitcoin": "btc",
+        "اتریوم": "eth", "ethereum": "eth", "تتر": "usdt", "tether": "usdt",
+        "تون": "ton", "toncoin": "ton", "سولانا": "sol", "solana": "sol",
+        "کاردانو": "ada", "ریپل": "xrp", "دوج": "doge", "دوجکوین": "doge",
+    }
+    symbol = _fa_sym.get(symbol, symbol)
+    if symbol in _FA_CURRENCY:
+        symbol = _FA_CURRENCY.get(symbol, symbol)
     coin_id = await resolve_coin_id(symbol)
     if not coin_id:
         return (
@@ -536,9 +690,23 @@ async def convert_currency(amount: float, from_cur: str, to_cur: str = "") -> st
         if from_cur in ("rial",) and to_cur in ("usd",):
             return f"{pn(f'{amount:,.0f}')} ریال = **${amount / d:,.4f}**"
 
-    # اگر from کریپتو-like بود
-    if re.match(r"^[a-zA-Z]{2,15}$", from_cur):
-        return await convert_crypto(amount, from_cur)
+    # اگر from کریپتو بود (انگلیسی یا فارسی)
+    _from_norm = (from_cur or "").lower().strip().replace(" ", "").replace("‌", "")
+    _crypto_fa = {
+        "بیتکوین", "بیتکویین", "بیتكوين", "اتریوم", "تتر", "تون", "سولانا",
+        "کاردانو", "ریپل", "دوج", "دوجکوین", "دوج‌کوین",
+    }
+    if (
+        re.match(r"^[a-zA-Z0-9\-]{2,30}$", _from_norm)
+        or _from_norm in SYMBOL_TO_ID
+        or _from_norm in _crypto_fa
+        or (
+            _from_norm in _FA_CURRENCY
+            and _FA_CURRENCY.get(_from_norm) in SYMBOL_TO_ID
+        )
+    ):
+        mapped = _FA_CURRENCY.get(_from_norm, _from_norm)
+        return await convert_crypto(amount, mapped or _from_norm)
 
     return (
         "❌ فرمت درست:\n"
@@ -685,9 +853,13 @@ _FA_CURRENCY = {
     "لیر": "try", "try": "try",
     "یوان": "cny", "cny": "cny",
     "روبل": "rub", "rub": "rub",
-    "بیتکوین": "btc", "بیت‌کوین": "btc", "بیت کوین": "btc",
-    "اتریوم": "eth", "تتر": "usdt", "تون": "ton", "سولانا": "sol",
-    "کاردانو": "ada", "ریپل": "xrp", "دوج": "doge", "دوج‌کوین": "doge",
+    "بیتکوین": "btc", "بیت‌کوین": "btc", "بیت کوین": "btc", "بیتکویین": "btc",
+    "bitcoin": "btc", "btc": "btc",
+    "اتریوم": "eth", "ethereum": "eth", "eth": "eth",
+    "تتر": "usdt", "tether": "usdt", "usdt": "usdt",
+    "تون": "ton", "ton": "ton", "toncoin": "ton",
+    "سولانا": "sol", "solana": "sol", "sol": "sol",
+    "کاردانو": "ada", "ریپل": "xrp", "دوج": "doge", "دوج‌کوین": "doge", "دوجکوین": "doge",
 }
 
 
