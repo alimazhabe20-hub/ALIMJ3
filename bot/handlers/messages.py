@@ -1106,7 +1106,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("🔙 بازگشت به سرگرمی",):
         await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard()); return
     if text in ("🧠 دانستنی روز", "دانستنی روز"):
-        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(), reply_markup=get_fun_keyboard()); return
+        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(user_id=user_id), reply_markup=get_fun_keyboard()); return
     if text in ("💪 چالش امروز", "چالش امروز"):
         track_usage(user_id, "challenge")
         try:
