@@ -14,7 +14,24 @@ from bot.features.market.finance import profit_loss, parse_profit, analyze_crypt
 async def _h_profit(u, c, t, uid):
     c.user_data.pop("waiting_for", None)
     p = parse_profit(t)
-    await u.message.reply_text(profit_loss(*p) if p else "❌", reply_markup=get_market_keyboard())
+    if not p:
+        await u.message.reply_text(
+            """❌ فرمت درست نیست.
+
+این‌طور بفرست:
+
+`قیمت‌خرید قیمت‌فروش`
+یا
+`قیمت‌خرید قیمت‌فروش تعداد`
+
+مثال:
+• `1000 1200`
+• `1000 1200 5`
+• `۵۰۰۰۰ ۴۸۰۰۰ ۲`""",
+            reply_markup=get_market_keyboard(),
+        )
+        return
+    await u.message.reply_text(profit_loss(*p), reply_markup=get_market_keyboard())
 
 async def _h_currency(u, c, t, uid):
     c.user_data.pop("waiting_for", None)

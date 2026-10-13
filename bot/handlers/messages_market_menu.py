@@ -182,7 +182,35 @@ async def handle_market_menu(update, context, text, user_id, city=None, first_na
         return
     if text in ("📈 سود و ضرر", "سود و ضرر"):
         context.user_data["waiting_for"] = "profit"; track_usage(user_id, "profit")
-        await update.message.reply_text("📈 `1000 1200` یا `1000 1200 5`", reply_markup=get_market_keyboard()); return
+        await update.message.reply_text(
+            """📈 **محاسبه سود و ضرر**
+
+سه عدد بفرست (یا دو عدد):
+
+1️⃣ **قیمت خرید**
+2️⃣ **قیمت فروش**
+3️⃣ **تعداد / حجم** (اختیاری — اگر ننویسی = ۱)
+
+────────────────────
+**مثال‌ها:**
+
+• `1000 1200`
+  خرید ۱۰۰۰ · فروش ۱۲۰۰ · تعداد ۱
+  → سود ۲۰۰
+
+• `1000 1200 5`
+  خرید ۱۰۰۰ · فروش ۱۲۰۰ · تعداد ۵
+  → سود ۱۰۰۰
+
+• `50000 48000 2`
+  خرید ۵۰٬۰۰۰ · فروش ۴۸٬۰۰۰ · تعداد ۲
+  → ضرر ۴٬۰۰۰
+
+────────────────────
+💡 واحد مهم نیست (تومان / دلار / …)
+فقط هر سه عدد با **یک واحد** باشند.""",
+            reply_markup=get_market_keyboard(),
+        ); return
     if text in (
         "📊 نمودار و تحلیل ارز دیجیتال",
         "نمودار و تحلیل ارز دیجیتال",
