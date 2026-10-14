@@ -621,18 +621,19 @@ _BRAND_WORDS = {
 
 
 def _shopping_intent(raw: str) -> dict:
-    q = str(raw or "").strip().replace("ي", "ی").replace("ك", "ک").lower()
-    q = re.sub(
+    q = str(raw or "").strip().replace("ي", "ی").replace("ك", "ک")
+    q_low = q.lower()
+    q_low = re.sub(
         r"^\s*نه[،,:؛\s]+(?=(گوشی|موبایل|شیائومی|سامسونگ|پوکو|آیفون|iphone|xiaomi))",
         "",
-        q,
+        q_low,
         flags=re.I,
     )
     phone = bool(
         re.search(
             r"گوشی|موبایل|اسمارت\s*فون|smart\s*phone|smartphone|iphone|آیفون|"
             r"شیائومی|xiaomi|سامسونگ|samsung|پوکو|poco|redmi|ردمی|honor|oneplus|pixel",
-            q,
+            q_low,
             re.I,
         )
     )
@@ -640,47 +641,71 @@ def _shopping_intent(raw: str) -> dict:
         re.search(
             r"گوشی\s*(?:لمسی|هوشمند)|موبایل\s*(?:لمسی|هوشمند)|لمسی|smartphone|"
             r"اسمارت\s*فون|هوشمند",
-            q,
+            q_low,
             re.I,
         )
     )
     non_touch = bool(
-        re.search(r"غیر\s*لمسی|غیرلمسی|دکمه(?:ای|‌ای)|ساده|کیبوردی|feature\s*phone", q, re.I)
+        re.search(r"غیر\s*لمسی|غیرلمسی|دکمه(?:ای|‌ای)|ساده|کیبوردی|feature\s*phone", q_low, re.I)
     )
     brand = ""
     for b in (
         "شیائومی", "xiaomi", "سامسونگ", "samsung", "اپل", "apple",
-        "آیفون", "honor", "آنر", "پوکو", "poco",
+        "آیفون", "iphone", "honor", "آنر", "پوکو", "poco", "ردمی", "redmi",
+        "هواوی", "huawei", "نوکیا", "nokia", "ریلمی", "realme", "گلکسی", "galaxy",
+        "لپ‌تاپ", "لپتاپ", "laptop", "مک‌بوک", "macbook",
     ):
-        if b in q:
+        if b.lower() in q_low:
             brand = b
             break
-    # حالت: پیشنهاد هوشمند vs ارزان‌ترین
+    # لینک محصول در متن
+    links = re.findall(r'https?://[^\s<>"\']+', q, flags=re.I)
+    # بودجه
+    budget = 0
+    try:
+        budget = int(_budget(q) or 0)
+    except Exception:
+        budget = 0
+    # مدل تقریبی (کدهایی مثل A55, Note 13, HY510, 13T)
+    model = ""
+    mm = re.search(
+        r"\b((?:note|redmi|poco|galaxy|iphone|ipad)?\s*[a-z]{0,6}\s*\d{1,4}[a-z]{0,3})\b",
+        q_low,
+        re.I,
+    )
+    if mm:
+        model = re.sub(r"\s+", " ", mm.group(1)).strip()
     cheapest_mode = bool(
-        re.search(r"ارزان(?:\s*ترین)?|کمترین\s*قیمت|cheap(?:est)?", q, re.I)
+        re.search(r"ارزان(?:\s*ترین)?|کمترین\s*قیمت|cheap(?:est)?", q_low, re.I)
     )
     suggest_mode = bool(
         re.search(
             r"بهترین|پیشنهاد|چی\s*بخر|چه\s*بخر|مناسب|ارزش\s*خرید|value|"
             r"راهنما|کدام|کدوم",
-            q,
+            q_low,
             re.I,
         )
     )
+    compare_mode = bool(
+        re.search(r"مقایسه|فرق|تفاوت|versus|\bvs\b|در\s*برابر|یا\s+", q_low, re.I)
+    )
     if not cheapest_mode and not suggest_mode:
-        # «تا X میلیون» بدون «ارزان» → پیشنهاد
-        if re.search(r"(?:تا|زیر|بودجه|حداکثر)\s*[0-9۰-۹]", q):
+        if re.search(r"(?:تا|زیر|بودجه|حداکثر)\s*[0-9۰-۹]", q_low) or budget:
             suggest_mode = True
     registry_pref = bool(
-        re.search(r"رجیستر|رجیستری|ثبت\s*شده|ثبت‌شده", q, re.I)
+        re.search(r"رجیستر|رجیستری|ثبت\s*شده|ثبت‌شده", q_low, re.I)
     )
     return {
         "phone": phone,
         "touch": touch and not non_touch,
         "non_touch": non_touch,
         "brand": brand,
+        "model": model,
+        "budget": budget,
+        "links": links,
         "cheapest_mode": cheapest_mode,
         "suggest_mode": suggest_mode and not cheapest_mode,
+        "compare_mode": compare_mode,
         "registry_pref": registry_pref,
     }
 
@@ -1972,6 +1997,129 @@ async def _mobo_phone_guide(query: str) -> set[str]:
 # ---------------------------------------------------------------------------
 # Main public API
 # ---------------------------------------------------------------------------
+
+def _split_compare_query(raw: str) -> tuple[str, str] | None:
+    """جدا کردن دو کالا برای مقایسه: «A با B» / «A vs B» / «مقایسه A و B»."""
+    s = str(raw or "").strip().replace("ي", "ی").replace("ك", "ک")
+    s = re.sub(r"^\s*مقایسه(?:\s*ی)?\s*", "", s, flags=re.I)
+    s = re.sub(r"[؟?!]+", " ", s)
+    patterns = [
+        r"^(.+?)\s+(?:با|و|versus|vs\.?|در\s*برابر|درمقابل)\s+(.+)$",
+        r"^(.+?)\s*/\s*(.+)$",
+    ]
+    for pat in patterns:
+        m = re.match(pat, s, flags=re.I | re.S)
+        if not m:
+            continue
+        a, b = m.group(1).strip(" ،,"), m.group(2).strip(" ،,")
+        # حذف کلمات اضافی
+        for w in ("مقایسه", "فرق", "تفاوت", "کدام", "کدوم", "بهتره", "بهتر"):
+            a = re.sub(rf"\b{w}\b", " ", a, flags=re.I).strip()
+            b = re.sub(rf"\b{w}\b", " ", b, flags=re.I).strip()
+        a, b = re.sub(r"\s+", " ", a).strip(), re.sub(r"\s+", " ", b).strip()
+        if len(a) >= 2 and len(b) >= 2 and a.lower() != b.lower():
+            return a, b
+    return None
+
+
+async def compare_products(query: str, user_id: int = 0, max_results: int = 3) -> str:
+    """مقایسه دو کالا با جستجوی زنده هر طرف و جدول خلاصه."""
+    parts = _split_compare_query(query)
+    if not parts:
+        return (
+            "برای مقایسه دو کالا این‌طور بنویس:\n"
+            "• مقایسه آیفون ۱۵ با سامسونگ S24\n"
+            "• پوکو F6 vs ردمی نوت ۱۳\n"
+            "• لپ‌تاپ ایسوس با لنوو"
+        )
+    a, b = parts
+    rows_a, rows_b = await asyncio.gather(
+        _search_rows_for_compare(a, user_id),
+        _search_rows_for_compare(b, user_id),
+    )
+
+    def _pick(rows: list) -> dict | None:
+        if not rows:
+            return None
+        # ارزان‌ترین معتبر
+        priced = [r for r in rows if r.get("price")]
+        if not priced:
+            return rows[0]
+        return sorted(priced, key=lambda x: int(x.get("price") or 10**18))[0]
+
+    pa, pb = _pick(rows_a), _pick(rows_b)
+    lines = [
+        f"⚖️ **مقایسه خرید**",
+        f"🅰️ {a}",
+        f"🅱️ {b}",
+        "────────────────────",
+    ]
+
+    def _side(label: str, row: dict | None, name: str) -> list[str]:
+        if not row:
+            return [f"{label} **{name}**", "  ❌ نتیجه‌ای در بودجه/منابع پیدا نشد."]
+        title = (row.get("title") or name)[:90]
+        price = row.get("price")
+        src = row.get("source") or row.get("store") or "?"
+        link = row.get("url") or row.get("link") or ""
+        out = [f"{label} **{title}**"]
+        if price:
+            out.append(f"  💰 {int(price):,} تومان")
+        out.append(f"  🏪 {src}")
+        if link:
+            out.append(f"  🔗 {link}")
+        return out
+
+    lines.extend(_side("🅰️", pa, a))
+    lines.append("")
+    lines.extend(_side("🅱️", pb, b))
+    lines.append("────────────────────")
+
+    if pa and pb and pa.get("price") and pb.get("price"):
+        da, db = int(pa["price"]), int(pb["price"])
+        diff = abs(da - db)
+        cheaper = "🅰️" if da < db else "🅱️"
+        lines.append(f"📊 اختلاف قیمت: {diff:,} تومان")
+        lines.append(f"🏷️ ارزان‌تر: {cheaper}")
+        # نسبت
+        if max(da, db) > 0:
+            pct = (diff / max(da, db)) * 100
+            lines.append(f"📈 اختلاف نسبی: {pct:.1f}%")
+    lines.append("")
+    lines.append("⚠️ قیمت لحظه‌ای است؛ قبل از خرید موجودی و گارانتی را چک کن.")
+    return chr(10).join(lines)
+
+
+async def _search_rows_for_compare(query: str, user_id: int = 0) -> list:
+    """جمع‌آوری چند ردیف خام برای یک سمت مقایسه."""
+    try:
+        budget = _budget(query) or 0
+        intent = _shopping_intent(query)
+        # جستجوی مستقیم منابع اصلی
+        digi, torob = await asyncio.gather(
+            _direct_digikala(query, budget or 0, 5),
+            _direct_torob(query, budget or 0, 5),
+        )
+        rows = list(digi or []) + list(torob or [])
+        # نرمال‌سازی کلیدها
+        out = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            out.append({
+                "title": r.get("title") or r.get("name") or "",
+                "price": r.get("price") or r.get("min_price"),
+                "url": r.get("url") or r.get("link") or "",
+                "source": r.get("source") or r.get("store") or "?",
+                "link": r.get("url") or r.get("link") or "",
+            })
+        return out[:8]
+    except Exception as exc:
+        logger.debug("compare search failed: %s", exc)
+        return []
+
+
+
 async def search_shopping(
     query: str = "",
     source: str = "all",
