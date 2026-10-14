@@ -1,3 +1,4 @@
+from bot.features.tools.graphical_calculator import start_graphical_calculator
 """Stable public facade.
 
 IMPORTANT: Keep this file small and stable. New functionality belongs in the
@@ -1090,8 +1091,11 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(f"📍 لوکیشن را از 📎 بفرستید.\nشهر فعلی: {city}", reply_markup=get_weather_geo_keyboard()); return
     # ابزار
     if text in ("🔢 ماشین‌حساب", "ماشین‌حساب"):
-        context.user_data["waiting_for"] = "calc"; track_usage(user_id, "calc")
-        await update.message.reply_text("🔢 `2+3*4`", reply_markup=get_tools_keyboard()); return
+        track_usage(user_id, "calc")
+        # ماشین‌حساب گرافیکی (دکمه‌ای) + امکان تایپ متنی
+        context.user_data["waiting_for"] = "calc"
+        await start_graphical_calculator(update, context)
+        return
     if text in ("🔐 پسورد تصادفی", "پسورد تصادفی"):
         track_usage(user_id, "password")
         pwd = generate_password(16)

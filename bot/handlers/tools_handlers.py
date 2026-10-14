@@ -3,7 +3,8 @@ from bot.utils.helpers import get_tools_keyboard
 from bot.features.tools.features_tools_app_tools import calculator, world_distance, count_text, parse_two_places
 
 async def _h_calc(u, c, t, uid):
-    c.user_data.pop("waiting_for", None)
+    # حالت calc را نگه می‌داریم تا چند عبارت پشت‌سرهم محاسبه شود
+    c.user_data["waiting_for"] = "calc"
     await u.message.reply_text(calculator(t), reply_markup=get_tools_keyboard())
 
 async def _h_distance(u, c, t, uid):
