@@ -40,5 +40,15 @@ async def handle_fun_menu(update, context, text, user_id, city=None, first_name=
     if text in ("💪 چالش امروز", "چالش امروز"):
         track_usage(user_id, "challenge"); await update.message.reply_text(await daily_challenge(), reply_markup=get_fun_keyboard()); return
     if text in ("💖 جمله انگیزشی", "جمله انگیزشی"):
-        track_usage(user_id, "motivation"); await update.message.reply_text(f"💖 {get_motivation()}", reply_markup=get_fun_keyboard()); return
+        track_usage(user_id, "motivation")
+        try:
+            from bot.utils.motivation import get_motivation_async
+            from bot.utils.fun_again import fun_again_keyboard
+            text_out = await get_motivation_async(user_id=user_id)
+            kb = fun_again_keyboard("motivation")
+        except Exception:
+            text_out = f"💖 {get_motivation()}"
+            kb = get_fun_keyboard()
+        await update.message.reply_text(text_out, reply_markup=kb, parse_mode="Markdown")
+        return
     return False

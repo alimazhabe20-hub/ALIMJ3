@@ -1161,6 +1161,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(
             await get_motivation_async(user_id=user_id),
             reply_markup=fun_again_keyboard("motivation"),
+            parse_mode="Markdown",
         )
         return
     # پروفایل
