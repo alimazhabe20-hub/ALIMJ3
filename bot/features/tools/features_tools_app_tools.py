@@ -255,17 +255,37 @@ def generate_password(length: int = 16) -> str:
 # ===== merged from bot/features/tools/app_tools_parts/part_005_count_text.py =====
 # Auto-split part 5: count_text
 def count_text(text: str) -> str:
+    """شمارش متن — UI مرتب و کامل‌تر."""
+    import re as _re
+    if text is None:
+        text = ""
     chars = len(text)
-    chars_no_space = len(text.replace(" ", "").replace("\n", ""))
-    words = len(text.split())
-    lines = text.count("\n") + 1
-    return (
-        f"📝 شمارش متن\n\n"
-        f"کاراکتر (با فاصله): {pn(chars)}\n"
-        f"کاراکتر (بدون فاصله): {pn(chars_no_space)}\n"
-        f"کلمه: {pn(words)}\n"
-        f"خط: {pn(lines)}"
-    )
+    chars_no_space = len(text.replace(" ", "").replace(chr(10), "").replace(chr(9), ""))
+    words = len([w for w in text.split() if w.strip()])
+    lines_n = text.count(chr(10)) + (1 if text else 0)
+    raw_paras = text.strip().split(chr(10)+chr(10)) if text.strip() else []
+    paras = len([p for p in raw_paras if p.strip()])
+    fa = len(_re.findall("[\u0600-\u06ff]", text))
+    en = len(_re.findall("[A-Za-z]", text))
+    digits = len(_re.findall("[0-9]", text))
+    lang = "فارسی" if fa >= en else ("انگلیسی" if en > 0 else "—")
+    return chr(10).join([
+        "📝  **شمارش متن**",
+        "・ ・ ・ ・ ・",
+        "",
+        f"🔤  کاراکتر (با فاصله): **{pn(chars)}**",
+        f"🔡  کاراکتر (بدون فاصله): **{pn(chars_no_space)}**",
+        f"📖  کلمه: **{pn(words)}**",
+        f"📄  خط: **{pn(lines_n)}**",
+        f"📦  پاراگراف: **{pn(paras)}**",
+        "",
+        f"🌍  زبان غالب: {lang}",
+        f"🔢  رقم: {pn(digits)}",
+        "",
+        "・ ・ ・ ・ ・",
+        "💡 متن دیگری بفرست تا دوباره بشمارم.",
+    ])
+
 
 # ===== end merged part =====
 
