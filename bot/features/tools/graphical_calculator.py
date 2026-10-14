@@ -67,13 +67,19 @@ def _kb() -> InlineKeyboardMarkup:
         [
             _BTN("π", callback_data="gcalc:pi"),
             _BTN("e", callback_data="gcalc:e"),
-            _BTN("کپی نتیجه", callback_data="gcalc:copy"),
+            _BTN("📋 تاریخچه", callback_data="gcalc:hist"),
+            _BTN("کپی", callback_data="gcalc:copy"),
         ],
     ]
     return InlineKeyboardMarkup(rows)
 
 
-def _display(expr: str, result: str | None = None, error: str | None = None) -> str:
+def _display(
+    expr: str,
+    result: str | None = None,
+    error: str | None = None,
+    history: list | None = None,
+) -> str:
     expr = expr or "0"
     lines = [
         "🔢 **ماشین‌حساب گرافیکی**",
@@ -86,9 +92,17 @@ def _display(expr: str, result: str | None = None, error: str | None = None) -> 
     elif result is not None:
         lines.append("")
         lines.append(f"📤 **= {result}**")
+    if history:
+        lines.append("")
+        lines.append("📋 **تاریخچه اخیر**")
+        for i, item in enumerate(reversed(list(history)[-5:]), 1):
+            e = item.get("expr", "?")
+            r = item.get("result", "?")
+            lines.append(f"{i}. `{e}` = **{r}**")
     lines.append("────────────────────")
     lines.append("از دکمه‌ها استفاده کنید.")
-    return "\n".join(lines)
+    return chr(10).join(lines)
+
 
 
 def _get_expr(context: ContextTypes.DEFAULT_TYPE) -> str:
@@ -97,6 +111,16 @@ def _get_expr(context: ContextTypes.DEFAULT_TYPE) -> str:
 
 def _set_expr(context: ContextTypes.DEFAULT_TYPE, expr: str) -> None:
     context.user_data["gcalc_expr"] = expr
+
+def _push_history(context: ContextTypes.DEFAULT_TYPE, expr: str, result: str) -> None:
+    hist = list(context.user_data.get("gcalc_history") or [])
+    hist.append({"expr": expr, "result": result})
+    context.user_data["gcalc_history"] = hist[-20:]  # حداکثر ۲۰ مورد
+
+
+def _get_history(context: ContextTypes.DEFAULT_TYPE) -> list:
+    return list(context.user_data.get("gcalc_history") or [])
+
 
 
 def _extract_result_number(text: str) -> str | None:
@@ -170,9 +194,9 @@ async def graphical_calc_callback(update: Update, context: ContextTypes.DEFAULT_
                         context.user_data["gcalc_last_result"] = _to_english_digits(
                             num.replace(",", "").replace("،", "").replace(" ", "")
                         )
+                        _push_history(context, expr, num)
                         # برای ادامه محاسبه، نتیجه را به‌عنوان عبارت نگه دار
                         eng = context.user_data["gcalc_last_result"]
-                        # ارقام فارسی را انگلیسی کن برای ادامه
                         expr = eng
         elif token == "pm":
             # تغییر علامت کل عبارت یا آخرین عدد
@@ -199,6 +223,13 @@ async def graphical_calc_callback(update: Update, context: ContextTypes.DEFAULT_
             expr += "e"
         elif token == "%":
             expr += "%"
+        elif token == "hist":
+            hist = _get_history(context)
+            if not hist:
+                error = "هنوز محاسبه‌ای در تاریخچه نیست."
+            else:
+                # فقط نمایش تاریخچه؛ عبارت فعلی حفظ می‌شود
+                result_show = None
         elif token == "copy":
             last = context.user_data.get("gcalc_last_result") or expr
             await query.answer(f"نتیجه: {last}", show_alert=True)
@@ -217,7 +248,7 @@ async def graphical_calc_callback(update: Update, context: ContextTypes.DEFAULT_
         expr = expr[:80]
 
     _set_expr(context, expr)
-    text = _display(expr or "0", result=result_show, error=error)
+    text = _display(expr or "0", result=result_show, error=error, history=_get_history(context)[-3:] if (token == "hist" or result_show or _get_history(context)) else None)
 
     try:
         await query.answer()
