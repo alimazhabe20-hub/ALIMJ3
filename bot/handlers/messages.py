@@ -1,3 +1,4 @@
+from bot.utils.fun_again import fun_again_keyboard
 from bot.features.tools.graphical_calculator import start_graphical_calculator
 """Stable public facade.
 
@@ -1133,12 +1134,20 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in _joke_map:
         track_usage(user_id, "joke")
         cat = _joke_map[text]
-        await update.message.reply_text(await joke_of_day(cat, user_id=update.effective_user.id), reply_markup=get_joke_keyboard())
+        await update.message.reply_text(
+            await joke_of_day(cat, user_id=update.effective_user.id),
+            reply_markup=fun_again_keyboard("joke"),
+        )
         return
     if text in ("🔙 بازگشت به سرگرمی",):
         await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard()); return
     if text in ("🧠 دانستنی روز", "دانستنی روز"):
-        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(user_id=user_id), reply_markup=get_fun_keyboard()); return
+        track_usage(user_id, "fact")
+        await update.message.reply_text(
+            await fact_of_day(user_id=user_id),
+            reply_markup=fun_again_keyboard("fact"),
+        )
+        return
     if text in ("💪 چالش امروز", "چالش امروز"):
         track_usage(user_id, "challenge")
         try:
@@ -1151,7 +1160,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         track_usage(user_id, "motivation")
         await update.message.reply_text(
             await get_motivation_async(user_id=user_id),
-            reply_markup=get_fun_keyboard(),
+            reply_markup=fun_again_keyboard("motivation"),
         )
         return
     # پروفایل

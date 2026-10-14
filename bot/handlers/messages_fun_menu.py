@@ -1,3 +1,4 @@
+from bot.utils.fun_again import fun_again_keyboard
 """Semantic message-routing handlers. Extracted from the legacy text handler without removing behavior."""
 from .messages_common import *  # noqa: F401,F403
 from . import messages_common as _common
@@ -35,7 +36,7 @@ async def handle_fun_menu(update, context, text, user_id, city=None, first_name=
     if text in ("🔙 بازگشت به سرگرمی",):
         await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard()); return
     if text in ("🧠 دانستنی روز", "دانستنی روز"):
-        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(user_id=user_id), reply_markup=get_fun_keyboard()); return
+        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(user_id=user_id), reply_markup=fun_again_keyboard("fact")); return
     if text in ("💪 چالش امروز", "چالش امروز"):
         track_usage(user_id, "challenge"); await update.message.reply_text(await daily_challenge(), reply_markup=get_fun_keyboard()); return
     if text in ("💖 جمله انگیزشی", "جمله انگیزشی"):

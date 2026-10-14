@@ -117,6 +117,39 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = update.effective_user.id
 
+    # ───────────────── یکی دیگه: انگیزشی / دانستنی / جوک ─────────────────
+    if data and data.startswith("fun:again:"):
+        kind = data.split(":", 2)[-1].strip().lower()
+        try:
+            from bot.utils.fun_again import fun_again_keyboard
+            if kind == "motivation":
+                from bot.utils.motivation import get_motivation_async
+                text = await get_motivation_async(user_id=user_id)
+                kb = fun_again_keyboard("motivation")
+            elif kind == "fact":
+                from bot.features.fun.features_fun_fun_tools import fact_of_day
+                text = await fact_of_day(user_id=user_id)
+                kb = fun_again_keyboard("fact")
+            elif kind == "joke":
+                from bot.features.fun.features_fun_fun_tools import joke_of_day
+                text = await joke_of_day(None, user_id=user_id)
+                kb = fun_again_keyboard("joke")
+            else:
+                await _safe_answer(query)
+                return
+            await _safe_answer(query)
+            try:
+                await query.edit_message_text(text, reply_markup=kb)
+            except Exception:
+                # اگر متن یکی باشد یا edit نشود، پیام جدید
+                if query.message:
+                    await query.message.reply_text(text, reply_markup=kb)
+        except Exception as _fun_exc:
+            logger.exception("fun:again failed: %s", _fun_exc)
+            await _safe_answer(query, text="⚠️ موقتاً ممکن نشد", show_alert=True)
+        return
+
+
     # ───────────────── تقویم اقتصادی بازار ─────────────────
     if data and data.startswith("ec:"):
         from bot.features.market.economic_calendar import (
