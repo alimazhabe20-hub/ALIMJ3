@@ -1,3 +1,4 @@
+from bot.utils.menu_buttons import is_reply_menu_button
 from bot.utils.status_ui import send_loading, finish_or_reply, fail_notice, safe_delete, loading_text, error_text
 """Stable public facade.
 
@@ -13,6 +14,9 @@ from bot.utils.helpers import get_market_keyboard
 from bot.features.market.finance import profit_loss, parse_profit, analyze_crypto, get_crypto_chart, get_crypto_analysis_keyboard, register_price_alert, calc_position_size
 
 async def _h_profit(u, c, t, uid):
+    if is_reply_menu_button(t):
+        c.user_data.pop("waiting_for", None)
+        return
     c.user_data.pop("waiting_for", None)
     p = parse_profit(t)
     if not p:
@@ -35,6 +39,9 @@ async def _h_profit(u, c, t, uid):
     await u.message.reply_text(profit_loss(*p), reply_markup=get_market_keyboard())
 
 async def _h_currency(u, c, t, uid):
+    if is_reply_menu_button(t):
+        c.user_data.pop("waiting_for", None)
+        return
     c.user_data.pop("waiting_for", None)
     from bot.features.market.finance import parse_currency_input, SYMBOL_TO_ID, convert_currency as smart_convert
     parsed = parse_currency_input(t)

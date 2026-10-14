@@ -1,4 +1,4 @@
-"""Semantic message-routing handlers — waiting_for با تشخیص قوی دکمه منو."""
+"""Waiting dispatch — دکمه منو هرگز به‌عنوان ورودی waiting پردازش نمی‌شود."""
 from .messages_common import *  # noqa: F401,F403
 from . import messages_common as _common
 globals().update({k: v for k, v in _common.__dict__.items() if not k.startswith("__")})
@@ -7,12 +7,12 @@ from bot.utils.menu_buttons import is_reply_menu_button
 
 
 def _is_back(text):
-    t = text.strip()
-    return t in ("🔙 بازگشت", "بازگشت") or "بازگشت" in t
+    t = (text or "").strip()
+    return t in ("🔙 بازگشت", "بازگشت") or ("بازگشت" in t and len(t) < 40)
 
 
 def _is_back_more(text):
-    return "بازگشت به بیشتر" in text
+    return "بازگشت به بیشتر" in (text or "")
 
 
 async def handle_waiting_dispatch(update, context, text, user_id, city=None, first_name=None, *_args, **_kwargs):
@@ -25,7 +25,7 @@ async def handle_waiting_dispatch(update, context, text, user_id, city=None, fir
         await update.message.reply_text("➕ منوی بیشتر:", reply_markup=get_more_keyboard())
         return True
 
-    # دکمه منو → waiting را رها کن تا handler منو اجرا شود
+    # هر دکمه منو → waiting لغو و اجازه اجرای handler منو
     if is_reply_menu_button(text):
         context.user_data.pop("waiting_for", None)
         return False
