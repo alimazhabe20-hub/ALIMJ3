@@ -307,6 +307,28 @@ def is_live_product_request(text: str, user_id: int | None = None) -> bool:
             if len(s.split()) <= 8:
                 return True
 
+    # مقایسه صریح دو کالا
+    if re.search(r"مقایسه\s+.+\s+(?:با|و|vs)", s, re.I) and _PRODUCT_STRONG_RE.search(s):
+        return True
+
+    # بودجه + برند/کالا (حتی بدون فعل خرید)
+    has_budget = bool(
+        re.search(
+            r"(?:تا|زیر|بودجه|حداکثر)\s*[0-9۰-۹]+\s*(?:میلیون|م|تومان|تومن)?|"
+            r"[0-9۰-۹]+\s*میلیون",
+            s,
+            re.I,
+        )
+    )
+    has_link = bool(re.search(r"https?://\S+", s, re.I))
+    if has_link and (
+        re.search(r"digikala|torob|technolife|amazon|دیجی\s*کالا|ترب", s, re.I)
+        or _PRODUCT_STRONG_RE.search(s)
+    ):
+        return True
+    if has_budget and _PRODUCT_STRONG_RE.search(s):
+        return True
+
     score, _info = _score_product_request(s)
     return score >= 45.0
 
@@ -358,18 +380,26 @@ async def run_live_product_search(update, user_id: int, text: str) -> bool:
         )
         return True
 
+    # تشخیص مقایسه دو کالا
+    is_compare = bool(
+        re.search(r"مقایسه|\bvs\b|versus|در\s*برابر|فرق\s+(?:بین|با)|تفاوت", text, re.I)
+    )
+
     notice = await update.message.reply_text(
-        "🔎 در حال استعلام زنده قیمت و فروشنده‌ها..."
+        "⚖️ در حال مقایسه قیمت دو کالا..." if is_compare else "🔎 در حال استعلام زنده قیمت و فروشنده‌ها..."
     )
     try:
-        from bot.features.market.shopping import search_shopping
+        from bot.features.market.shopping import search_shopping, compare_products, _split_compare_query
 
-        result = await search_shopping(
-            query,
-            source="all",
-            max_results=8,
-            user_id=user_id,
-        )
+        if is_compare and _split_compare_query(text):
+            result = await compare_products(text, user_id=user_id)
+        else:
+            result = await search_shopping(
+                query,
+                source="all",
+                max_results=8,
+                user_id=user_id,
+            )
         remember_shop_query(user_id, query)
         await update.message.reply_text(result)
     except Exception:
