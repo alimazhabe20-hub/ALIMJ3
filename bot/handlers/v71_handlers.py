@@ -36,7 +36,12 @@ async def _start_probe(update, context, url: str):
         return
     from bot.services.v72_platform import ux_text
     lang = _dl_lang(update)
-    notice = await update.message.reply_text(ux_text(lang, "checking"))
+    try:
+        from bot.utils.status_ui import loading_text as _lt
+        _chk = _lt("download_check") if lang in ("fa", None, "") else ux_text(lang, "checking")
+    except Exception:
+        _chk = ux_text(lang, "checking")
+    notice = await update.message.reply_text(_chk)
     try:
         info = await probe(url)
         token = secrets.token_urlsafe(9)
@@ -112,7 +117,12 @@ async def _download_social_direct(update: Update, context: ContextTypes.DEFAULT_
     from bot.services.insta_downloader import download as insta_download, is_video_path, cleanup_path
     from bot.services.downloader import MAX_BYTES, user_message
 
-    notice = await update.message.reply_text("⏳ در حال دانلود...")
+    try:
+        from bot.utils.status_ui import loading_text as _lt
+        _dl_msg = _lt("download_file")
+    except Exception:
+        _dl_msg = "⏳ در حال دانلود فایل…"
+    notice = await update.message.reply_text(_dl_msg)
     path = None
     try:
         path = await insta_download(url)

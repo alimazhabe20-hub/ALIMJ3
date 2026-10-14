@@ -1,3 +1,4 @@
+from bot.utils.status_ui import send_loading, finish_or_reply, fail_notice, safe_delete, loading_text, error_text
 """Stable public facade.
 
 IMPORTANT: Keep this file small and stable. New functionality belongs in the
@@ -49,11 +50,12 @@ async def _h_currency(u, c, t, uid):
         )
         return
     amount, a, b = parsed
+    notice = await send_loading(u.message, "currency")
     try:
         result = await smart_convert(amount, a or "usd", b or "")
-        await u.message.reply_text(result, reply_markup=get_market_keyboard())
+        await finish_or_reply(notice, u.message, result, reply_markup=get_market_keyboard())
     except Exception as e:
-        await u.message.reply_text(f"⚠️ خطا در تبدیل: {e}", reply_markup=get_market_keyboard())
+        await fail_notice(notice, u.message, "currency", detail=str(e), reply_markup=get_market_keyboard())
 
 async def _h_crypto_full(u, c, t, uid):
     """تحلیل کامل کریپتو با ارسال امن نمودار و متن کامل در چند پیام."""
@@ -82,7 +84,7 @@ async def _h_crypto_full(u, c, t, uid):
 
     symbol = symbol.lower().replace("usdt", "").strip()
     c.user_data["crypto_symbol"] = symbol
-    wait = await u.message.reply_text(f"⏳ در حال دریافت تحلیل {symbol.upper()}...")
+    wait = await send_loading(u.message, "crypto_analyze", symbol=symbol.upper())
     chart_task = _aio.create_task(get_crypto_chart(symbol, days))
     try:
         report = await analyze_crypto(symbol, ai_summary="", ai_guide="")
@@ -185,12 +187,15 @@ async def _h_economic_calendar(u, c, t, uid):
     """تقویم اقتصادی زنده + تحلیل هوشمند فارسی."""
     c.user_data.pop("waiting_for", None)
     from bot.features.market.economic_calendar import get_calendar_for_user, calendar_text, get_calendar_keyboard
+    notice = await send_loading(u.message, "economic")
     try:
         events, tz_name = await get_calendar_for_user(uid, "today", "all")
         text = calendar_text(events, title="تقویم اقتصادی امروز", tz_name=tz_name)
-        await u.message.reply_text(text, parse_mode="HTML", reply_markup=get_calendar_keyboard(uid, events=events))
+        ok = await finish_or_reply(notice, u.message, text, parse_mode="HTML", reply_markup=get_calendar_keyboard(uid, events=events))
+        if not ok:
+            pass
     except Exception as e:
-        await u.message.reply_text(f"⚠️ تقویم اقتصادی فعلاً در دسترس نیست.\n{e}", reply_markup=get_market_keyboard())
+        await fail_notice(notice, u.message, "economic", detail=str(e), reply_markup=get_market_keyboard())
 
 
 async def _h_ict(u, c, t, uid):

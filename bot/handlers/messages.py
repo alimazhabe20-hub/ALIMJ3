@@ -1,4 +1,4 @@
-from bot.utils.fun_again import fun_again_keyboard
+from bot.utils.status_ui import send_loading, finish_or_reply, fail_notice, safe_delete, loading_text, error_text
 from bot.features.fonts.font_ux import start_font_studio
 from bot.features.tools.graphical_calculator import start_graphical_calculator
 """Stable public facade.
@@ -691,7 +691,17 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     if text == "📅 تاریخ و سن":
-        await update.message.reply_text("📅 تاریخ و سن:", reply_markup=get_date_tools_keyboard()); return
+        await update.message.reply_text(
+            chr(10).join([
+                "📅  **تاریخ و سن**",
+                "・ ・ ・ ・ ・",
+                "تبدیل تاریخ، سن، مناسبت و شمارش‌معکوس.",
+                "یک گزینه را از منو انتخاب کن.",
+            ]),
+            reply_markup=get_date_tools_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
     if text == "🕌 مذهبی":
         await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard()); return
     if text == "💰 بازار":
@@ -783,55 +793,199 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("➕ منوی بیشتر:", reply_markup=get_more_keyboard()); return
     # تاریخ و سن
     if text in ("🔄 مبدل تاریخ", "مبدل تاریخ"):
-        context.user_data["waiting_for"] = "date_convert"; track_usage(user_id, "date_convert")
-        await update.message.reply_text("🔄 تاریخ:\n`1403/05/18` یا `2024/08/09`", reply_markup=get_date_tools_keyboard()); return
+        context.user_data["waiting_for"] = "date_convert"
+        track_usage(user_id, "date_convert")
+        await update.message.reply_text(
+            chr(10).join([
+                "🔄  **مبدل تاریخ**",
+                "・ ・ ・ ・ ・",
+                "یک تاریخ شمسی یا میلادی بفرست.",
+                "",
+                "مثال:",
+                "• `1403/05/18`",
+                "• `2024/08/09`",
+                "• `1403-5-18`",
+                "",
+                "・ ・ ・ ・ ・",
+                "💡 چند تاریخ پشت‌سرهم هم می‌توانی بفرستی.",
+            ]),
+            reply_markup=get_date_tools_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
     if text in ("🎂 محاسبه سن", "🎂 محاسبه سن دقیق", "محاسبه سن"):
-        context.user_data["waiting_for"] = "age_calc"; track_usage(user_id, "age_calc")
-        await update.message.reply_text("🎂 تولد شمسی:\n`1375/03/15`", reply_markup=get_date_tools_keyboard()); return
+        context.user_data["waiting_for"] = "age_calc"
+        track_usage(user_id, "age_calc")
+        await update.message.reply_text(
+            chr(10).join([
+                "🎂  **محاسبه سن**",
+                "・ ・ ・ ・ ・",
+                "تاریخ تولد شمسی را بفرست.",
+                "",
+                "مثال: `1375/03/15`",
+                "با ساعت: `1375/03/15 14:30`",
+                "",
+                "・ ・ ・ ・ ・",
+                "💡 خروجی: سال، ماه، روز و جزئیات.",
+            ]),
+            reply_markup=get_date_tools_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
     if text in ("🎉 روزشمار تولد", "روزشمار تولد"):
-        context.user_data["waiting_for"] = "birthday"; track_usage(user_id, "birthday")
+        context.user_data["waiting_for"] = "birthday"
+        track_usage(user_id, "birthday")
         bd = get_birth_date(user_id)
         if bd and len(bd.split("/")) == 3:
-            p = bd.split("/"); context.user_data.pop("waiting_for", None)
-            await update.message.reply_text(birthday_countdown(int(p[0]), int(p[1]), int(p[2])), reply_markup=get_date_tools_keyboard()); return
-        await update.message.reply_text("🎉 تولد شمسی:\n`1375/03/15`", reply_markup=get_date_tools_keyboard()); return
+            p = bd.split("/")
+            context.user_data.pop("waiting_for", None)
+            await update.message.reply_text(
+                birthday_countdown(int(p[0]), int(p[1]), int(p[2])),
+                reply_markup=get_date_tools_keyboard(),
+            )
+            return
+        await update.message.reply_text(
+            chr(10).join([
+                "🎉  **روزشمار تولد**",
+                "・ ・ ・ ・ ・",
+                "تاریخ تولد شمسی را بفرست تا بگوید چند روز تا تولد مانده.",
+                "",
+                "مثال: `1375/03/15`",
+                "",
+                "・ ・ ・ ・ ・",
+                "💡 بعد از اولین بار، در پروفایل هم ذخیره می‌شود.",
+            ]),
+            reply_markup=get_date_tools_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
     if text in ("♈ برج و حیوان", "برج و حیوان"):
-        context.user_data["waiting_for"] = "zodiac"; track_usage(user_id, "zodiac")
-        await update.message.reply_text("♈ تولد شمسی:\n`1375/03/15`", reply_markup=get_date_tools_keyboard()); return
+        context.user_data["waiting_for"] = "zodiac"
+        track_usage(user_id, "zodiac")
+        await update.message.reply_text(
+            chr(10).join([
+                "♈  **برج و حیوان سال**",
+                "・ ・ ・ ・ ・",
+                "تاریخ تولد شمسی را بفرست.",
+                "",
+                "مثال: `1375/03/15`",
+            ]),
+            reply_markup=get_date_tools_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
     if text in ("🌙 سن قمری", "سن قمری"):
-        context.user_data["waiting_for"] = "lunar"; track_usage(user_id, "lunar")
-        await update.message.reply_text("🌙 تولد شمسی:\n`1375/03/15`", reply_markup=get_date_tools_keyboard()); return
+        context.user_data["waiting_for"] = "lunar"
+        track_usage(user_id, "lunar")
+        await update.message.reply_text(
+            chr(10).join([
+                "🌙  **سن قمری**",
+                "・ ・ ・ ・ ・",
+                "تاریخ تولد شمسی را بفرست.",
+                "",
+                "مثال: `1375/03/15`",
+            ]),
+            reply_markup=get_date_tools_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
     if text in ("📆 اختلاف تاریخ", "📆 اختلاف دو تاریخ", "اختلاف تاریخ"):
-        context.user_data["waiting_for"] = "date_diff"; track_usage(user_id, "date_diff")
+        context.user_data["waiting_for"] = "date_diff"
+        track_usage(user_id, "date_diff")
         await update.message.reply_text(
-            "📆 دو تاریخ شمسی بفرست:\n"
-            "`1375/03/15 1403/05/18`\n\n"
-            "خروجی: سال/ماه/روز • هفته • ساعت • روز کاری • میلادی و قمری",
+            chr(10).join([
+                "📆  **اختلاف دو تاریخ**",
+                "・ ・ ・ ・ ・",
+                "دو تاریخ شمسی را در یک پیام بفرست.",
+                "",
+                "مثال:",
+                "`1375/03/15 1403/05/18`",
+                "",
+                "・ ・ ・ ・ ・",
+                "💡 خروجی: سال/ماه/روز • هفته • ساعت • روز کاری",
+            ]),
             reply_markup=get_date_tools_keyboard(),
-        ); return
+            parse_mode="Markdown",
+        )
+        return
     if text in ("👥 اختلاف سن", "اختلاف سن"):
-        context.user_data["waiting_for"] = "age_diff"; track_usage(user_id, "age_diff")
+        context.user_data["waiting_for"] = "age_diff"
+        track_usage(user_id, "age_diff")
         await update.message.reply_text(
-            "👥 دو تاریخ تولد شمسی بفرست:\n"
-            "`1375/03/15 1380/06/20`\n\n"
-            "خروجی: سن هر نفر • اختلاف دقیق • سن قمری • نسبت سنی",
+            chr(10).join([
+                "👥  **اختلاف سن**",
+                "・ ・ ・ ・ ・",
+                "دو تاریخ تولد شمسی را در یک پیام بفرست.",
+                "مثال: `1375/03/15 1380/06/20`",
+            ]),
             reply_markup=get_date_tools_keyboard(),
-        ); return
+            parse_mode="Markdown",
+        )
+        return
     if text in ("📅 تقویم ماه", "تقویم ماه"):
         track_usage(user_id, "month_cal")
         await update.message.reply_text(month_calendar(), reply_markup=get_date_tools_keyboard()); return
     if text in ("🔍 مناسبت‌یاب", "مناسبت‌یاب"):
-        context.user_data["waiting_for"] = "event_search"; track_usage(user_id, "event_search")
-        await update.message.reply_text("🔍 کلمه کلیدی:\n`نوروز`", reply_markup=get_date_tools_keyboard()); return
+        context.user_data["waiting_for"] = "event_search"
+        track_usage(user_id, "event_search")
+        await update.message.reply_text(
+            chr(10).join([
+                "🔍  **مناسبت‌یاب**",
+                "・ ・ ・ ・ ・",
+                "کلمه کلیدی مناسبت را بفرست.",
+                "",
+                "مثال: `نوروز` · `یلدا` · `غدیر`",
+                "",
+                "・ ・ ・ ・ ・",
+                "💡 چند حرف هم کافی است.",
+            ]),
+            reply_markup=get_date_tools_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
     if text in ("🌸 شمارش نوروز", "شمارش نوروز"):
         track_usage(user_id, "nowruz")
-        await update.message.reply_text(nowruz_countdown(), reply_markup=get_date_tools_keyboard()); return
+        body = nowruz_countdown()
+        await update.message.reply_text(
+            chr(10).join([
+                "🌸  **شمارش نوروز**",
+                "・ ・ ・ ・ ・",
+                "",
+                body,
+            ]),
+            reply_markup=get_date_tools_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
     if text in ("🌍 ساعت جهانی", "ساعت جهانی"):
         track_usage(user_id, "world_clock")
-        await update.message.reply_text(world_clock(), reply_markup=get_date_tools_keyboard()); return
+        body = world_clock()
+        await update.message.reply_text(
+            chr(10).join([
+                "🌍  **ساعت جهانی**",
+                "・ ・ ・ ・ ・",
+                "",
+                body,
+            ]),
+            reply_markup=get_date_tools_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
     if text in ("⏳ شمارش‌معکوس", "شمارش‌معکوس"):
-        context.user_data["waiting_for"] = "countdown"; track_usage(user_id, "countdown")
-        await update.message.reply_text("⏳ تاریخ:\n`1405/01/01 نوروز`", reply_markup=get_date_tools_keyboard()); return
+        context.user_data["waiting_for"] = "countdown"
+        track_usage(user_id, "countdown")
+        await update.message.reply_text(
+            chr(10).join([
+                "⏳  **شمارش‌معکوس**",
+                "・ ・ ・ ・ ・",
+                "تاریخ هدف را بفرست (اختیاری با عنوان).",
+                "",
+                "مثال: `1405/01/01 نوروز`",
+            ]),
+            reply_markup=get_date_tools_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
     # مذهبی
     if text in ("🕋 قبله‌نما", "قبله‌نما"):
         track_usage(user_id, "qibla")
@@ -844,13 +998,10 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(await daily_verse_hadith(user_id), reply_markup=get_religious_keyboard()); return
     if text in ("🕌 مناسبت مذهبی", "مناسبت مذهبی"):
         track_usage(user_id, "rel_cd")
-        body = religious_countdown() + chr(10) + chr(10) + religious_month_view()
-        await update.message.reply_text(
-            body,
-            reply_markup=get_religious_keyboard(),
-            parse_mode="Markdown",
-        )
-        return
+        # معماری مشابه تقویم: نمای کلی + مناسبت‌های نزدیک + نمای ماه جاری قمری
+        body = religious_countdown()
+        body += "\n\n" + "—" * 12 + "\n" + religious_month_view()
+        await update.message.reply_text(body, reply_markup=get_religious_keyboard()); return
     if text in ("🙏 استخاره", "استخاره"):
         track_usage(user_id, "istikhara")
         context.user_data["waiting_for"] = "istikhara_confirm"
@@ -892,7 +1043,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("🥇 تحلیل طلا", "تحلیل طلا"):
         try:
             track_usage(user_id, "gold_analysis")
-            notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…")
+            notice = await send_loading(update.message, "gold")
             report = await analyze_gold("1h")
             chart_note = ""
             try:
@@ -953,7 +1104,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         # فقط وقتی پیام واقعاً درباره طلاست؛ اعداد/متن‌های نامرتبطی که کلمه gold را داخل جمله دارند هم به تحلیل طلا می‌روند.
         try:
             track_usage(user_id, "gold_analysis")
-            notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…")
+            notice = await send_loading(update.message, "gold")
             report = await analyze_gold("1h")
             chart_note = ""
             try:
@@ -1033,16 +1184,24 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     if text in ("💵 قیمت کامل بازار", "قیمت کامل بازار"):
         track_usage(user_id, "market")
-        m = await update.message.reply_text("⏳ دریافت قیمت‌ها...")
-        r = await full_market_prices()
-        await m.edit_text(r)
-        await update.message.reply_text("💰", reply_markup=get_market_keyboard()); return
+        notice = await send_loading(update.message, "market")
+        try:
+            r = await full_market_prices()
+            await finish_or_reply(notice, update.message, r)
+        except Exception as _e:
+            await fail_notice(notice, update.message, "market", detail=str(_e), reply_markup=get_market_keyboard())
+            return
+        await update.message.reply_text("💰 بازار", reply_markup=get_market_keyboard()); return
     if text in ("💎 ۲۰ ارز برتر کریپتو", "۲۰ ارز برتر کریپتو", "💎 ۳۰۰ ارز برتر کریپتو", "۳۰۰ ارز برتر کریپتو", "کریپتو"):
         track_usage(user_id, "crypto_top")
-        m = await update.message.reply_text("⏳ دریافت لیست کریپتو...")
-        r = await get_top_crypto(20)
-        await m.edit_text(r)
-        await update.message.reply_text("💎", reply_markup=get_market_keyboard()); return
+        notice = await send_loading(update.message, "crypto_top")
+        try:
+            r = await get_top_crypto(20)
+            await finish_or_reply(notice, update.message, r)
+        except Exception as _e:
+            await fail_notice(notice, update.message, "crypto_top", detail=str(_e), reply_markup=get_market_keyboard())
+            return
+        await update.message.reply_text("💎 کریپتو", reply_markup=get_market_keyboard()); return
     if text in ("🔄 تبدیل ارز", "تبدیل ارز", "🔄 تبدیل ارز / کریپتو", "تبدیل ارز / کریپتو"):
         context.user_data["waiting_for"] = "currency"; track_usage(user_id, "currency")
         await update.message.reply_text(
@@ -1164,19 +1323,8 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             parse_mode="HTML",
         ); return
     if text in ("📝 شمارش متن", "شمارش متن"):
-        context.user_data["waiting_for"] = "count_text"
-        track_usage(user_id, "count")
-        await update.message.reply_text(
-            chr(10).join([
-                "📝  **شمارش متن**",
-                "・ ・ ・ ・ ・",
-                "متن یا پاراگراف را بفرست",
-                "تا کاراکتر، کلمه و خط را بشمارم.",
-            ]),
-            reply_markup=get_tools_keyboard(),
-            parse_mode="Markdown",
-        )
-        return
+        context.user_data["waiting_for"] = "count_text"; track_usage(user_id, "count")
+        await update.message.reply_text("📝 متن را بفرستید:", reply_markup=get_tools_keyboard()); return
     # سرگرمی
     if text in ("📖 فال حافظ", "فال حافظ"):
         track_usage(user_id, "hafez"); await update.message.reply_text(await hafez_fal(user_id), reply_markup=get_fun_keyboard()); return
@@ -1208,13 +1356,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("🔙 بازگشت به سرگرمی",):
         await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard()); return
     if text in ("🧠 دانستنی روز", "دانستنی روز"):
-        track_usage(user_id, "fact")
-        await update.message.reply_text(
-            await fact_of_day(user_id=user_id),
-            reply_markup=fun_again_keyboard("fact"),
-            parse_mode="Markdown",
-        )
-        return
+        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(user_id=user_id), reply_markup=get_fun_keyboard()); return
     if text in ("💪 چالش امروز", "چالش امروز"):
         track_usage(user_id, "challenge")
         try:
@@ -1227,8 +1369,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         track_usage(user_id, "motivation")
         await update.message.reply_text(
             await get_motivation_async(user_id=user_id),
-            reply_markup=fun_again_keyboard("motivation"),
-            parse_mode="Markdown",
+            reply_markup=get_fun_keyboard(),
         )
         return
     # پروفایل
