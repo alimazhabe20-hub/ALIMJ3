@@ -16,63 +16,235 @@ def pn(n):
 
 # ===== end merged part =====
 
+
 _CALC_BINOPS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
     ast.Mult: operator.mul,
     ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
     ast.Mod: operator.mod,
     ast.Pow: operator.pow,
 }
 _CALC_UNARY = {ast.UAdd: operator.pos, ast.USub: operator.neg}
 
-# ===== merged from bot/features/tools/app_tools_parts/part_002__safe_calc.py =====
-import ast
 
-# Auto-split part 2: _safe_calc
+def _calc_fact(n):
+    n = int(n)
+    if n < 0 or n > 170:
+        raise ValueError("fact range 0..170")
+    return math.factorial(n)
+
+
+_CALC_FUNCS = {
+    "sqrt": lambda x: math.sqrt(x),
+    "cbrt": lambda x: x ** (1 / 3) if x >= 0 else -((-x) ** (1 / 3)),
+    "sin": lambda x: math.sin(math.radians(x)),  # درجه
+    "cos": lambda x: math.cos(math.radians(x)),
+    "tan": lambda x: math.tan(math.radians(x)),
+    "asin": lambda x: math.degrees(math.asin(x)),
+    "acos": lambda x: math.degrees(math.acos(x)),
+    "atan": lambda x: math.degrees(math.atan(x)),
+    "sind": lambda x: math.sin(math.radians(x)),
+    "cosd": lambda x: math.cos(math.radians(x)),
+    "tand": lambda x: math.tan(math.radians(x)),
+    "sinr": math.sin,  # رادیان
+    "cosr": math.cos,
+    "tanr": math.tan,
+    "log": math.log10,
+    "log10": math.log10,
+    "ln": math.log,
+    "log2": math.log2,
+    "exp": math.exp,
+    "abs": abs,
+    "fabs": math.fabs,
+    "floor": math.floor,
+    "ceil": math.ceil,
+    "round": lambda x, n=0: round(x, int(n)),
+    "trunc": math.trunc,
+    "fact": _calc_fact,
+    "factorial": _calc_fact,
+    "pow": lambda a, b: a ** b,
+    "min": min,
+    "max": max,
+    "hypot": math.hypot,
+    "degrees": math.degrees,
+    "radians": math.radians,
+    "pct": lambda a, b: (a / 100.0) * b,  # pct(20, 500) = 20% از 500
+    "percent": lambda a, b: (a / 100.0) * b,
+}
+
+_CALC_CONSTS = {
+    "pi": math.pi,
+    "π": math.pi,
+    "e": math.e,
+    "phi": (1 + math.sqrt(5)) / 2,
+    "tau": math.tau,
+}
+
+
 def _safe_calc(node: ast.AST, depth: int = 0):
-    if depth > 32:
+    if depth > 40:
         raise ValueError("expression too deep")
     if isinstance(node, ast.Expression):
         return _safe_calc(node.body, depth + 1)
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
-        if abs(node.value) > 10**100:
+        if abs(node.value) > 10 ** 100:
             raise ValueError("number too large")
-        return node.value
+        return float(node.value) if isinstance(node.value, float) else node.value
+    # Python 3.8 compat Num
+    if hasattr(ast, "Num") and isinstance(node, ast.Num):  # pragma: no cover
+        if abs(node.n) > 10 ** 100:
+            raise ValueError("number too large")
+        return node.n
     if isinstance(node, ast.UnaryOp) and type(node.op) in _CALC_UNARY:
         return _CALC_UNARY[type(node.op)](_safe_calc(node.operand, depth + 1))
     if isinstance(node, ast.BinOp) and type(node.op) in _CALC_BINOPS:
         left = _safe_calc(node.left, depth + 1)
         right = _safe_calc(node.right, depth + 1)
         if isinstance(node.op, ast.Pow):
-            if abs(right) > 1000 or abs(left) > 10**6:
+            if abs(float(right)) > 1000 or (abs(float(left)) > 1e6 and abs(float(right)) > 10):
                 raise ValueError("power too large")
+        if isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)) and float(right) == 0:
+            raise ZeroDivisionError("division by zero")
         result = _CALC_BINOPS[type(node.op)](left, right)
-        if isinstance(result, complex) or not math.isfinite(float(result)) or abs(result) > 10**200:
+        if isinstance(result, complex):
+            raise ValueError("complex not supported")
+        if isinstance(result, (int, float)) and abs(result) > 10 ** 100:
             raise ValueError("result too large")
+        return result
+    if isinstance(node, ast.Name):
+        key = node.id.lower() if node.id.isascii() else node.id
+        if key in _CALC_CONSTS:
+            return _CALC_CONSTS[key]
+        if node.id in _CALC_CONSTS:
+            return _CALC_CONSTS[node.id]
+        raise ValueError(f"unknown name: {node.id}")
+    if isinstance(node, ast.Call):
+        if not isinstance(node.func, ast.Name):
+            raise ValueError("unsupported call")
+        fname = node.func.id.lower()
+        if fname not in _CALC_FUNCS:
+            raise ValueError(f"unknown function: {fname}")
+        if len(node.args) > 3 or node.keywords:
+            raise ValueError("bad arguments")
+        args = [_safe_calc(a, depth + 1) for a in node.args]
+        result = _CALC_FUNCS[fname](*args)
+        if isinstance(result, complex):
+            raise ValueError("complex not supported")
         return result
     raise ValueError("unsupported expression")
 
-# ===== end merged part =====
 
-# ===== merged from bot/features/tools/app_tools_parts/part_003_calculator.py =====
-# Auto-split part 3: calculator
+def _format_number(result) -> str:
+    if isinstance(result, bool):
+        return str(result)
+    if isinstance(result, int) or (isinstance(result, float) and result == int(result) and abs(result) < 1e15):
+        iv = int(result)
+        return pn(f"{iv:,}")
+    if isinstance(result, float):
+        if abs(result) >= 1e12 or (abs(result) < 1e-6 and result != 0):
+            s = f"{result:.8g}"
+        else:
+            s = f"{result:.10f}".rstrip("0").rstrip(".")
+        return pn(s)
+    return pn(str(result))
+
+
+def _preprocess_expr(expr: str) -> str:
+    """نرمال‌سازی ورودی فارسی و نمادهای رایج."""
+    t = expr.strip()
+    t = t.translate(str.maketrans(
+        "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩×÷٫",
+        "01234567890123456789*/.",
+    ))
+    # درصد تکی: 25% → (25/100)
+    t = re.sub(r"(\d+(?:\.\d+)?)\s*%", r"(\1/100)", t)
+    # توان: 2^3 → 2**3
+    t = t.replace("^", "**")
+    # رادیکال ساده: √9 یا sqrt
+    t = t.replace("√", "sqrt")
+    t = t.replace("π", "pi")
+    # فاصله‌ها
+    t = re.sub(r"\s+", "", t)
+    # ضرب ضمنی ساده: 2pi → 2*pi ، 2(3+1) → 2*(3+1)
+    t = re.sub(r"(\d)(pi|e|phi|tau|sqrt|sin|cos|tan|log|ln|abs|fact)\b", r"\1*\2", t, flags=re.I)
+    t = re.sub(r"(\d)\(", r"\1*(", t)
+    t = re.sub(r"\)(\d)", r")*\1", t)
+    t = re.sub(r"\)(\()", r")*(", t)
+    return t
+
+
 def calculator(expr: str) -> str:
-    t = expr.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩×÷", "01234567890123456789*/"))
-    t = re.sub(r"\s+", " ", t).strip()
-    if len(t) > 200 or not t or not re.fullmatch(r"[0-9+\-*/().%\s]+", t):
-        return "❌ عبارت نامعتبر. مثال: 2+3*4"
+    """ماشین‌حساب پیشرفته و امن با توابع ریاضی."""
+    if not expr or not str(expr).strip():
+        return chr(10).join([
+            '🔢 **ماشین\u200cحساب هوشمند**',
+            '',
+            'عبارت ریاضی را بفرستید.',
+            '',
+            '📌 عملگرها: +  -  *  /  **  ^  %  ()',
+            '📌 توابع: sqrt sin cos tan log ln abs floor ceil fact pct round',
+            '📌 ثابت\u200cها: pi  e  tau  phi',
+            '',
+            'مثال\u200cها:',
+            '• 2+3*4',
+            '• (10+5)/3',
+            '• 2^8',
+            '• sqrt(144)',
+            '• sin(30)     ← درجه',
+            '• log(1000) · ln(e)',
+            '• fact(6)',
+            '• pi*5^2     ← مساحت دایره r=5',
+            '• pct(20,500) ← ۲۰٪ از ۵۰۰',
+            '• ۲۵×۴',
+        ])
+
+    raw = str(expr).strip()
+    t = _preprocess_expr(raw)
+
+    if len(t) > 300:
+        return "❌ عبارت خیلی طولانی است."
+    if not re.fullmatch(r"[0-9+*/().%,a-zA-Z_\-]+", t):
+        return chr(10).join([
+            "❌ عبارت نامعتبر است.",
+            "",
+            "عملگرها: + - * / ** ^ % ()",
+            "توابع: sqrt sin cos tan log ln abs floor ceil fact pct",
+            "ثابت‌ها: pi e",
+            "مثال: sqrt(2)*pi",
+        ])
+
     try:
         tree = ast.parse(t, mode="eval")
         result = _safe_calc(tree)
-        return f"🔢 نتیجه: {pn(result)}"
-    except Exception:
-        return "❌ عبارت نامعتبر. مثال: 2+3*4"
+        out = _format_number(result)
+        lines = [
+            "🔢 **نتیجه**",
+            "────────────────────",
+            f"📥 ورودی: `{raw}`",
+            f"📤 خروجی: **{out}**",
+        ]
+        try:
+            fv = float(result)
+            if abs(fv) >= 1e9 or (0 < abs(fv) < 1e-4):
+                lines.append(f"🔬 علمی: {pn(f'{fv:.6e}')}")
+        except Exception:
+            pass
+        lines.append("────────────────────")
+        lines.append("💡 عبارت بعدی را بفرستید (یا از منو خارج شوید).")
+        return chr(10).join(lines)
+    except ZeroDivisionError:
+        return "❌ تقسیم بر صفر مجاز نیست."
+    except Exception as e:
+        logger.debug("calculator error: %s | expr=%s", e, raw)
+        return chr(10).join([
+            "❌ محاسبه ممکن نشد.",
+            "",
+            "مثال: 15*1.09 | (100-20)/4 | 2^10 | sqrt(81) | sin(90) | pct(15,200000)",
+        ])
 
-# ===== end merged part =====
 
-# ===== merged from bot/features/tools/app_tools_parts/part_004_generate_password.py =====
-# Auto-split part 4: generate_password
 def generate_password(length: int = 16) -> str:
     length = max(6, min(64, length))
     alphabet = string.ascii_letters + string.digits + "!@#$%&*"
