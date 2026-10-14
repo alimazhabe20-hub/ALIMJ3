@@ -18,6 +18,7 @@ from bot.handlers.commands import (
 )
 from bot.handlers.callbacks import button_handler
 from bot.features.tools.graphical_calculator import graphical_calc_callback
+from bot.features.fonts.font_ux import font_callback
 from bot.handlers.messages import text_handler, media_ai_handler, voice_ai_handler, lens_command
 from bot.scheduler import setup_scheduler
 from bot.handlers.platform_handlers import features_command, watchlist_command, alerts_command, memory_v65_command, platform_health_command
@@ -425,6 +426,7 @@ def main():
     app.add_handler(CallbackQueryHandler(_download_callback_router, pattern=r"^dl:"))
     # ماشین‌حساب گرافیکی — باید قبل از button_handler عمومی باشد
     app.add_handler(CallbackQueryHandler(graphical_calc_callback, pattern=r"^gcalc:"))
+    app.add_handler(CallbackQueryHandler(font_callback, pattern=r"^font:"))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(
         MessageHandler(filters.PHOTO | filters.VIDEO | filters.VIDEO_NOTE | filters.Document.ALL, media_ai_handler),
