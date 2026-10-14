@@ -176,7 +176,7 @@ def get_month_religious_events(hijri_year: Optional[int] = None, hijri_month: Op
 # Auto-split part 7: religious_countdown
 def religious_countdown(days: int = 30) -> str:
     """
-    نمایش اصلی منوی «مناسبت مذهبی» — ساختاریافته مثل تقویم:
+    نمایش اصلی منوی «مناسبت مذهبی» — UI مرتب:
     - امروز
     - نزدیک‌ترین مناسبت‌ها در بازه
     """
@@ -187,66 +187,96 @@ def religious_countdown(days: int = 30) -> str:
     except Exception:
         today_q = "نامشخص"
 
+    def _pn(n):
+        return str(n).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
+
     lines = [
-        "🕌 **مناسبت‌های مذهبی و قمری**",
-        f"امروز قمری: {today_q}",
-        f"امروز شمسی: {_to_shamsi_str(today)}",
+        "🕌  **مناسبت مذهبی**",
+        "・ ・ ・ ・ ・",
+        "",
+        f"📅  امروز قمری: **{today_q}**",
+        f"📆  امروز شمسی: `{_to_shamsi_str(today)}`",
         "",
     ]
 
     today_events = get_today_religious_events()
     if today_events:
-        lines.append("📌 **امروز:**")
+        lines.append("──────── امروز")
         for name, q_label, _ in today_events:
-            lines.append(f"• {name}")
+            lines.append(f"🟢  **{name}**")
+            if q_label:
+                lines.append(f"    🌙 {q_label}")
         lines.append("")
 
     upcoming = get_upcoming_religious_events(days=days, limit=20)
-    # فقط آینده (offset > 0) را در بخش جداگانه نشان بده
     future = [u for u in upcoming if u[0] > 0]
     if future:
-        lines.append(f"📅 **نزدیک‌ترین مناسبت‌ها (تا {days} روز):**")
-        for offset, name, q_label, shamsi in future:
-            lines.append(
-                f"• **{name}** — {offset} روز دیگر\n"
-                f"  قمری: {q_label} | شمسی: {shamsi}"
-            )
+        lines.append("──────── نزدیک‌ترین‌ها")
+        lines.append(f"تا {_pn(days)} روز آینده")
+        lines.append("")
+        for offset, name, q_label, shamsi in future[:12]:
+            if offset == 1:
+                when, badge = "فردا", "🟡"
+            else:
+                when, badge = f"{_pn(offset)} روز دیگر", "⚪"
+            lines.append(f"{badge}  **{name}**")
+            lines.append(f"    ⏱ {when}")
+            if q_label:
+                lines.append(f"    🌙 {q_label}")
+            if shamsi:
+                lines.append(f"    📆 {shamsi}")
+            lines.append("")
     elif not today_events:
         lines.append("مناسبت قمری ثبت‌شده‌ای در بازه فعلی یافت نشد.")
+        lines.append("")
 
-    return "\n".join(lines)
+    lines.append("・ ・ ・ ・ ・")
+    return chr(10).join(lines)
+
 
 # ===== end merged part =====
 
 # ===== merged from bot/features/religious/events_parts/features_religious_events_parts_part_008_religious_month_view.py =====
 # Auto-split part 8: religious_month_view
 def religious_month_view() -> str:
-    """نمای ماه جاری قمری — شبیه تقویم ماهانه."""
+    """نمای ماه جاری قمری — UI مرتب."""
     today = datetime.now(tehran_tz).date()
     try:
         h = Gregorian(today.year, today.month, today.day).to_hijri()
     except Exception:
         return "خطا در محاسبه تاریخ قمری."
 
+    def _pn(n):
+        return str(n).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
+
     month_name = HIJRI_MONTH_NAMES.get(h.month, str(h.month))
     events = get_month_religious_events(h.year, h.month)
     lines = [
-        f"🕌 **مناسبت‌های ماه {month_name} {h.year}**",
+        f"🕌  **ماه {month_name} {_pn(h.year)}**",
+        "・ ・ ・ ・ ・",
         "",
     ]
     if not events:
         lines.append("مناسبتی برای این ماه ثبت نشده است.")
-        return "\n".join(lines)
+        lines.append("")
+        lines.append("・ ・ ・ ・ ・")
+        return chr(10).join(lines)
 
-    by_day: dict[int, list[str]] = {}
+    by_day: dict = {}
     for day, name, _ in events:
         by_day.setdefault(day, []).append(name)
 
     for day in sorted(by_day.keys()):
-        mark = " ← امروز" if day == h.day else ""
-        names = "، ".join(by_day[day])
-        lines.append(f"• روز {day}: {names}{mark}")
+        joined = "، ".join(by_day[day])
+        if day == h.day:
+            lines.append(f"◀  **روز {_pn(day)} (امروز)** — {joined}")
+        else:
+            lines.append(f"•  روز {_pn(day)} — {joined}")
 
-    return "\n".join(lines)
+    lines.append("")
+    lines.append("・ ・ ・ ・ ・")
+    lines.append("✨ مناسبت‌ها بر اساس تقویم قمری است.")
+    return chr(10).join(lines)
+
 
 # ===== end merged part =====
