@@ -48,18 +48,71 @@ async def handle_basic_menu(update, context, text, user_id, city=None, first_nam
     if text == "🎮 سرگرمی":
         await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard()); return
     if text in ("🎨 فونت", "فونت"):
-        await update.message.reply_text("🎨 بخش فونت:", reply_markup=get_font_keyboard()); return
+        await update.message.reply_text(
+            chr(10).join([
+                "🎨  **استودیوی فونت**",
+                "・ ・ ・ ・ ・",
+                "",
+                "🇬🇧  فونت انگلیسی — استایل‌های یونیکد",
+                "🇮🇷  فونت فارسی — تزئینی و سازگار",
+                "🌈  همه فونت‌ها — یک متن روی همه استایل‌ها",
+                "📋  لیست فونت‌ها — پیش‌نمایش سریع",
+                "",
+                "・ ・ ・ ・ ・",
+                "یک گزینه را از منو انتخاب کن.",
+            ]),
+            reply_markup=get_font_keyboard(),
+            parse_mode="Markdown",
+        ); return
+
     if text in ("📋 لیست فونت‌ها", "📋 لیست همه فونت‌ها"):
-        await update.message.reply_text(list_fonts(), reply_markup=get_font_keyboard()); return
+        await update.message.reply_text(list_fonts(), reply_markup=get_font_keyboard(), parse_mode="Markdown"); return
     if text == "🇬🇧 فونت انگلیسی":
-        await update.message.reply_text("🇬🇧 یک فونت انگلیسی انتخاب کنید:", reply_markup=get_font_en_keyboard()); return
+        await update.message.reply_text(
+            chr(10).join([
+                "🇬🇧  **فونت انگلیسی**",
+                "・ ・ ・ ・ ・",
+                "یک استایل را انتخاب کن،",
+                "بعد متن انگلیسی‌ات را بفرست.",
+            ]),
+            reply_markup=get_font_en_keyboard(),
+            parse_mode="Markdown",
+        ); return
     if text == "🇮🇷 فونت فارسی":
-        await update.message.reply_text("🇮🇷 یک فونت فارسی/تزئینی انتخاب کنید:", reply_markup=get_font_fa_keyboard()); return
+        await update.message.reply_text(
+            chr(10).join([
+                "🇮🇷  **فونت فارسی / عربی**",
+                "・ ・ ・ ・ ・",
+                "یک استایل سازگار را انتخاب کن،",
+                "بعد متن فارسی‌ات را بفرست.",
+            ]),
+            reply_markup=get_font_fa_keyboard(),
+            parse_mode="Markdown",
+        ); return
     if text == "🌈 همه فونت‌ها":
         context.user_data["waiting_for"] = "font_all"
-        await update.message.reply_text("🌈 یک کلمه یا جمله بفرستید تا روی همه فونت‌ها اعمال شود:", reply_markup=get_font_keyboard()); return
+        await update.message.reply_text(
+            chr(10).join([
+                "🌈  **گالری همه فونت‌ها**",
+                "・ ・ ・ ・ ・",
+                "یک کلمه یا جمله کوتاه بفرست",
+                "تا روی همه استایل‌های مناسب اعمال شود.",
+                "",
+                "مثال: `سلام` یا `Hello`",
+            ]),
+            reply_markup=get_font_keyboard(),
+            parse_mode="Markdown",
+        ); return
     if text == "🔙 بازگشت فونت":
-        await update.message.reply_text("🎨 بخش فونت:", reply_markup=get_font_keyboard()); return
+        await update.message.reply_text(
+            chr(10).join([
+                "🎨  **استودیوی فونت**",
+                "・ ・ ・ ・ ・",
+                "یک گزینه را از منو انتخاب کن.",
+            ]),
+            reply_markup=get_font_keyboard(),
+            parse_mode="Markdown",
+        ); return
     # انتخاب فونت از نام نمایشی
     name_to_key = {v: k for k, v in FONT_NAMES.items()}
     name_to_key.update({v[:18]: k for k, v in FONT_NAMES.items()})
@@ -67,7 +120,17 @@ async def handle_basic_menu(update, context, text, user_id, city=None, first_nam
         key = name_to_key.get(text, text)
         context.user_data["selected_font"] = key
         context.user_data["waiting_for"] = "font_text"
-        await update.message.reply_text(f"🎨 فونت انتخاب شد.\nمتن را بفرستید:", reply_markup=get_font_keyboard()); return
+        name = FONT_NAMES.get(key, key)
+        await update.message.reply_text(
+            chr(10).join([
+                "🎨  **فونت آماده است**",
+                f"✨  `{name}`",
+                "・ ・ ・ ・ ・",
+                "حالا متنت را بفرست تا تبدیل شود.",
+            ]),
+            reply_markup=get_font_keyboard(),
+            parse_mode="Markdown",
+        ); return
     if text == "👤 پروفایل":
         await update.message.reply_text("👤 پروفایل:", reply_markup=get_profile_keyboard()); return
     if _is_back_more(text):

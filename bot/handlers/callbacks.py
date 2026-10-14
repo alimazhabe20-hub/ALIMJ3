@@ -117,6 +117,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = update.effective_user.id
 
+    # ───────────────── فونت UX ─────────────────
+    if data and data.startswith("font:"):
+        from bot.features.fonts.font_ux import font_callback
+        await font_callback(update, context)
+        return
+
+
     # ───────────────── یکی دیگه: انگیزشی / دانستنی / جوک ─────────────────
     if data and data.startswith("fun:again:"):
         kind = data.split(":", 2)[-1].strip().lower()

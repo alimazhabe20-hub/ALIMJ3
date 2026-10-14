@@ -1,4 +1,4 @@
-from bot.utils.fun_again import fun_again_keyboard
+from bot.features.fonts.font_ux import start_font_studio
 from bot.features.tools.graphical_calculator import start_graphical_calculator
 """Stable public facade.
 
@@ -702,18 +702,62 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text == "🎮 سرگرمی":
         await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard()); return
     if text in ("🎨 فونت", "فونت"):
-        await update.message.reply_text("🎨 بخش فونت:", reply_markup=get_font_keyboard()); return
+        track_usage(user_id, "font")
+        await start_font_studio(update, context)
+        return
+
     if text in ("📋 لیست فونت‌ها", "📋 لیست همه فونت‌ها"):
-        await update.message.reply_text(list_fonts(), reply_markup=get_font_keyboard()); return
+        await update.message.reply_text(list_fonts(), reply_markup=get_font_keyboard(), parse_mode="Markdown"); return
     if text == "🇬🇧 فونت انگلیسی":
-        await update.message.reply_text("🇬🇧 یک فونت انگلیسی انتخاب کنید:", reply_markup=get_font_en_keyboard()); return
+        from bot.features.fonts.font_ux import font_en_inline
+        await update.message.reply_text(
+            chr(10).join([
+                "🇬🇧  فونت انگلیسی",
+                "・ ・ ・ ・ ・",
+                "از دکمه‌های شیشه‌ای یک استایل را لمس کن.",
+            ]),
+            reply_markup=font_en_inline(),
+            parse_mode="HTML",
+        )
+        await update.message.reply_text("یا از منوی پایین:", reply_markup=get_font_en_keyboard())
+        return
     if text == "🇮🇷 فونت فارسی":
-        await update.message.reply_text("🇮🇷 یک فونت فارسی/تزئینی انتخاب کنید:", reply_markup=get_font_fa_keyboard()); return
+        from bot.features.fonts.font_ux import font_fa_inline
+        await update.message.reply_text(
+            chr(10).join([
+                "🇮🇷  فونت فارسی / عربی",
+                "・ ・ ・ ・ ・",
+                "از دکمه‌های شیشه‌ای یک استایل را لمس کن.",
+            ]),
+            reply_markup=font_fa_inline(),
+            parse_mode="HTML",
+        )
+        await update.message.reply_text("یا از منوی پایین:", reply_markup=get_font_fa_keyboard())
+        return
     if text == "🌈 همه فونت‌ها":
         context.user_data["waiting_for"] = "font_all"
-        await update.message.reply_text("🌈 یک کلمه یا جمله بفرستید تا روی همه فونت‌ها اعمال شود:", reply_markup=get_font_keyboard()); return
+        await update.message.reply_text(
+            chr(10).join([
+                "🌈  **گالری همه فونت‌ها**",
+                "・ ・ ・ ・ ・",
+                "یک کلمه یا جمله کوتاه بفرست",
+                "تا روی همه استایل‌های مناسب اعمال شود.",
+                "",
+                "مثال: `سلام` یا `Hello`",
+            ]),
+            reply_markup=get_font_keyboard(),
+            parse_mode="Markdown",
+        ); return
     if text == "🔙 بازگشت فونت":
-        await update.message.reply_text("🎨 بخش فونت:", reply_markup=get_font_keyboard()); return
+        await update.message.reply_text(
+            chr(10).join([
+                "🎨  **استودیوی فونت**",
+                "・ ・ ・ ・ ・",
+                "یک گزینه را از منو انتخاب کن.",
+            ]),
+            reply_markup=get_font_keyboard(),
+            parse_mode="Markdown",
+        ); return
     # انتخاب فونت از نام نمایشی
     name_to_key = {v: k for k, v in FONT_NAMES.items()}
     name_to_key.update({v[:18]: k for k, v in FONT_NAMES.items()})
@@ -721,7 +765,17 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         key = name_to_key.get(text, text)
         context.user_data["selected_font"] = key
         context.user_data["waiting_for"] = "font_text"
-        await update.message.reply_text(f"🎨 فونت انتخاب شد.\nمتن را بفرستید:", reply_markup=get_font_keyboard()); return
+        name = FONT_NAMES.get(key, key)
+        await update.message.reply_text(
+            chr(10).join([
+                "🎨  **فونت آماده است**",
+                f"✨  `{name}`",
+                "・ ・ ・ ・ ・",
+                "حالا متنت را بفرست تا تبدیل شود.",
+            ]),
+            reply_markup=get_font_keyboard(),
+            parse_mode="Markdown",
+        ); return
     if text == "👤 پروفایل":
         await update.message.reply_text("👤 پروفایل:", reply_markup=get_profile_keyboard()); return
     if _is_back_more(text):
@@ -1134,20 +1188,12 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in _joke_map:
         track_usage(user_id, "joke")
         cat = _joke_map[text]
-        await update.message.reply_text(
-            await joke_of_day(cat, user_id=update.effective_user.id),
-            reply_markup=fun_again_keyboard("joke"),
-        )
+        await update.message.reply_text(await joke_of_day(cat, user_id=update.effective_user.id), reply_markup=get_joke_keyboard())
         return
     if text in ("🔙 بازگشت به سرگرمی",):
         await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard()); return
     if text in ("🧠 دانستنی روز", "دانستنی روز"):
-        track_usage(user_id, "fact")
-        await update.message.reply_text(
-            await fact_of_day(user_id=user_id),
-            reply_markup=fun_again_keyboard("fact"),
-        )
-        return
+        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(user_id=user_id), reply_markup=get_fun_keyboard()); return
     if text in ("💪 چالش امروز", "چالش امروز"):
         track_usage(user_id, "challenge")
         try:
@@ -1160,8 +1206,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         track_usage(user_id, "motivation")
         await update.message.reply_text(
             await get_motivation_async(user_id=user_id),
-            reply_markup=fun_again_keyboard("motivation"),
-            parse_mode="Markdown",
+            reply_markup=get_fun_keyboard(),
         )
         return
     # پروفایل
