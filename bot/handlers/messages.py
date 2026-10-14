@@ -1,3 +1,4 @@
+from bot.utils.fun_again import fun_again_keyboard
 from bot.features.fonts.font_ux import start_font_studio
 from bot.features.tools.graphical_calculator import start_graphical_calculator
 """Stable public facade.
@@ -843,10 +844,13 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(await daily_verse_hadith(user_id), reply_markup=get_religious_keyboard()); return
     if text in ("🕌 مناسبت مذهبی", "مناسبت مذهبی"):
         track_usage(user_id, "rel_cd")
-        # معماری مشابه تقویم: نمای کلی + مناسبت‌های نزدیک + نمای ماه جاری قمری
-        body = religious_countdown()
-        body += "\n\n" + "—" * 12 + "\n" + religious_month_view()
-        await update.message.reply_text(body, reply_markup=get_religious_keyboard()); return
+        body = religious_countdown() + chr(10) + chr(10) + religious_month_view()
+        await update.message.reply_text(
+            body,
+            reply_markup=get_religious_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
     if text in ("🙏 استخاره", "استخاره"):
         track_usage(user_id, "istikhara")
         context.user_data["waiting_for"] = "istikhara_confirm"
@@ -1160,8 +1164,19 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             parse_mode="HTML",
         ); return
     if text in ("📝 شمارش متن", "شمارش متن"):
-        context.user_data["waiting_for"] = "count_text"; track_usage(user_id, "count")
-        await update.message.reply_text("📝 متن را بفرستید:", reply_markup=get_tools_keyboard()); return
+        context.user_data["waiting_for"] = "count_text"
+        track_usage(user_id, "count")
+        await update.message.reply_text(
+            chr(10).join([
+                "📝  **شمارش متن**",
+                "・ ・ ・ ・ ・",
+                "متن یا پاراگراف را بفرست",
+                "تا کاراکتر، کلمه و خط را بشمارم.",
+            ]),
+            reply_markup=get_tools_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
     # سرگرمی
     if text in ("📖 فال حافظ", "فال حافظ"):
         track_usage(user_id, "hafez"); await update.message.reply_text(await hafez_fal(user_id), reply_markup=get_fun_keyboard()); return
@@ -1193,7 +1208,13 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("🔙 بازگشت به سرگرمی",):
         await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard()); return
     if text in ("🧠 دانستنی روز", "دانستنی روز"):
-        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(user_id=user_id), reply_markup=get_fun_keyboard()); return
+        track_usage(user_id, "fact")
+        await update.message.reply_text(
+            await fact_of_day(user_id=user_id),
+            reply_markup=fun_again_keyboard("fact"),
+            parse_mode="Markdown",
+        )
+        return
     if text in ("💪 چالش امروز", "چالش امروز"):
         track_usage(user_id, "challenge")
         try:
@@ -1206,7 +1227,8 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         track_usage(user_id, "motivation")
         await update.message.reply_text(
             await get_motivation_async(user_id=user_id),
-            reply_markup=get_fun_keyboard(),
+            reply_markup=fun_again_keyboard("motivation"),
+            parse_mode="Markdown",
         )
         return
     # پروفایل
