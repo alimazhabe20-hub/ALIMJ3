@@ -104,7 +104,16 @@ async def _build_message_inner(user_id, user_name, city):
         elif lang == "ar": hname = hijri_ar.get(hname,hname)
         hijri_date = f"{to_persian_num(hijri.get('day', 0))} {hname} {hy}/{hm}/{hd}"
         hijri_events_list = get_hijri_events(hijri.get("month", 0), hijri.get("day", 0)) or []
-        hijri_events_text = chr(10).join([f"• {e}" for e in hijri_events_list]) or "• —"
+        _seen_h = set()
+        _ht = []
+        for e in (hijri_events_list or []):
+            s = str(e).strip()
+            k = s.replace(" ", "").replace("‌", "")
+            if not s or k in _seen_h:
+                continue
+            _seen_h.add(k)
+            _ht.append(f"• {s}")
+        hijri_events_text = chr(10).join(_ht) if _ht else ""
     except Exception:
         pass
 
@@ -117,11 +126,28 @@ async def _build_message_inner(user_id, user_name, city):
         hijri_tomorrow_events = get_hijri_events(
             hijri_tomorrow.get("month", 0), hijri_tomorrow.get("day", 0)
         ) or []
-        hijri_tomorrow_text = chr(10).join([f"• {e}" for e in hijri_tomorrow_events]) or "• —"
+        def _uniq_bullets(items):
+            seen = set()
+            out = []
+            for e in items or []:
+                s = str(e).strip()
+                if not s:
+                    continue
+                key = s.replace(" ", "").replace("‌", "")
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(f"• {s}")
+            return out
+
+        ht = _uniq_bullets(hijri_tomorrow_events)
+        hijri_tomorrow_text = chr(10).join(ht) if ht else ""
         shamsi_tomorrow = get_shamsi_events(tomorrow.year, tomorrow.month, tomorrow.day) or []
-        shamsi_tomorrow_text = chr(10).join([f"• {e}" for e in shamsi_tomorrow]) or "• —"
+        st = _uniq_bullets(shamsi_tomorrow)
+        shamsi_tomorrow_text = chr(10).join(st) if st else ""
         shamsi_events_list = get_shamsi_events(today.year, today.month, today.day) or []
-        shamsi_text = chr(10).join([f"• {e}" for e in shamsi_events_list]) or "• —"
+        ss = _uniq_bullets(shamsi_events_list)
+        shamsi_text = chr(10).join(ss) if ss else ""
     except Exception:
         pass
 
@@ -213,21 +239,101 @@ async def _build_message_inner(user_id, user_name, city):
             return ""
 
     try:
-        message = (
-            _safe_text("welcome", name=user_name) + nl + nl
-            + (f"📅 امروز (شمسی): {persian_date}" if lang == "fa" else f"📅 Solar date: {persian_date}" if lang == "en" else f"📅 التاريخ الشمسي: {persian_date}") + nl
-            + (f"📅 امروز (میلادی): {miladi_date}" if lang == "fa" else f"📅 Gregorian date: {miladi_date}" if lang == "en" else f"📅 التاريخ الميلادي: {miladi_date}") + nl
-            + (f"🌙 امروز (قمری): {hijri_date}" if lang == "fa" else f"🌙 Hijri date: {hijri_date}" if lang == "en" else f"🌙 التاريخ الهجري: {hijri_date}") + nl + nl
-            + section["events_h_today"][lang] + nl + hijri_events_text + nl + nl
-            + section["events_h_tom"][lang] + nl + hijri_tomorrow_text + nl + nl
-            + section["events_s_today"][lang] + nl + shamsi_text + nl + nl
-            + section["events_s_tom"][lang] + nl + shamsi_tomorrow_text + nl + nl
-            + section["prayer"][lang] + nl + prayer_text + next_prayer_text + nl
-            + section["weather"][lang] + nl + weather_text + nl + nl
-            + section["market"][lang] + nl + market_text + nl
-            + ({"fa":"💖 **پیام انگیزشی روز:**","en":"💖 **Daily Motivation:**","ar":"💖 **رسالة تحفيزية اليوم:**"}[lang]) + nl + motivation + nl + nl
-            + ({"fa":"🔔 برای تغییر شهر، از دکمه‌های زیر استفاده کن.","en":"🔔 Use the buttons below to change city.","ar":"🔔 استخدم الأزرار أدناه لتغيير المدينة."}[lang])
+        import html as _html
+
+        def _esc(s) -> str:
+            return _html.escape(str(s if s is not None else ""), quote=False)
+
+        def _quote_block(title: str, body: str) -> str:
+            """عنوان + محتوای نقل‌قولی (ظاهر بلوک آبی تلگرام)."""
+            body = (body or "").strip()
+            if not body:
+                return ""
+            return f"<b>{_esc(title)}</b>\n<blockquote>{_esc(body)}</blockquote>"
+
+        def _quote_lines(title: str, lines) -> str:
+            if isinstance(lines, str):
+                body = lines
+            else:
+                body = "\n".join(str(x) for x in (lines or []) if str(x).strip())
+            return _quote_block(title, body)
+
+        # مناسبت‌ها
+        event_blocks = []
+        if hijri_events_text:
+            # bullets already have • 
+            body = hijri_events_text.replace(chr(10), "\n")
+            event_blocks.append(_quote_block(
+                "📌 مناسبت‌های قمری امروز:" if lang == "fa" else "📌 Hijri events today:" if lang == "en" else "📌 المناسبات الهجرية اليوم:",
+                body,
+            ))
+        if hijri_tomorrow_text:
+            event_blocks.append(_quote_block(
+                "📌 مناسبت‌های قمری فردا:" if lang == "fa" else "📌 Hijri events tomorrow:" if lang == "en" else "📌 المناسبات الهجرية غداً:",
+                hijri_tomorrow_text,
+            ))
+        if shamsi_text:
+            event_blocks.append(_quote_block(
+                "📌 مناسبت‌های شمسی امروز:" if lang == "fa" else "📌 Solar events today:" if lang == "en" else "📌 المناسبات الشمسية اليوم:",
+                shamsi_text,
+            ))
+        if shamsi_tomorrow_text:
+            event_blocks.append(_quote_block(
+                "📌 مناسبت‌های شمسی فردا:" if lang == "fa" else "📌 Solar events tomorrow:" if lang == "en" else "📌 المناسبات الشمسية غداً:",
+                shamsi_tomorrow_text,
+            ))
+
+        # اوقات شرعی: بدون تکرار ایموجی اضافی در هر خط اگر لازم
+        prayer_body = prayer_text
+        if next_prayer_text:
+            prayer_body = (prayer_text + "\n" + next_prayer_text.strip()).strip()
+
+        welcome_line = _safe_text("welcome", name=user_name) or (
+            f"🌟 سلام {_esc(user_name)} عزیز!" if lang == "fa"
+            else f"🌟 Hello {_esc(user_name)}!" if lang == "en"
+            else f"🌟 مرحباً {_esc(user_name)}!"
         )
+        # welcome از get_text ممکن است HTML نداشته باشد — escape کل خط اگر تگ ندارد
+        if "<" not in welcome_line:
+            welcome_line = _esc(welcome_line)
+
+        parts = [welcome_line, ""]
+
+        if lang == "fa":
+            parts.append(_quote_block("📅 امروز (شمسی):", persian_date))
+            parts.append(_quote_block("📅 امروز (میلادی):", miladi_date))
+            parts.append(_quote_block("🌙 امروز (قمری):", hijri_date))
+            parts.extend(event_blocks)
+            parts.append(_quote_block(f"⏰ اوقات شرعی امروز ({city}):", prayer_body))
+            parts.append(_quote_block(f"🌦️ آب و هوای {city}:", weather_text))
+            parts.append(_quote_block("📊 قیمت بازار:", market_text))
+            parts.append(_quote_block("💖 پیام انگیزشی روز:", motivation))
+            parts.append("")
+            parts.append("🔔 برای تغییر شهر، از دکمه‌های زیر استفاده کن.")
+        elif lang == "en":
+            parts.append(_quote_block("📅 Solar date:", persian_date))
+            parts.append(_quote_block("📅 Gregorian date:", miladi_date))
+            parts.append(_quote_block("🌙 Hijri date:", hijri_date))
+            parts.extend(event_blocks)
+            parts.append(_quote_block(f"⏰ Prayer times ({city}):", prayer_body))
+            parts.append(_quote_block(f"🌦️ Weather — {city}:", weather_text))
+            parts.append(_quote_block("📊 Market:", market_text))
+            parts.append(_quote_block("💖 Daily motivation:", motivation))
+            parts.append("")
+            parts.append("🔔 Use the buttons below to change city.")
+        else:
+            parts.append(_quote_block("📅 التاريخ الشمسي:", persian_date))
+            parts.append(_quote_block("📅 التاريخ الميلادي:", miladi_date))
+            parts.append(_quote_block("🌙 التاريخ الهجري:", hijri_date))
+            parts.extend(event_blocks)
+            parts.append(_quote_block(f"⏰ أوقات الصلاة ({city}):", prayer_body))
+            parts.append(_quote_block(f"🌦️ الطقس — {city}:", weather_text))
+            parts.append(_quote_block("📊 السوق:", market_text))
+            parts.append(_quote_block("💖 رسالة تحفيزية:", motivation))
+            parts.append("")
+            parts.append("🔔 استخدم الأزرار أدناه لتغيير المدينة.")
+
+        message = "\n".join(p for p in parts if p is not None and str(p).strip() != "")
     except Exception:
         message = (
             f"🌟 سلام {user_name} عزیز!\n\n"
