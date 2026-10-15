@@ -44,7 +44,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     city = get_user_city(user_id)
     message = await build_message(user_id, first_name, city)
     await update.message.reply_text("⬇️", reply_markup=get_main_keyboard(user_id))
-    msg = await update.message.reply_text(message, reply_markup=get_refresh_button())
+    msg = await update.message.reply_text(message, reply_markup=get_refresh_button(), parse_mode="HTML")
     context.user_data["last_main_msg_id"] = msg.message_id
     set_last_main_msg_id(user_id, msg.message_id)
     # راهنمای کوتاه برای کاربر تازه‌وارد

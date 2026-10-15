@@ -1207,7 +1207,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     try:
                         await query.edit_message_text(
                             text=message,
-                            reply_markup=get_refresh_button(),
+                            reply_markup=get_refresh_button(), parse_mode="HTML",
                         )
                         sent = True
                         if message_id:
@@ -1232,7 +1232,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             chat_id=chat_id,
                             message_id=message_id,
                             text=message,
-                            reply_markup=get_refresh_button(),
+                            reply_markup=get_refresh_button(), parse_mode="HTML",
                         )
                         sent = True
                         context.user_data["last_main_msg_id"] = message_id
@@ -1255,7 +1255,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         msg = await context.bot.send_message(
                             chat_id=chat_id,
                             text=message,
-                            reply_markup=get_refresh_button(),
+                            reply_markup=get_refresh_button(), parse_mode="HTML",
                         )
                         sent = True
                         context.user_data["last_main_msg_id"] = msg.message_id
@@ -1335,7 +1335,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sent = False
             # 1) ویرایش همان پیام
             try:
-                await query.edit_message_text(message, reply_markup=get_refresh_button())
+                await query.edit_message_text(message, reply_markup=get_refresh_button(), parse_mode="HTML")
                 context.user_data["last_main_msg_id"] = query.message.message_id
                 try:
                     set_last_main_msg_id(user_id, query.message.message_id)
@@ -1351,7 +1351,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     msg = await context.bot.send_message(
                         chat_id=query.message.chat_id,
                         text=message,
-                        reply_markup=get_refresh_button(),
+                            reply_markup=get_refresh_button(), parse_mode="HTML",
                     )
                     context.user_data["last_main_msg_id"] = msg.message_id
                     try:
