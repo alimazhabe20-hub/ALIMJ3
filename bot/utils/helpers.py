@@ -259,28 +259,60 @@ async def _build_message_inner(user_id, user_name, city):
             return _quote_block(title, body)
 
         # مناسبت‌ها
+        def _clean_event_body(raw: str) -> str:
+            lines = []
+            for line in (raw or "").splitlines():
+                t = line.strip()
+                if not t:
+                    continue
+                core = t.lstrip("•").strip()
+                if not core or core in ("—", "-", "–"):
+                    continue
+                if any(x in core for x in (
+                    "هیچ مناسبت",
+                    "مناسبت خاصی ثبت نشده",
+                    "ثبت نشده است",
+                    "No event",
+                    "no events",
+                    "لا مناسبات",
+                )):
+                    continue
+                if not t.startswith("•"):
+                    t = "• " + core
+                lines.append(t)
+            seen, out = set(), []
+            for t in lines:
+                k = t.replace(" ", "").replace("‌", "")
+                if k in seen:
+                    continue
+                seen.add(k)
+                out.append(t)
+            return chr(10).join(out)
+
         event_blocks = []
-        if hijri_events_text:
-            # bullets already have • 
-            body = hijri_events_text.replace(chr(10), "\n")
+        _ht = _clean_event_body(hijri_events_text)
+        if _ht:
             event_blocks.append(_quote_block(
                 "📌 مناسبت‌های قمری امروز:" if lang == "fa" else "📌 Hijri events today:" if lang == "en" else "📌 المناسبات الهجرية اليوم:",
-                body,
+                _ht,
             ))
-        if hijri_tomorrow_text:
+        _htm = _clean_event_body(hijri_tomorrow_text)
+        if _htm:
             event_blocks.append(_quote_block(
                 "📌 مناسبت‌های قمری فردا:" if lang == "fa" else "📌 Hijri events tomorrow:" if lang == "en" else "📌 المناسبات الهجرية غداً:",
-                hijri_tomorrow_text,
+                _htm,
             ))
-        if shamsi_text:
+        _st = _clean_event_body(shamsi_text)
+        if _st:
             event_blocks.append(_quote_block(
                 "📌 مناسبت‌های شمسی امروز:" if lang == "fa" else "📌 Solar events today:" if lang == "en" else "📌 المناسبات الشمسية اليوم:",
-                shamsi_text,
+                _st,
             ))
-        if shamsi_tomorrow_text:
+        _stm = _clean_event_body(shamsi_tomorrow_text)
+        if _stm:
             event_blocks.append(_quote_block(
                 "📌 مناسبت‌های شمسی فردا:" if lang == "fa" else "📌 Solar events tomorrow:" if lang == "en" else "📌 المناسبات الشمسية غداً:",
-                shamsi_tomorrow_text,
+                _stm,
             ))
 
         # اوقات شرعی: بدون تکرار ایموجی اضافی در هر خط اگر لازم
