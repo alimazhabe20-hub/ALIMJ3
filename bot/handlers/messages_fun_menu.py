@@ -31,12 +31,12 @@ async def handle_fun_menu(update, context, text, user_id, city=None, first_name=
     if text in _joke_map:
         track_usage(user_id, "joke")
         cat = _joke_map[text]
-        await update.message.reply_text(await joke_of_day(cat, user_id=update.effective_user.id), reply_markup=get_joke_keyboard(), parse_mode="HTML")
+        await update.message.reply_text(await joke_of_day(cat, user_id=update.effective_user.id), reply_markup=fun_again_keyboard("joke"), parse_mode="HTML")
         return
     if text in ("🔙 بازگشت به سرگرمی",):
         await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard(), parse_mode="HTML"); return
     if text in ("🧠 دانستنی روز", "دانستنی روز"):
-        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(user_id=user_id), reply_markup=fun_again_keyboard("fact")); return
+        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(user_id=user_id), reply_markup=fun_again_keyboard("fact"), parse_mode="HTML"); return
     if text in ("💪 چالش امروز", "چالش امروز"):
         track_usage(user_id, "challenge"); await update.message.reply_text(await daily_challenge(), reply_markup=get_fun_keyboard(), parse_mode="HTML"); return
     if text in ("💖 جمله انگیزشی", "جمله انگیزشی"):
@@ -49,6 +49,6 @@ async def handle_fun_menu(update, context, text, user_id, city=None, first_name=
         except Exception:
             text_out = f"💖 {get_motivation()}"
             kb = get_fun_keyboard()
-        await update.message.reply_text(text_out, reply_markup=kb, parse_mode="Markdown")
+        await update.message.reply_text(text_out, reply_markup=kb, parse_mode="HTML")
         return
     return False

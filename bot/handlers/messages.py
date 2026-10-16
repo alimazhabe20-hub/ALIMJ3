@@ -36,6 +36,7 @@ from bot.handlers.feature_handlers import (
     _h_crypto_analyze, _h_economic_calendar, _h_distance, _h_birth_save, _h_count_text,
     _h_font_text, _h_font_all, _h_reminder_manager, _h_reminder_input,
 )
+from bot.utils.fun_again import fun_again_keyboard
 from bot.utils.motivation import get_motivation, get_motivation_async
 from bot.features.date.features_date_date_tools import (
     parse_shamsi, parse_any_date, parse_two_dates, parse_countdown,
@@ -1346,12 +1347,12 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in _joke_map:
         track_usage(user_id, "joke")
         cat = _joke_map[text]
-        await update.message.reply_text(await joke_of_day(cat, user_id=update.effective_user.id), reply_markup=get_joke_keyboard(), parse_mode="HTML")
+        await update.message.reply_text(await joke_of_day(cat, user_id=update.effective_user.id), reply_markup=fun_again_keyboard("joke"), parse_mode="HTML")
         return
     if text in ("🔙 بازگشت به سرگرمی",):
         await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard(), parse_mode="HTML"); return
     if text in ("🧠 دانستنی روز", "دانستنی روز"):
-        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(user_id=user_id), reply_markup=get_fun_keyboard(), parse_mode="HTML"); return
+        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(user_id=user_id), reply_markup=fun_again_keyboard("fact"), parse_mode="HTML"); return
     if text in ("💪 چالش امروز", "چالش امروز"):
         track_usage(user_id, "challenge")
         try:
@@ -1363,8 +1364,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in ("💖 جمله انگیزشی", "جمله انگیزشی"):
         track_usage(user_id, "motivation")
         await update.message.reply_text(
-            await get_motivation_async(user_id=user_id),
-            reply_markup=get_fun_keyboard(), parse_mode="HTML",
+            await get_motivation_async(user_id=user_id), reply_markup=fun_again_keyboard("motivation"), parse_mode="HTML",
         )
         return
     # پروفایل
