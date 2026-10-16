@@ -297,12 +297,12 @@ async def _h_ict(u, c, t, uid):
             try:
                 m = await c.bot.send_message(
                     chat_id=chat_id, text=chunk, parse_mode="HTML",
-                    reply_markup=get_market_keyboard(), parse_mode="HTML" if i == len(chunks) - 1 else None,
+                    reply_markup=get_market_keyboard() if i == len(chunks) - 1 else None,
                 )
             except Exception:
                 m = await c.bot.send_message(
                     chat_id=chat_id, text=_re.sub(r"<[^>]*>", "", chunk),
-                    reply_markup=get_market_keyboard(), parse_mode="HTML" if i == len(chunks) - 1 else None,
+                    reply_markup=get_market_keyboard() if i == len(chunks) - 1 else None,
                 )
             ids.append(m.message_id)
 

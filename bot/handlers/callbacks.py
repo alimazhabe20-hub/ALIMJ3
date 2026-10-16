@@ -146,11 +146,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             await _safe_answer(query)
             try:
-                await query.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
+                await query.edit_message_text(text, reply_markup=kb, parse_mode="HTML")
             except Exception:
                 # اگر متن یکی باشد یا edit نشود، پیام جدید
                 if query.message:
-                    await query.message.reply_text(text, reply_markup=kb, parse_mode="Markdown")
+                    await query.message.reply_text(text, reply_markup=kb, parse_mode="HTML")
         except Exception as _fun_exc:
             logger.exception("fun:again failed: %s", _fun_exc)
             await _safe_answer(query, text="⚠️ موقتاً ممکن نشد", show_alert=True)
