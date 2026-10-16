@@ -11,7 +11,8 @@ async def send_daily_messages(context):
             await context.bot.send_message(
                 chat_id=user_id,
                 text=msg,
-                reply_markup=get_refresh_button()
+                reply_markup=get_refresh_button(),
+                parse_mode="HTML",
             )
             count += 1
             await asyncio.sleep(0.2)
