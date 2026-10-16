@@ -7,7 +7,7 @@ async def handle_tools_menu(update, context, text, user_id, city=None, first_nam
     # ابزار
     if text in ("🔢 ماشین‌حساب", "ماشین‌حساب"):
         context.user_data["waiting_for"] = "calc"; track_usage(user_id, "calc")
-        await update.message.reply_text("🔢 `2+3*4`", reply_markup=get_tools_keyboard()); return
+        await update.message.reply_text("🔢 `2+3*4`", reply_markup=get_tools_keyboard(), parse_mode="HTML"); return
     if text in ("🔐 پسورد تصادفی", "پسورد تصادفی"):
         track_usage(user_id, "password")
         pwd = generate_password(16)
@@ -18,5 +18,5 @@ async def handle_tools_menu(update, context, text, user_id, city=None, first_nam
         ); return
     if text in ("📝 شمارش متن", "شمارش متن"):
         context.user_data["waiting_for"] = "count_text"; track_usage(user_id, "count")
-        await update.message.reply_text("📝 متن را بفرستید:", reply_markup=get_tools_keyboard()); return
+        await update.message.reply_text("📝 متن را بفرستید:", reply_markup=get_tools_keyboard(), parse_mode="HTML"); return
     return False

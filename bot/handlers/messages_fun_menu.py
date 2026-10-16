@@ -7,12 +7,12 @@ globals().update({k:v for k,v in _common.__dict__.items() if not k.startswith('_
 async def handle_fun_menu(update, context, text, user_id, city=None, first_name=None):
     # سرگرمی
     if text in ("📖 فال حافظ", "فال حافظ"):
-        track_usage(user_id, "hafez"); await update.message.reply_text(await hafez_fal(user_id), reply_markup=get_fun_keyboard()); return
+        track_usage(user_id, "hafez"); await update.message.reply_text(await hafez_fal(user_id), reply_markup=get_fun_keyboard(), parse_mode="HTML"); return
     if text in ("😂 جوک روز", "جوک روز"):
         track_usage(user_id, "joke")
         await update.message.reply_text(
             "😂 دسته جوک را انتخاب کن:\n(بیش از ۸۷۰۰ جوک از farsijokes)",
-            reply_markup=get_joke_keyboard(),
+            reply_markup=get_joke_keyboard(), parse_mode="HTML",
         ); return
     # دسته‌های جوک
     _joke_map = {
@@ -34,11 +34,11 @@ async def handle_fun_menu(update, context, text, user_id, city=None, first_name=
         await update.message.reply_text(await joke_of_day(cat, user_id=update.effective_user.id), reply_markup=get_joke_keyboard(), parse_mode="HTML")
         return
     if text in ("🔙 بازگشت به سرگرمی",):
-        await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard()); return
+        await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard(), parse_mode="HTML"); return
     if text in ("🧠 دانستنی روز", "دانستنی روز"):
         track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(user_id=user_id), reply_markup=fun_again_keyboard("fact")); return
     if text in ("💪 چالش امروز", "چالش امروز"):
-        track_usage(user_id, "challenge"); await update.message.reply_text(await daily_challenge(), reply_markup=get_fun_keyboard()); return
+        track_usage(user_id, "challenge"); await update.message.reply_text(await daily_challenge(), reply_markup=get_fun_keyboard(), parse_mode="HTML"); return
     if text in ("💖 جمله انگیزشی", "جمله انگیزشی"):
         track_usage(user_id, "motivation")
         try:

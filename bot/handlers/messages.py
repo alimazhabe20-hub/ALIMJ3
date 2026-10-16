@@ -987,7 +987,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(qibla_direction(city), reply_markup=get_religious_keyboard(), parse_mode="HTML"); return
     if text in ("📿 اذکار روز", "اذکار روز"):
         track_usage(user_id, "adhkar")
-        await update.message.reply_text(daily_adhkar(user_id), reply_markup=get_religious_keyboard()); return
+        await update.message.reply_text(daily_adhkar(user_id), reply_markup=get_religious_keyboard(), parse_mode="HTML"); return
     if text in ("📖 آیه و حدیث", "آیه و حدیث"):
         track_usage(user_id, "verse")
         await update.message.reply_text(await daily_verse_hadith(user_id), reply_markup=get_religious_keyboard(), parse_mode="HTML"); return
@@ -1007,7 +1007,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text == "🙏 استخاره بگیر":
         context.user_data.pop("waiting_for", None)
         track_usage(user_id, "istikhara_do")
-        await update.message.reply_text(await istikhara(user_id), reply_markup=get_religious_keyboard()); return
+        await update.message.reply_text(await istikhara(user_id), reply_markup=get_religious_keyboard(), parse_mode="HTML"); return
     if text == "🔙 بازگشت به مذهبی":
         context.user_data.pop("waiting_for", None)
         await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard(), parse_mode="HTML"); return
@@ -1088,7 +1088,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.error("gold market button failed: %s", exc, exc_info=True)
             await update.message.reply_text(
                 "⚠️ دریافت تحلیل طلا موقتاً ناموفق بود؛ دوباره تلاش کنید.",
-                reply_markup=get_market_keyboard(),
+                reply_markup=get_market_keyboard(), parse_mode="HTML",
             )
             return
     # تحلیل مستقیم طلا: کاربر می‌تواند فقط «gold»، «طلا»، «اونس»، «XAUUSD» یا عبارت تحلیلی مشابه را بفرستد.
@@ -1184,7 +1184,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             r = await full_market_prices()
             await finish_or_reply(notice, update.message, r)
         except Exception as _e:
-            await fail_notice(notice, update.message, "market", detail=str(_e), reply_markup=get_market_keyboard())
+            await fail_notice(notice, update.message, "market", detail=str(_e), reply_markup=get_market_keyboard(), parse_mode="HTML")
             return
         await update.message.reply_text("💰 بازار", reply_markup=get_market_keyboard(), parse_mode="HTML"); return
     if text in ("💎 ۲۰ ارز برتر کریپتو", "۲۰ ارز برتر کریپتو", "💎 ۳۰۰ ارز برتر کریپتو", "۳۰۰ ارز برتر کریپتو", "کریپتو"):
@@ -1194,7 +1194,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             r = await get_top_crypto(20)
             await finish_or_reply(notice, update.message, r)
         except Exception as _e:
-            await fail_notice(notice, update.message, "crypto_top", detail=str(_e), reply_markup=get_market_keyboard())
+            await fail_notice(notice, update.message, "crypto_top", detail=str(_e), reply_markup=get_market_keyboard(), parse_mode="HTML")
             return
         await update.message.reply_text("💎 کریپتو", reply_markup=get_market_keyboard(), parse_mode="HTML"); return
     if text in ("🔄 تبدیل ارز", "تبدیل ارز", "🔄 تبدیل ارز / کریپتو", "تبدیل ارز / کریپتو"):
@@ -1211,7 +1211,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             "• 50000 تومان دلار\n"
             "• 100 usdt toman\n"
             "• ۲ بیتکوین",
-            reply_markup=get_market_keyboard()
+            reply_markup=get_market_keyboard(), parse_mode="HTML"
         ); return
     if text in ("🗓 تقویم اقتصادی", "تقویم اقتصادی", "📅 تقویم اقتصادی"):
         track_usage(user_id, "economic_calendar")
@@ -1246,7 +1246,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
 ────────────────────
 💡 واحد مهم نیست (تومان / دلار / …)
 فقط هر سه عدد با **یک واحد** باشند.""",
-            reply_markup=get_market_keyboard(),
+            reply_markup=get_market_keyboard(), parse_mode="HTML",
         ); return
     if text in (
         "📊 نمودار و تحلیل ارز دیجیتال",
@@ -1276,7 +1276,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             "• نسبت لانگ/شورت و شاخص ترس و طمع\n"
             "• سناریو A/B و سیگنال لانگ / شورت / صبر با AI\n\n"
             "⚠️ صرفاً آموزشی است؛ توصیه سرمایه‌گذاری قطعی نیست.",
-            reply_markup=get_market_keyboard(),
+            reply_markup=get_market_keyboard(), parse_mode="HTML",
         )
         return
     # هوا
@@ -1297,7 +1297,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             "• ایران ژاپن\n"
             "• Paris to Tokyo\n"
             "• New York - Brazil",
-            reply_markup=get_tools_keyboard(),
+            reply_markup=get_tools_keyboard(), parse_mode="HTML",
         ); return
     if text in ("📍 لوکیشن من", "لوکیشن من"):
         track_usage(user_id, "location")
@@ -1322,12 +1322,12 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("📝 متن را بفرستید:", reply_markup=get_tools_keyboard(), parse_mode="HTML"); return
     # سرگرمی
     if text in ("📖 فال حافظ", "فال حافظ"):
-        track_usage(user_id, "hafez"); await update.message.reply_text(await hafez_fal(user_id), reply_markup=get_fun_keyboard()); return
+        track_usage(user_id, "hafez"); await update.message.reply_text(await hafez_fal(user_id), reply_markup=get_fun_keyboard(), parse_mode="HTML"); return
     if text in ("😂 جوک روز", "جوک روز"):
         track_usage(user_id, "joke")
         await update.message.reply_text(
             "😂 دسته جوک را انتخاب کن:\n(بیش از ۸۷۰۰ جوک از farsijokes)",
-            reply_markup=get_joke_keyboard(),
+            reply_markup=get_joke_keyboard(), parse_mode="HTML",
         ); return
     # دسته‌های جوک
     _joke_map = {
@@ -1346,7 +1346,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text in _joke_map:
         track_usage(user_id, "joke")
         cat = _joke_map[text]
-        await update.message.reply_text(await joke_of_day(cat, user_id=update.effective_user.id), reply_markup=get_joke_keyboard())
+        await update.message.reply_text(await joke_of_day(cat, user_id=update.effective_user.id), reply_markup=get_joke_keyboard(), parse_mode="HTML")
         return
     if text in ("🔙 بازگشت به سرگرمی",):
         await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard(), parse_mode="HTML"); return
@@ -1364,7 +1364,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         track_usage(user_id, "motivation")
         await update.message.reply_text(
             await get_motivation_async(user_id=user_id),
-            reply_markup=get_fun_keyboard(),
+            reply_markup=get_fun_keyboard(), parse_mode="HTML",
         )
         return
     # پروفایل

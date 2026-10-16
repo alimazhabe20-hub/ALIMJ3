@@ -59,7 +59,7 @@ async def handle_market_menu(update, context, text, user_id, city=None, first_na
             logger.error("gold market button failed: %s", exc, exc_info=True)
             await update.message.reply_text(
                 "⚠️ دریافت تحلیل طلا موقتاً ناموفق بود؛ دوباره تلاش کنید.",
-                reply_markup=get_market_keyboard(),
+                reply_markup=get_market_keyboard(), parse_mode="HTML",
             )
             return
     # تحلیل مستقیم طلا: کاربر می‌تواند فقط «gold»، «طلا»، «اونس»، «XAUUSD» یا عبارت تحلیلی مشابه را بفرستد.
@@ -153,13 +153,13 @@ async def handle_market_menu(update, context, text, user_id, city=None, first_na
         m = await update.message.reply_text("⏳ دریافت قیمت‌ها...", parse_mode="HTML")
         r = await full_market_prices()
         await m.edit_text(r)
-        await update.message.reply_text("💰", reply_markup=get_market_keyboard()); return
+        await update.message.reply_text("💰", reply_markup=get_market_keyboard(), parse_mode="HTML"); return
     if text in ("💎 ۲۰ ارز برتر کریپتو", "۲۰ ارز برتر کریپتو", "💎 ۳۰۰ ارز برتر کریپتو", "۳۰۰ ارز برتر کریپتو", "کریپتو"):
         track_usage(user_id, "crypto_top")
         m = await update.message.reply_text("⏳ دریافت لیست کریپتو...", parse_mode="HTML")
         r = await get_top_crypto(20)
         await m.edit_text(r)
-        await update.message.reply_text("💎", reply_markup=get_market_keyboard()); return
+        await update.message.reply_text("💎", reply_markup=get_market_keyboard(), parse_mode="HTML"); return
     if text in ("🔄 تبدیل ارز", "تبدیل ارز", "🔄 تبدیل ارز / کریپتو", "تبدیل ارز / کریپتو"):
         context.user_data["waiting_for"] = "currency"; track_usage(user_id, "currency")
         await update.message.reply_text(
@@ -174,7 +174,7 @@ async def handle_market_menu(update, context, text, user_id, city=None, first_na
             "• 50000 تومان دلار\n"
             "• 100 usdt toman\n"
             "• ۲ بیتکوین",
-            reply_markup=get_market_keyboard()
+            reply_markup=get_market_keyboard(), parse_mode="HTML"
         ); return
     if text in ("🗓 تقویم اقتصادی", "تقویم اقتصادی", "📅 تقویم اقتصادی"):
         track_usage(user_id, "economic_calendar")
@@ -209,7 +209,7 @@ async def handle_market_menu(update, context, text, user_id, city=None, first_na
 ────────────────────
 💡 واحد مهم نیست (تومان / دلار / …)
 فقط هر سه عدد با **یک واحد** باشند.""",
-            reply_markup=get_market_keyboard(),
+            reply_markup=get_market_keyboard(), parse_mode="HTML",
         ); return
     if text in (
         "📊 نمودار و تحلیل ارز دیجیتال",
@@ -239,7 +239,7 @@ async def handle_market_menu(update, context, text, user_id, city=None, first_na
             "• نسبت لانگ/شورت و شاخص ترس و طمع\n"
             "• سناریو A/B و سیگنال لانگ / شورت / صبر با AI\n\n"
             "⚠️ صرفاً آموزشی است؛ توصیه سرمایه‌گذاری قطعی نیست.",
-            reply_markup=get_market_keyboard(),
+            reply_markup=get_market_keyboard(), parse_mode="HTML",
         )
         return
     return False

@@ -9,7 +9,7 @@ async def _h_calc(u, c, t, uid):
         c.user_data.pop("waiting_for", None)
         return
     c.user_data["waiting_for"] = "calc"
-    await u.message.reply_text(calculator(t), reply_markup=get_tools_keyboard())
+    await u.message.reply_text(calculator(t), reply_markup=get_tools_keyboard(), parse_mode="HTML")
 
 
 async def _h_distance(u, c, t, uid):
@@ -21,11 +21,11 @@ async def _h_distance(u, c, t, uid):
     if not parsed:
         await u.message.reply_text(
             "❌ دو مکان بنویسید." + chr(10) + "مثال: تهران مشهد | تهران تا ترکیه | Paris to Tokyo",
-            reply_markup=get_tools_keyboard(),
+            reply_markup=get_tools_keyboard(), parse_mode="HTML",
         )
         return
     p1, p2 = parsed
-    await u.message.reply_text(await world_distance(p1, p2), reply_markup=get_tools_keyboard())
+    await u.message.reply_text(await world_distance(p1, p2), reply_markup=get_tools_keyboard(), parse_mode="HTML")
 
 
 async def _h_count_text(u, c, t, uid):

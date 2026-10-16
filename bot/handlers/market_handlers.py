@@ -33,10 +33,10 @@ async def _h_profit(u, c, t, uid):
 • `1000 1200`
 • `1000 1200 5`
 • `۵۰۰۰۰ ۴۸۰۰۰ ۲`""",
-            reply_markup=get_market_keyboard(),
+            reply_markup=get_market_keyboard(), parse_mode="HTML",
         )
         return
-    await u.message.reply_text(profit_loss(*p), reply_markup=get_market_keyboard())
+    await u.message.reply_text(profit_loss(*p), reply_markup=get_market_keyboard(), parse_mode="HTML")
 
 async def _h_currency(u, c, t, uid):
     if is_reply_menu_button(t):
@@ -53,16 +53,16 @@ async def _h_currency(u, c, t, uid):
             "• `50000 تومان دلار`\n"
             "• `1 btc eth`\n"
             "• `100 usdt toman`",
-            reply_markup=get_market_keyboard(),
+            reply_markup=get_market_keyboard(), parse_mode="HTML",
         )
         return
     amount, a, b = parsed
     notice = await send_loading(u.message, "currency")
     try:
         result = await smart_convert(amount, a or "usd", b or "")
-        await finish_or_reply(notice, u.message, result, reply_markup=get_market_keyboard())
+        await finish_or_reply(notice, u.message, result, reply_markup=get_market_keyboard(), parse_mode="HTML")
     except Exception as e:
-        await fail_notice(notice, u.message, "currency", detail=str(e), reply_markup=get_market_keyboard())
+        await fail_notice(notice, u.message, "currency", detail=str(e), reply_markup=get_market_keyboard(), parse_mode="HTML")
 
 async def _h_crypto_full(u, c, t, uid):
     """تحلیل کامل کریپتو با ارسال امن نمودار و متن کامل در چند پیام."""
@@ -202,7 +202,7 @@ async def _h_economic_calendar(u, c, t, uid):
         if not ok:
             pass
     except Exception as e:
-        await fail_notice(notice, u.message, "economic", detail=str(e), reply_markup=get_market_keyboard())
+        await fail_notice(notice, u.message, "economic", detail=str(e), reply_markup=get_market_keyboard(), parse_mode="HTML")
 
 
 async def _h_ict(u, c, t, uid):
@@ -217,7 +217,7 @@ async def _h_ict(u, c, t, uid):
             "نماد را بفرستید، مثلاً:\n"
             "• btc\n• eth\n• sol\n• btc 4h\n• eth 1h\n\n"
             "تایم‌فریم اختیاری: 15m / 1h / 4h / 1d",
-            reply_markup=get_market_keyboard(),
+            reply_markup=get_market_keyboard(), parse_mode="HTML",
         )
         return
     parts = text.replace("،", " ").split()
@@ -297,12 +297,12 @@ async def _h_ict(u, c, t, uid):
             try:
                 m = await c.bot.send_message(
                     chat_id=chat_id, text=chunk, parse_mode="HTML",
-                    reply_markup=get_market_keyboard() if i == len(chunks) - 1 else None,
+                    reply_markup=get_market_keyboard(), parse_mode="HTML" if i == len(chunks) - 1 else None,
                 )
             except Exception:
                 m = await c.bot.send_message(
                     chat_id=chat_id, text=_re.sub(r"<[^>]*>", "", chunk),
-                    reply_markup=get_market_keyboard() if i == len(chunks) - 1 else None,
+                    reply_markup=get_market_keyboard(), parse_mode="HTML" if i == len(chunks) - 1 else None,
                 )
             ids.append(m.message_id)
 
@@ -321,7 +321,7 @@ async def _h_ict(u, c, t, uid):
                 pass
         try:
             await c.bot.edit_message_reply_markup(
-                chat_id=chat_id, message_id=ids[-1], reply_markup=get_market_keyboard()
+                chat_id=chat_id, message_id=ids[-1], reply_markup=get_market_keyboard(), parse_mode="HTML"
             )
         except Exception:
             pass

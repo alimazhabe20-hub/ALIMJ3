@@ -7,10 +7,10 @@ async def handle_weather_menu(update, context, text, user_id, city=None, first_n
     # هوا
     if text in ("🌤 پیش‌بینی هوا", "پیش‌بینی هوا"):
         track_usage(user_id, "forecast")
-        await update.message.reply_text(await weather_forecast(city), reply_markup=get_weather_geo_keyboard()); return
+        await update.message.reply_text(await weather_forecast(city), reply_markup=get_weather_geo_keyboard(), parse_mode="HTML"); return
     if text in ("🌫 کیفیت هوا", "کیفیت هوا"):
         track_usage(user_id, "aqi")
-        await update.message.reply_text(await air_quality(city), reply_markup=get_weather_geo_keyboard()); return
+        await update.message.reply_text(await air_quality(city), reply_markup=get_weather_geo_keyboard(), parse_mode="HTML"); return
     if text in ("🗺 فاصله شهرها", "فاصله شهرها", "🗺 فاصله جهانی", "فاصله جهانی"):
         context.user_data["waiting_for"] = "distance"; track_usage(user_id, "distance")
         await update.message.reply_text(
@@ -22,9 +22,9 @@ async def handle_weather_menu(update, context, text, user_id, city=None, first_n
             "• ایران ژاپن\n"
             "• Paris to Tokyo\n"
             "• New York - Brazil",
-            reply_markup=get_tools_keyboard(),
+            reply_markup=get_tools_keyboard(), parse_mode="HTML",
         ); return
     if text in ("📍 لوکیشن من", "لوکیشن من"):
         track_usage(user_id, "location")
-        await update.message.reply_text(f"📍 لوکیشن را از 📎 بفرستید.\nشهر فعلی: {city}", reply_markup=get_weather_geo_keyboard()); return
+        await update.message.reply_text(f"📍 لوکیشن را از 📎 بفرستید.\nشهر فعلی: {city}", reply_markup=get_weather_geo_keyboard(), parse_mode="HTML"); return
     return False
