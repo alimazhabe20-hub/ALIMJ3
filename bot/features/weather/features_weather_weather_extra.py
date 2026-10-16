@@ -1,3 +1,4 @@
+from bot.utils.quote_ui import section as _qs, quote as _q, bold as _b, esc as _e
 """پیش‌بینی هوا ۷ روزه، AQI واقعی، فاصله شهرها — Open-Meteo (بدون کلید، سریع، پایدار)"""
 import math
 import httpx
@@ -445,7 +446,12 @@ async def weather_forecast(city: str, days: int = 7, start_day: int = 0) -> str:
                 result = "\n".join(lines)
                 _cache[key] = result
                 _cache_t[key] = now
-                return result
+                
+        _lines = [x for x in result.split(chr(10)) if x is not None]
+        _title = _lines[0] if _lines else '🌤'
+        _body = chr(10).join(_lines[1:]).strip() if len(_lines) > 1 else result
+        return _qs(_title.replace('**','').strip(), _body or result)
+
     except Exception as e:
         logger.error(f"wttr fallback {city}: {e}")
 
@@ -613,7 +619,12 @@ async def air_quality(city: str) -> str:
         result = "\n".join(lines)
         _cache[key] = result
         _cache_t[key] = now
-        return result
+        
+        _lines = [x for x in result.split(chr(10)) if x is not None]
+        _title = _lines[0] if _lines else '🌤'
+        _body = chr(10).join(_lines[1:]).strip() if len(_lines) > 1 else result
+        return _qs(_title.replace('**','').strip(), _body or result)
+
     except Exception as e:
         logger.error(f"aqi {city}: {e}")
         return f"❌ کیفیت هوای {city} موقتاً در دسترس نیست."

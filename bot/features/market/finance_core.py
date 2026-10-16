@@ -842,7 +842,11 @@ def profit_loss(buy: float, sell: float, qty: float = 1.0) -> str:
         "",
         "💡 دوباره بفرست: `خرید فروش` یا `خرید فروش تعداد`",
     ]
-    return chr(10).join(lines)
+    from bot.utils.quote_ui import section as _qs
+    _title = lines[0].replace("**", "").strip() if lines else "📈 سود و ضرر"
+    _body = chr(10).join(lines[1:])
+    return _qs(_title, _body)
+
 
 
 # END MERGED LEGACY PART: 

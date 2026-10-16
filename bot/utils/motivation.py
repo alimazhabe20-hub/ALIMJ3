@@ -1538,40 +1538,26 @@ def _format_motivation_card(
     author: str | None = None,
     source: str = "local",
 ) -> str:
-    """UI خلوت، خوانا و سازگار با تلگرام."""
+    """UI نقل‌قولی یکدست."""
+    from bot.utils.quote_ui import section
     body = (body or "").strip()
-    # شکستن نرم جملات بلند تک‌خطی برای خوانایی موبایل
-    if "\n" not in body and len(body) > 56:
+    if chr(10) not in body and len(body) > 56:
         mid = len(body) // 2
         cut = -1
         for sep in ("،", "؛", ":", " "):
-            j = body.find(sep, mid - 8)
-            if j != -1 and 12 < j < len(body) - 8:
-                cut = j + (0 if sep == " " else 1)
+            jj = body.find(sep, mid - 8)
+            if jj != -1 and 12 < jj < len(body) - 8:
+                cut = jj + (0 if sep == " " else 1)
                 break
         if cut > 0:
             body = body[:cut].rstrip() + chr(10) + body[cut:].lstrip()
-
     emoji = _CAT_EMOJI.get(cat or "", "💖")
     cat_label = cat or "انگیزه"
-
-    lines = [
-        "🕯  **جملهٔ روز**",
-        f"{emoji}  `{cat_label}`",
-        "",
-        body,
-        "",
-    ]
+    quote_body = body
     if author:
-        lines.append(f"— _{author}_")
-        lines.append("")
-    lines.append("・ ・ ・ ・ ・")
-    if source == "api":
-        lines.append("✨ ترجمه · منبع جهانی")
-    else:
-        lines.append("✨ برای لحظهٔ تو")
-    return chr(10).join(lines)
-
+        quote_body = body + chr(10) + f"— {author}"
+    foot = "✨ ترجمه · منبع جهانی" if source == "api" else "✨ برای لحظهٔ تو"
+    return section(f"💖 جمله انگیزشی · {emoji} {cat_label}", quote_body) + chr(10) + foot
 
 
 def get_motivation_rich(user_id: int | None = None) -> str:

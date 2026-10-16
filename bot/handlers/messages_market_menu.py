@@ -9,7 +9,7 @@ async def handle_market_menu(update, context, text, user_id, city=None, first_na
     if text in ("🥇 تحلیل طلا", "تحلیل طلا"):
         try:
             track_usage(user_id, "gold_analysis")
-            notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…")
+            notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…", parse_mode="HTML")
             report = await analyze_gold("1h")
             chart_note = ""
             try:
@@ -41,7 +41,7 @@ async def handle_market_menu(update, context, text, user_id, city=None, first_na
                     chart_note = chart_note or str(send_exc)
             elif chart_note:
                 try:
-                    await update.message.reply_text(f"⚠️ نمودار طلا در دسترس نیست: {chart_note[:300]}")
+                    await update.message.reply_text(f"⚠️ نمودار طلا در دسترس نیست: {chart_note[:300]}", parse_mode="HTML")
                 except Exception:
                     pass
             chunks = [report[i:i+3900] for i in range(0, len(report or ""), 3900)] or ["داده کافی برای تحلیل طلا در دسترس نیست."]
@@ -70,7 +70,7 @@ async def handle_market_menu(update, context, text, user_id, city=None, first_na
         # فقط وقتی پیام واقعاً درباره طلاست؛ اعداد/متن‌های نامرتبطی که کلمه gold را داخل جمله دارند هم به تحلیل طلا می‌روند.
         try:
             track_usage(user_id, "gold_analysis")
-            notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…")
+            notice = await update.message.reply_text("⏳ در حال دریافت تحلیل زنده طلا / XAUUSD…", parse_mode="HTML")
             report = await analyze_gold("1h")
             chart_note = ""
             try:
@@ -100,7 +100,7 @@ async def handle_market_menu(update, context, text, user_id, city=None, first_na
                     chart_note = chart_note or str(send_exc)
             elif chart_note:
                 try:
-                    await update.message.reply_text(f"⚠️ نمودار طلا در دسترس نیست: {chart_note[:300]}")
+                    await update.message.reply_text(f"⚠️ نمودار طلا در دسترس نیست: {chart_note[:300]}", parse_mode="HTML")
                 except Exception:
                     pass
             # گزارش کامل را به‌صورت پیام متنی می‌فرستیم تا محدودیت 1024 کاراکتری کپشن باعث ناقص شدن تحلیل نشود.
@@ -113,14 +113,14 @@ async def handle_market_menu(update, context, text, user_id, city=None, first_na
                         reply_markup=menu if i == len(chunks) - 1 else None,
                     )
                 except Exception:
-                    mtxt = await update.message.reply_text(re.sub(r"<[^>]+>", "", chunk)[:3500])
+                    mtxt = await update.message.reply_text(re.sub(r"<[^>]+>", "", chunk)[:3500], parse_mode="HTML")
                 text_ids.append(mtxt.message_id)
             context.user_data["market_analysis_text_ids"] = text_ids
             context.user_data["market_analysis_chat_id"] = update.effective_chat.id
             return
         except Exception as exc:
             logger.error("direct gold analysis failed: %s", exc, exc_info=True)
-            await update.message.reply_text("⚠️ دریافت تحلیل طلا موقتاً ناموفق بود؛ دوباره تلاش کنید.")
+            await update.message.reply_text("⚠️ دریافت تحلیل طلا موقتاً ناموفق بود؛ دوباره تلاش کنید.", parse_mode="HTML")
             return
     # دکمه‌های تکی اذان (با ✅ یا ❌)
     _azan_btn_map = {
@@ -137,7 +137,7 @@ async def handle_market_menu(update, context, text, user_id, city=None, first_na
             await _show_azan_settings(update, user_id, city, note=f"{label} {status} شد.")
             return
     if text in ("🔙 بازگشت به مذهبی",):
-        await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard())
+        await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard(), parse_mode="HTML")
         return
     # «دستیار خرید» قدیمی حذف شده؛ خرید اکنون بخشی از همان دستیار هوشمند است.
     if text in ("🛒 دستیار خرید", "دستیار خرید", "🛍 دستیار خرید"):
@@ -150,13 +150,13 @@ async def handle_market_menu(update, context, text, user_id, city=None, first_na
         return
     if text in ("💵 قیمت کامل بازار", "قیمت کامل بازار"):
         track_usage(user_id, "market")
-        m = await update.message.reply_text("⏳ دریافت قیمت‌ها...")
+        m = await update.message.reply_text("⏳ دریافت قیمت‌ها...", parse_mode="HTML")
         r = await full_market_prices()
         await m.edit_text(r)
         await update.message.reply_text("💰", reply_markup=get_market_keyboard()); return
     if text in ("💎 ۲۰ ارز برتر کریپتو", "۲۰ ارز برتر کریپتو", "💎 ۳۰۰ ارز برتر کریپتو", "۳۰۰ ارز برتر کریپتو", "کریپتو"):
         track_usage(user_id, "crypto_top")
-        m = await update.message.reply_text("⏳ دریافت لیست کریپتو...")
+        m = await update.message.reply_text("⏳ دریافت لیست کریپتو...", parse_mode="HTML")
         r = await get_top_crypto(20)
         await m.edit_text(r)
         await update.message.reply_text("💎", reply_markup=get_market_keyboard()); return

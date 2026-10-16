@@ -166,6 +166,7 @@ def compute_qibla(
 
 def format_qibla_message(data: dict) -> str:
     """ساخت متن کامل خروجی برای تلگرام."""
+    from bot.utils.quote_ui import section
     label = data.get("label") or "موقعیت شما"
     bearing = float(data["bearing_true"])
     magnetic = float(data["bearing_magnetic"])
@@ -174,31 +175,33 @@ def format_qibla_message(data: dict) -> str:
     dist = _format_distance(float(data["distance_km"]))
     from_gps = bool(data.get("from_gps"))
 
-    source_line = (
-        "📍 بر اساس **موقعیت لحظه‌ای** که فرستادی"
+    source_plain = (
+        "بر اساس موقعیت لحظه‌ای که فرستادی"
         if from_gps
-        else f"📍 بر اساس مختصات شهر **{label}**"
+        else f"بر اساس مختصات شهر {label}"
     )
+    main_body = chr(10).join([
+        f"📍 {source_plain}",
+        f"📐 زاویه از شمال حقیقی: {bearing:.1f}°",
+        f"🧭 جهت تقریبی: {direction}",
+        f"📏 فاصله تا کعبه: {dist}",
+    ])
+    how_body = chr(10).join([
+        "۱) قطب‌نما یا قبله‌نمای گوشی را باز کن و دور از فلز نگه دار.",
+        "۲) عقربه را با شمال هم‌راستا کن.",
+        f"۳) بدن را ساعت‌گرد بچرخان تا به حدود {bearing:.0f}° برسی.",
+        f"۴) همان سمت، قبله است (تقریباً {direction}).",
+    ])
+    warn_body = chr(10).join([
+        "زاویه نسبت به شمال جغرافیایی (حقیقی) است.",
+        f"میل مغناطیسی حدود {decl:+.1f}° — قطب‌نمای مغناطیسی: ~{magnetic:.0f}°",
+    ])
+    return chr(10).join([
+        section(f"🕋 قبله‌نما — {label}", main_body),
+        section("📌 چطور با قطب‌نما بایستم؟", how_body),
+        section("⚠️ شمال مغناطیسی ≠ شمال حقیقی", warn_body),
+    ])
 
-    return (
-        f"🕋 **قبله‌نما — {label}**\n\n"
-        f"{source_line}\n\n"
-        f"📐 زاویه از شمال حقیقی: **{bearing:.1f}°**\n"
-        f"🧭 جهت تقریبی: **{direction}**\n"
-        f"📏 فاصله تا کعبه: **{dist}**\n\n"
-        f"📌 **چطور با قطب‌نما بایستم؟**\n"
-        f"۱) قطب‌نما یا قبله‌نمای گوشی را باز کن و دور از فلز نگه دار.\n"
-        f"۲) عقربه/شاخص را با **شمال** هم‌راستا کن.\n"
-        f"۳) بدن را **ساعت‌گرد** بچرخان تا به حدود **{bearing:.0f}°** برسی.\n"
-        f"۴) همان سمت، قبله است (تقریباً {direction}).\n\n"
-        f"⚠️ **شمال مغناطیسی ≠ شمال حقیقی**\n"
-        f"زاویه بالا نسبت به شمال جغرافیایی (حقیقی) است.\n"
-        f"میل مغناطیسی تقریبی این ناحیه حدود **{decl:.1f}° شرقی** است؛\n"
-        f"برای قطب‌نمای مغناطیسی ساده می‌توانی حدود **{magnetic:.0f}°** را هدف بگیری.\n"
-        f"دقیق‌ترین مرجع روزمره: **محراب مسجد محل** یا قبله‌نمای GPS گوشی.\n\n"
-        f"💡 برای دقت نقطه‌ای، موقعیت فعلی‌ات را از تلگرام بفرست "
-        f"(دکمه 📎 → موقعیت مکانی / Location)."
-    )
 
 
 def qibla_direction(city: str) -> str:

@@ -412,9 +412,12 @@ async def daily_verse_hadith(user_id: int = 0) -> str:
         src, txt = random.choice(HADITHS)
         hadith_source, hadith_body = src, txt
 
+    from bot.utils.quote_ui import section as _qs
+    _h = f"{hadith_source}\n{hadith_body}" if hadith_source else hadith_body
     return (
-        "📖 **آیه و حدیث**\n\n"
-        f"**آیه:**\n{verse_text}\n\n"
-        f"**حدیث:**\n*{hadith_source}:*\n{hadith_body}\n\n"
-        "💚 تدبر کنید و به کار بندید."
+        _qs("📖 آیه و حدیث — آیه", verse_text)
+        + chr(10)
+        + _qs("📖 حدیث", _h)
+        + chr(10)
+        + "💚 تدبر کنید و به کار بندید."
     )

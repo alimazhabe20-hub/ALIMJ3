@@ -698,15 +698,15 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     if text == "🕌 مذهبی":
-        await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard()); return
+        await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard(), parse_mode="HTML"); return
     if text == "💰 بازار":
-        await update.message.reply_text("💰 بازار:", reply_markup=get_market_keyboard()); return
+        await update.message.reply_text("💰 بازار:", reply_markup=get_market_keyboard(), parse_mode="HTML"); return
     if text == "🌤 هوا و مکان":
-        await update.message.reply_text("🌤 هوا و مکان:", reply_markup=get_weather_geo_keyboard()); return
+        await update.message.reply_text("🌤 هوا و مکان:", reply_markup=get_weather_geo_keyboard(), parse_mode="HTML"); return
     if text == "🛠 ابزارها":
-        await update.message.reply_text("🛠 ابزارها:", reply_markup=get_tools_keyboard()); return
+        await update.message.reply_text("🛠 ابزارها:", reply_markup=get_tools_keyboard(), parse_mode="HTML"); return
     if text == "🎮 سرگرمی":
-        await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard()); return
+        await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard(), parse_mode="HTML"); return
     if text in ("🎨 فونت", "فونت"):
         track_usage(user_id, "font")
         await start_font_studio(update, context)
@@ -984,19 +984,19 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     # مذهبی
     if text in ("🕋 قبله‌نما", "قبله‌نما"):
         track_usage(user_id, "qibla")
-        await update.message.reply_text(qibla_direction(city), reply_markup=get_religious_keyboard()); return
+        await update.message.reply_text(qibla_direction(city), reply_markup=get_religious_keyboard(), parse_mode="HTML"); return
     if text in ("📿 اذکار روز", "اذکار روز"):
         track_usage(user_id, "adhkar")
         await update.message.reply_text(daily_adhkar(user_id), reply_markup=get_religious_keyboard()); return
     if text in ("📖 آیه و حدیث", "آیه و حدیث"):
         track_usage(user_id, "verse")
-        await update.message.reply_text(await daily_verse_hadith(user_id), reply_markup=get_religious_keyboard()); return
+        await update.message.reply_text(await daily_verse_hadith(user_id), reply_markup=get_religious_keyboard(), parse_mode="HTML"); return
     if text in ("🕌 مناسبت مذهبی", "مناسبت مذهبی"):
         track_usage(user_id, "rel_cd")
         # معماری مشابه تقویم: نمای کلی + مناسبت‌های نزدیک + نمای ماه جاری قمری
         body = religious_countdown()
         body += "\n\n" + "—" * 12 + "\n" + religious_month_view()
-        await update.message.reply_text(body, reply_markup=get_religious_keyboard()); return
+        await update.message.reply_text(body, reply_markup=get_religious_keyboard(), parse_mode="HTML"); return
     if text in ("🙏 استخاره", "استخاره"):
         track_usage(user_id, "istikhara")
         context.user_data["waiting_for"] = "istikhara_confirm"
@@ -1010,7 +1010,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(await istikhara(user_id), reply_markup=get_religious_keyboard()); return
     if text == "🔙 بازگشت به مذهبی":
         context.user_data.pop("waiting_for", None)
-        await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard()); return
+        await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard(), parse_mode="HTML"); return
     if text in ("🔔 تنظیم اذان", "تنظیم اذان"):
         track_usage(user_id, "azan")
         await _show_azan_settings(update, user_id, city)
@@ -1166,7 +1166,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             await _show_azan_settings(update, user_id, city, note=f"{label} {status} شد.")
             return
     if text in ("🔙 بازگشت به مذهبی",):
-        await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard())
+        await update.message.reply_text("🕌 مذهبی:", reply_markup=get_religious_keyboard(), parse_mode="HTML")
         return
     # «دستیار خرید» قدیمی حذف شده؛ خرید اکنون بخشی از همان دستیار هوشمند است.
     if text in ("🛒 دستیار خرید", "دستیار خرید", "🛍 دستیار خرید"):
@@ -1186,7 +1186,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception as _e:
             await fail_notice(notice, update.message, "market", detail=str(_e), reply_markup=get_market_keyboard())
             return
-        await update.message.reply_text("💰 بازار", reply_markup=get_market_keyboard()); return
+        await update.message.reply_text("💰 بازار", reply_markup=get_market_keyboard(), parse_mode="HTML"); return
     if text in ("💎 ۲۰ ارز برتر کریپتو", "۲۰ ارز برتر کریپتو", "💎 ۳۰۰ ارز برتر کریپتو", "۳۰۰ ارز برتر کریپتو", "کریپتو"):
         track_usage(user_id, "crypto_top")
         notice = await send_loading(update.message, "crypto_top")
@@ -1196,7 +1196,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception as _e:
             await fail_notice(notice, update.message, "crypto_top", detail=str(_e), reply_markup=get_market_keyboard())
             return
-        await update.message.reply_text("💎 کریپتو", reply_markup=get_market_keyboard()); return
+        await update.message.reply_text("💎 کریپتو", reply_markup=get_market_keyboard(), parse_mode="HTML"); return
     if text in ("🔄 تبدیل ارز", "تبدیل ارز", "🔄 تبدیل ارز / کریپتو", "تبدیل ارز / کریپتو"):
         context.user_data["waiting_for"] = "currency"; track_usage(user_id, "currency")
         await update.message.reply_text(
@@ -1282,10 +1282,10 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     # هوا
     if text in ("🌤 پیش‌بینی هوا", "پیش‌بینی هوا"):
         track_usage(user_id, "forecast")
-        await update.message.reply_text(await weather_forecast(city), reply_markup=get_weather_geo_keyboard()); return
+        await update.message.reply_text(await weather_forecast(city), reply_markup=get_weather_geo_keyboard(), parse_mode="HTML"); return
     if text in ("🌫 کیفیت هوا", "کیفیت هوا"):
         track_usage(user_id, "aqi")
-        await update.message.reply_text(await air_quality(city), reply_markup=get_weather_geo_keyboard()); return
+        await update.message.reply_text(await air_quality(city), reply_markup=get_weather_geo_keyboard(), parse_mode="HTML"); return
     if text in ("🗺 فاصله شهرها", "فاصله شهرها", "🗺 فاصله جهانی", "فاصله جهانی"):
         context.user_data["waiting_for"] = "distance"; track_usage(user_id, "distance")
         await update.message.reply_text(
@@ -1301,7 +1301,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         ); return
     if text in ("📍 لوکیشن من", "لوکیشن من"):
         track_usage(user_id, "location")
-        await update.message.reply_text(f"📍 لوکیشن را از 📎 بفرستید.\nشهر فعلی: {city}", reply_markup=get_weather_geo_keyboard()); return
+        await update.message.reply_text(f"📍 لوکیشن را از 📎 بفرستید.\nشهر فعلی: {city}", reply_markup=get_weather_geo_keyboard(), parse_mode="HTML"); return
     # ابزار
     if text in ("🔢 ماشین‌حساب", "ماشین‌حساب"):
         track_usage(user_id, "calc")
@@ -1319,7 +1319,7 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         ); return
     if text in ("📝 شمارش متن", "شمارش متن"):
         context.user_data["waiting_for"] = "count_text"; track_usage(user_id, "count")
-        await update.message.reply_text("📝 متن را بفرستید:", reply_markup=get_tools_keyboard()); return
+        await update.message.reply_text("📝 متن را بفرستید:", reply_markup=get_tools_keyboard(), parse_mode="HTML"); return
     # سرگرمی
     if text in ("📖 فال حافظ", "فال حافظ"):
         track_usage(user_id, "hafez"); await update.message.reply_text(await hafez_fal(user_id), reply_markup=get_fun_keyboard()); return
@@ -1349,16 +1349,16 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(await joke_of_day(cat, user_id=update.effective_user.id), reply_markup=get_joke_keyboard())
         return
     if text in ("🔙 بازگشت به سرگرمی",):
-        await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard()); return
+        await update.message.reply_text("🎮 سرگرمی:", reply_markup=get_fun_keyboard(), parse_mode="HTML"); return
     if text in ("🧠 دانستنی روز", "دانستنی روز"):
-        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(user_id=user_id), reply_markup=get_fun_keyboard()); return
+        track_usage(user_id, "fact"); await update.message.reply_text(await fact_of_day(user_id=user_id), reply_markup=get_fun_keyboard(), parse_mode="HTML"); return
     if text in ("💪 چالش امروز", "چالش امروز"):
         track_usage(user_id, "challenge")
         try:
             _ch = await daily_challenge(user_id=user_id)
         except TypeError:
             _ch = await daily_challenge()
-        await update.message.reply_text(_ch, reply_markup=get_fun_keyboard())
+        await update.message.reply_text(_ch, reply_markup=get_fun_keyboard(), parse_mode="HTML")
         return
     if text in ("💖 جمله انگیزشی", "جمله انگیزشی"):
         track_usage(user_id, "motivation")

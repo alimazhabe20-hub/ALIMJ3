@@ -215,7 +215,8 @@ def random_joke(category: str = None, user_id: int = None) -> str:
     else:
         text = random.choice(pool)
 
-    return f"😂 **جوک ({label})**\n\n{text}"
+    from bot.utils.quote_ui import section as _qs
+    return _qs(f"😂 جوک ({label})", text)
 
 # ===== end merged part =====
 
@@ -689,10 +690,12 @@ async def fact_of_day(user_id=None):
             lst.append(fact_fa)
             if len(lst) > _FACT_RECENT_MAX:
                 _FACT_RECENT[uid] = lst[-_FACT_RECENT_MAX:]
-        return f"🧠 **دانستنی**\n\n{fact_fa}"
+        from bot.utils.quote_ui import section as _qs
+        return _qs("🧠 دانستنی", fact_fa)
 
     fact_fa = _pick_local_fact(user_id)
-    return f"🧠 **دانستنی**\n\n{fact_fa}"
+    from bot.utils.quote_ui import section as _qs
+    return _qs("🧠 دانستنی", fact_fa)
 
 
 
@@ -785,12 +788,9 @@ async def daily_challenge(user_id: int | None = None) -> str:
     }
     tip = tips.get(cat, "وقتی انجام دادی به خودت امتیاز بده.")
 
-    return (
-        f"💪 **چالش امروز**\n"
-        f"{emoji} دسته: **{cat}**\n\n"
-        f"{text}\n\n"
-        f"💡 {tip}\n"
-        f"✅ بعد از انجام، به خودت یک آفرین بگو!"
-    )
+    from bot.utils.quote_ui import section as _qs
+    body = text + chr(10)*2 + f"💡 {tip}" + chr(10) + "✅ بعد از انجام، به خودت یک آفرین بگو!"
+    return _qs(f"💪 چالش امروز · {emoji} {cat}", body)
+
 
 # ===== end merged part =====

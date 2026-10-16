@@ -86,7 +86,7 @@ async def _h_crypto_full(u, c, t, uid):
     if not symbol and parts:
         symbol = parts[0]
     if not symbol:
-        await u.message.reply_text("❌ نماد را بفرستید. مثال: btc یا eth 30", reply_markup=get_market_keyboard())
+        await u.message.reply_text("❌ نماد را بفرستید. مثال: btc یا eth 30", reply_markup=get_market_keyboard(), parse_mode="HTML")
         return
 
     symbol = symbol.lower().replace("usdt", "").strip()
