@@ -164,7 +164,10 @@ FOREIGN_ALIASES = {
 IRAN_ALIASES = {
     "دیجی کالا": "digikala.com",
     "دیجی‌کالا": "digikala.com",
+    "دیجیکالا": "digikala.com",
+    "دیجی‌کالا": "digikala.com",
     "digikala": "digikala.com",
+    "dk": "digikala.com",
     "ترب": "torob.com",
     "torob": "torob.com",
     "تکنولایف": "technolife.ir",
@@ -517,30 +520,94 @@ def _clean_query(text: str) -> str:
         flags=re.I,
     )
     q = re.sub(r"(?:سایت|فروشگاه)\s+(?:خارجی|های خارجی|های ایرانی|ایرانی)", " ", q, flags=re.I)
+    q = re.sub(
+        r"(?:فقط\s*)?(?:از\s*)?(?:تو\s*|در\s*|روی\s*)?(?:دیجی\s*کالا|دیجی‌کالا|دیجیکالا|digikala|ترب|torob|تکنولایف)",
+        " ",
+        q,
+        flags=re.I,
+    )
+    q = re.sub(r"(?:زیر|تا|حداکثر|بودجه)\s*\d+[\d,٬]*\s*(?:هزار|میلیون|م|تومان|تومن)?", " ", q, flags=re.I)
     q = re.sub(r"https?://\S+", " ", q)
     q = re.sub(r"\s+", " ", q).strip(" ؟?!،,")
     return q or str(text or "").strip()
 
 
 def _budget(text: str) -> int:
-    t = _digits(text).replace(",", "").replace("٬", "")
-    patterns = (
+    """استخراج سقف بودجه به تومان.
+
+    پشتیبانی:
+    - زیر/تا ۵۰ میلیون
+    - زیر 700 هزار / 700 هزار تومن
+    - زیر 700 تومن  (محاوره‌ای = 700 هزار)
+    - 1500000 تومان
+    """
+    raw = _digits(text).replace(",", "").replace("٬", "")
+    # میلیون
+    m = re.search(
         r"(?:بودجه|تا|زیر|حداکثر|حدود|حد)\s*(\d+(?:\.\d+)?)\s*(?:میلیون|م)\b",
-        r"(\d+(?:\.\d+)?)\s*(?:میلیون|م)\s*(?:تومان|تومن)?",
-        r"(?:بودجه|تا|زیر|حداکثر|حدود|حد)\s*(\d{5,})\s*(?:تومان|تومن)?",
+        raw,
+        re.I,
     )
-    for pat in patterns:
-        m = re.search(pat, t, re.I)
-        if m:
-            try:
-                n = float(m.group(1))
-                if "میلیون" in m.group(0) or re.search(r"\d+(?:\.\d+)?\s*م\b", m.group(0)):
-                    n *= 1_000_000
-                if n >= 100_000:
-                    return int(n)
-            except Exception:
-                pass
+    if not m:
+        m = re.search(r"(\d+(?:\.\d+)?)\s*(?:میلیون|م)\s*(?:تومان|تومن)?", raw, re.I)
+    if m:
+        try:
+            n = float(m.group(1)) * 1_000_000
+            if n >= 100_000:
+                return int(n)
+        except Exception:
+            pass
+    # هزار
+    m = re.search(
+        r"(?:بودجه|تا|زیر|حداکثر|حدود|حد)?\s*(\d{1,5})\s*هزار\s*(?:تومان|تومن)?",
+        raw,
+        re.I,
+    )
+    if m:
+        try:
+            n = float(m.group(1)) * 1_000
+            if n >= 50_000:
+                return int(n)
+        except Exception:
+            pass
+    # عدد کامل ۵ رقم به بالا
+    m = re.search(
+        r"(?:بودجه|تا|زیر|حداکثر|حدود|حد)\s*(\d{5,})\s*(?:تومان|تومن)?",
+        raw,
+        re.I,
+    )
+    if m:
+        try:
+            n = float(m.group(1))
+            if n >= 100_000:
+                return int(n)
+        except Exception:
+            pass
+    m = re.search(r"(\d{5,})\s*(?:تومان|تومن)\b", raw, re.I)
+    if m:
+        try:
+            n = float(m.group(1))
+            if n >= 100_000:
+                return int(n)
+        except Exception:
+            pass
+    # محاوره: «زیر 700 تومن» / «تا 700 تومان» → 700 هزار
+    m = re.search(
+        r"(?:بودجه|تا|زیر|حداکثر|حدود|حد)\s*(\d{2,4})\s*(?:تومان|تومن)\b",
+        raw,
+        re.I,
+    )
+    if m:
+        try:
+            n = float(m.group(1))
+            if 10 <= n < 10_000:
+                n *= 1_000  # 700 تومن = 700,000
+            if n >= 50_000:
+                return int(n)
+        except Exception:
+            pass
     return 0
+
 
 
 def _foreign_requested(text: str) -> bool:
@@ -555,12 +622,35 @@ def _foreign_requested(text: str) -> bool:
 
 
 def _explicit_domain(text: str) -> str:
-    q = str(text or "").lower()
-    for alias, domain in sorted({**IRAN_ALIASES, **FOREIGN_ALIASES}.items(), key=lambda x: -len(x[0])):
-        if alias in q:
+    raw = str(text or "")
+    q_low = raw.lower().replace("ي", "ی").replace("ك", "ک")
+    q_compact = re.sub(r"[\s\u200c]+", "", q_low)
+    pairs = sorted({**IRAN_ALIASES, **FOREIGN_ALIASES}.items(), key=lambda x: -len(x[0]))
+    for alias, domain in pairs:
+        a_low = alias.lower()
+        a_compact = re.sub(r"[\s\u200c]+", "", a_low)
+        if a_compact and a_compact in q_compact:
             return domain
-    m = re.search(r"(?:https?://)?(?:www\.)?([a-z0-9][a-z0-9.-]+\.[a-z]{2,})(?:/[^\s]*)?", q)
+        if a_low in q_low:
+            return domain
+    m = re.search(r"(?:https?://)?(?:www\.)?([a-z0-9][a-z0-9.-]+\.[a-z]{2,})(?:/[^\s]*)?", q_low)
     return m.group(1).lower().rstrip(".") if m else ""
+
+
+def _exclusive_store(text: str) -> bool:
+    """کاربر صریحاً فقط یک فروشگاه خواسته؟"""
+    q = str(text or "").lower().replace("ي", "ی").replace("ك", "ک")
+    return bool(
+        re.search(
+            r"فقط\s*(?:از|تو|در|روی)?\s*(?:دیجی|ترب|تکنولایف|اسنپ)|"
+            r"فقط\s*دیجی|"
+            r"از\s*همان\s*دیجی|همون\s*دیجی|"
+            r"only\s*digikala|only\s*torob",
+            q,
+            re.I,
+        )
+    )
+
 
 
 def _tokens(text: str) -> set[str]:
@@ -2194,20 +2284,26 @@ async def search_shopping(
 
         rows: list[dict] = []
 
-        # Direct API (highest confidence)
-        if not foreign and not domain:
+        # Direct API (highest confidence) — حتی وقتی فقط یک فروشگاه خواسته شده
+        if not foreign:
             direct_tasks = []
+            want_dk = (not domain) or domain in ("digikala.com",)
+            want_tb = (not domain) or domain in ("torob.com",)
+            # اگر فروشگاه انحصاری غیر از این دو باشد، API عمومی نزن
+            if domain and domain not in ("digikala.com", "torob.com"):
+                want_dk = want_tb = False
             for v in variants[:2]:
-                direct_tasks += [
-                    _direct_digikala(v, max_price, max(8, max_results)),
-                    _direct_torob(v, max_price, max(8, max_results)),
-                ]
-            direct_batches = await asyncio.gather(*direct_tasks, return_exceptions=True)
-            for b in direct_batches:
-                if isinstance(b, list):
-                    for x in b:
-                        x["_verified_direct"] = True
-                        rows.append(x)
+                if want_dk:
+                    direct_tasks.append(_direct_digikala(v, max_price, max(8, max_results)))
+                if want_tb:
+                    direct_tasks.append(_direct_torob(v, max_price, max(8, max_results)))
+            if direct_tasks:
+                direct_batches = await asyncio.gather(*direct_tasks, return_exceptions=True)
+                for b in direct_batches:
+                    if isinstance(b, list):
+                        for x in b:
+                            x["_verified_direct"] = True
+                            rows.append(x)
 
         # Direct site pages
         direct_site_tasks = []
@@ -2270,6 +2366,22 @@ async def search_shopping(
 
         # حذف قیمت‌های پرت (مثلاً ÷۱۰ اشتباه از ترب)
         filtered = _filter_price_outliers(filtered)
+        # فیلتر سخت فروشگاه + بودجه (قبل از رتبه‌بندی)
+        if domain:
+            def _row_domain_ok(r: dict) -> bool:
+                u = str(r.get("url") or "").lower()
+                s = str(r.get("source") or "").lower()
+                if domain == "digikala.com":
+                    return ("digikala" in u) or ("دیجی" in s)
+                if domain == "torob.com":
+                    return ("torob" in u) or ("ترب" in s)
+                return domain.split(".")[0] in u
+            filtered = [r for r in filtered if _row_domain_ok(r)]
+        if max_price:
+            filtered = [
+                r for r in filtered
+                if not r.get("price") or int(r.get("price") or 0) <= int(max_price)
+            ]
         rows = _rank(filtered, clean, max_price)
         # اعتبارسنجی متقابل قیمت بین منابع
         rows = _cross_validate_prices(rows)
