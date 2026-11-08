@@ -587,3 +587,13 @@ __all__ = [
     "get_iraq_cities_keyboard", "get_language_keyboard", "get_font_keyboard",
     "get_font_en_keyboard", "get_font_fa_keyboard",
 ]
+
+
+def group_safe_markup(reply_markup, *, is_group: bool = False):
+    """در گروه ReplyKeyboard نشان داده نشود (فقط Inline)."""
+    if not is_group or reply_markup is None:
+        return reply_markup
+    from telegram import ReplyKeyboardMarkup, InlineKeyboardMarkup
+    if isinstance(reply_markup, ReplyKeyboardMarkup):
+        return None
+    return reply_markup
