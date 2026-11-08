@@ -351,6 +351,11 @@ def main():
         startup_self_check()
 
     init_db()
+    try:
+        from bot.handlers.group_settings import ensure_group_settings_table
+        ensure_group_settings_table()
+    except Exception as _gs:
+        logger.debug('group settings init: %s', _gs)
     backup_db()
 
     app = (
@@ -379,6 +384,16 @@ def main():
     app.add_handler(CommandHandler("automation", automation_command))
     app.add_handler(CommandHandler("agent", agent_command))
     app.add_handler(CommandHandler("plugins", plugins_command))
+    # Group AI commands
+    try:
+        from bot.handlers.group_commands import ask_command, groupsettings_command
+        app.add_handler(CommandHandler("ask", ask_command))
+        app.add_handler(CommandHandler("ai", ask_command))
+        app.add_handler(CommandHandler("groupsettings", groupsettings_command))
+        app.add_handler(CommandHandler("gsettings", groupsettings_command))
+    except Exception as _gc:
+        logger.warning("group commands skipped: %s", _gc)
+
     # V61-V65 platform commands
     app.add_handler(CommandHandler("features", features_command))
     app.add_handler(CommandHandler("watchlist", watchlist_command))
@@ -443,39 +458,13 @@ def main():
     except Exception as _gm:
         logger.warning("group chat_member handler skipped: %s", _gm)
 
-    # Group dismiss / help callbacks
-    async def _group_callback_router(update, context):
-        q = update.callback_query
-        if not q:
-            return
-        data = q.data or ""
-        try:
-            if data == "group_dismiss":
-                await q.answer("حذف شد")
-                try:
-                    await q.message.delete()
-                except Exception:
-                    try:
-                        await q.edit_message_reply_markup(reply_markup=None)
-                    except Exception:
-                        pass
-                return
-            if data == "group_help":
-                await q.answer()
-                uname = (context.bot.username or "bot").lstrip("@")
-                await q.message.reply_text(
-                    f"🧠 در گروه:\n"
-                    f"• منشن کن: @{uname} سؤالت\n"
-                    f"• یا به پیام من ریپلای کن\n"
-                    f"• یا بنویس: ! سؤالت\n\n"
-                    f"برای منوی کامل بهم تو پیوی پیام بده.",
-                    disable_web_page_preview=True,
-                )
-                return
-        except Exception as exc:
-            logger.debug("group callback: %s", exc)
+    # Group callbacks (dismiss / help / settings)
+    try:
+        from bot.handlers.group_commands import group_callback_handler
+        app.add_handler(CallbackQueryHandler(group_callback_handler, pattern=r"^(group_|gset:)"))
+    except Exception as _gcb:
+        logger.warning("group callback skipped: %s", _gcb)
 
-    app.add_handler(CallbackQueryHandler(_group_callback_router, pattern=r"^group_"))
 
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
