@@ -2,25 +2,23 @@
 Group Mode — پشتیبانی حرفه‌ای ربات در گروه‌ها و سوپرگروه‌ها.
 
 قوانین UX گروه:
-- فقط با منشن، ریپلای به ربات، یا دستورات صریح پاسخ می‌دهد (جلوگیری از اسپم).
+- فقط با منشن، ریپلای به ربات، دستورات صریح یا پیشوند پاسخ می‌دهد.
 - ReplyKeyboard استفاده نمی‌شود؛ فقط InlineKeyboard.
-- پاسخ‌ها کوتاه‌تر، تمیزتر و با attribution (نام کاربر) هستند.
-- استریم نوشتن لحظه‌ای فعال است.
+- پاسخ‌ها کوتاه‌تر، تمیزتر و با attribution هستند.
+- ادمین گروه می‌تواند AI را فعال/غیرفعال کند.
 """
 from __future__ import annotations
 
 import re
 from typing import Optional, Tuple
 
-from telegram import Update, Chat, Message, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.constants import ChatType, ChatAction
+from telegram import Update, Chat, Message, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
+from telegram.constants import ChatType, ChatMemberStatus
 from telegram.ext import ContextTypes
 
 from bot.logger import logger
 from bot.config import config
 
-
-# --- Helpers ---------------------------------------------------------------
 
 def is_group_chat(chat: Optional[Chat]) -> bool:
     if not chat:
@@ -36,14 +34,13 @@ def is_private_chat(chat: Optional[Chat]) -> bool:
 
 def get_bot_username(context: ContextTypes.DEFAULT_TYPE) -> str:
     bot = context.bot
-    uname = getattr(bot, "username", None) or ""
+    uname = getattr(bot, "username", None) or getattr(config, "BOT_USERNAME", "") or ""
     return (uname or "").lstrip("@").lower()
 
 
 def is_bot_mentioned(text: str, bot_username: str) -> bool:
     if not text or not bot_username:
         return False
-    # @username anywhere (case-insensitive)
     pattern = rf"(?<!\w)@{re.escape(bot_username)}(?!\w)"
     return bool(re.search(pattern, text, flags=re.IGNORECASE))
 
@@ -63,12 +60,6 @@ def should_respond_in_group(
     *,
     allow_commands: bool = True,
 ) -> Tuple[bool, str]:
-    """
-    تصمیم می‌گیرد آیا ربات باید در گروه به این پیام پاسخ دهد یا نه.
-
-    Returns:
-        (should_respond, reason)
-    """
     message = update.effective_message
     chat = update.effective_chat
     if not message or not chat or not is_group_chat(chat):
@@ -78,19 +69,15 @@ def should_respond_in_group(
     bot_id = context.bot.id
     bot_uname = get_bot_username(context)
 
-    # 1) دستورات (شروع با /)
     if allow_commands and text.startswith("/"):
         return True, "command"
 
-    # 2) منشن ربات
     if is_bot_mentioned(text, bot_uname):
         return True, "mention"
 
-    # 3) ریپلای به پیام ربات
     if is_reply_to_bot(message, bot_id):
         return True, "reply"
 
-    # 4) پیشوند اختیاری (قابل تنظیم)
     prefixes = getattr(config, "GROUP_TRIGGER_PREFIXES", ["!", "ربات", "هوشمند"])
     low = text.lower()
     for p in prefixes:
@@ -104,7 +91,6 @@ def should_respond_in_group(
 
 
 def clean_group_prompt(text: str, bot_username: str) -> str:
-    """منشن و پیشوند را از متن سؤال پاک می‌کند تا به AI تمیز برسد."""
     if not text:
         return ""
     cleaned = text
@@ -115,19 +101,28 @@ def clean_group_prompt(text: str, bot_username: str) -> str:
             cleaned,
             flags=re.IGNORECASE,
         )
-    # حذف پیشوندهای رایج
     cleaned = re.sub(r"^(?:!|ربات|هوشمند)\s*", "", cleaned.strip(), flags=re.IGNORECASE)
+    # حذف /ask و /ai از ابتدای متن
+    cleaned = re.sub(r"^/(?:ask|ai)(?:@\w+)?\s*", "", cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
 
 
 def group_attribution(user) -> str:
-    """نام کاربر برای نمایش در پاسخ گروهی."""
     if not user:
         return "کاربر"
     name = (user.full_name or user.first_name or "کاربر").strip()
     if len(name) > 28:
         name = name[:25] + "…"
     return name
+
+
+def _esc(s: str) -> str:
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
 def group_ai_header(user, *, streaming: bool = False) -> str:
@@ -141,48 +136,68 @@ def group_ai_footer() -> str:
     return "\n━━━━━━━━━━━━━━\n💡 ریپلای کن یا منشن کن تا ادامه بدیم"
 
 
-def _esc(s: str) -> str:
-    return (
-        str(s)
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
-
-
 def group_inline_actions(user_id: int, answer_id: Optional[str] = None) -> InlineKeyboardMarkup:
-    """دکمه‌های مینیمال و حرفه‌ای مخصوص گروه."""
     rows = [
         [
             InlineKeyboardButton("🔄 ادامه", callback_data=f"ai_continue:{answer_id or 0}"),
-            InlineKeyboardButton("🗑️ پاک کردن", callback_data="group_dismiss"),
-        ],
-        [
-            InlineKeyboardButton("💬 چت خصوصی", url=f"https://t.me/{getattr(config, 'BOT_USERNAME', 'roozeziba_bot')}"),
+            InlineKeyboardButton("🗑️", callback_data="group_dismiss"),
         ],
     ]
     return InlineKeyboardMarkup(rows)
 
 
-# متن خوش‌آمدگویی وقتی ربات به گروه اضافه می‌شود
+def settings_keyboard(chat_id: int, settings: dict) -> InlineKeyboardMarkup:
+    ai_on = bool(settings.get("ai_enabled", 1))
+    short_on = bool(settings.get("short_replies", 1))
+    ai_label = "✅ AI فعال" if ai_on else "❌ AI خاموش"
+    short_label = "✅ پاسخ کوتاه" if short_on else "📝 پاسخ کامل"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(ai_label, callback_data=f"gset:ai:{chat_id}")],
+        [InlineKeyboardButton(short_label, callback_data=f"gset:short:{chat_id}")],
+        [InlineKeyboardButton("بستن", callback_data="group_dismiss")],
+    ])
+
+
+async def user_is_group_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """بررسی ادمین بودن کاربر در گروه (یا ادمین سراسری ربات)."""
+    user = update.effective_user
+    chat = update.effective_chat
+    if not user or not chat:
+        return False
+    if user.id in getattr(config, "ADMIN_IDS", []):
+        return True
+    try:
+        member = await context.bot.get_chat_member(chat.id, user.id)
+        status = member.status
+        return status in (
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.OWNER,
+            "administrator",
+            "creator",
+        )
+    except Exception as exc:
+        logger.debug("user_is_group_admin: %s", exc)
+        return False
+
+
 GROUP_WELCOME_TEXT = """✨ <b>سلام! من روز زیبا هستم</b>
 
 در این گروه می‌تونم کمکتون کنم:
 
 🧠 <b>هوش مصنوعی</b>
-• منشن کنید: <code>@{bot_username} سؤالتون</code>
-• یا به پیام من ریپلای کنید
-• یا بنویسید: <code>! سؤالتون</code>
+• منشن: <code>@{bot_username} سؤالتون</code>
+• ریپلای به پیام من
+• دستور: <code>/ask سؤالتون</code> یا <code>/ai سؤالتون</code>
+• پیشوند: <code>! سؤالتون</code>
 
 📊 بازار · 🌤️ آب‌وهوا · 📅 تقویم · 📥 دانلود
-و خیلی قابلیت‌های دیگه با دستورات `/help`
 
+⚙️ ادمین‌ها: <code>/groupsettings</code> برای تنظیمات گروه
 ━━━━━━━━━━━━━━
 💡 برای تجربه کامل‌تر، بهم تو پیوی پیام بده."""
 
 
 async def send_group_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """وقتی ربات به گروه اضافه می‌شود."""
     chat = update.effective_chat
     if not chat or not is_group_chat(chat):
         return
@@ -190,6 +205,7 @@ async def send_group_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE)
     text = GROUP_WELCOME_TEXT.format(bot_username=uname)
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("📖 راهنما", callback_data="group_help")],
+        [InlineKeyboardButton("⚙️ تنظیمات گروه", callback_data="group_settings_open")],
         [InlineKeyboardButton("💬 شروع در پیوی", url=f"https://t.me/{uname}?start=group")],
     ])
     try:
@@ -205,7 +221,6 @@ async def send_group_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """تشخیص اضافه شدن ربات به گروه."""
     result = update.my_chat_member
     if not result:
         return
@@ -214,7 +229,11 @@ async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TY
         return
     old = result.old_chat_member.status if result.old_chat_member else ""
     new = result.new_chat_member.status if result.new_chat_member else ""
-    # اضافه شدن یا ارتقا به عضو/ادمین
     if new in ("member", "administrator") and old in ("left", "kicked", ""):
         logger.info("Bot added to group %s (%s)", chat.id, chat.title)
+        try:
+            from bot.handlers.group_settings import ensure_group_settings_table
+            ensure_group_settings_table()
+        except Exception:
+            pass
         await send_group_welcome(update, context)

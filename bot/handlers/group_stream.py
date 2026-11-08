@@ -1,17 +1,15 @@
 """
-استریم حرفه‌ای و لحظه‌ای برای پاسخ‌های AI — مخصوص گروه و پیوی.
+استریم حرفه‌ای و لحظه‌ای برای پاسخ‌های AI — گروه و پیوی.
 
-ویژگی‌ها:
-- نوشتن تدریجی با حس typewriter (ویرایش پیام با فاصله‌های کوتاه)
-- هدر و فوتر تمیز در گروه‌ها
-- مدیریت rate-limit تلگرام برای edit
-- حالت loading جذاب
+- انیمیشن لودینگ چندفریم
+- پاسخ کوتاه‌تر خودکار در گروه
+- پرامپت ضد توهم (grounded)
 """
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import Optional, AsyncIterator, Tuple
+from typing import Optional
 
 from telegram import Update, Message, InlineKeyboardMarkup
 from telegram.constants import ChatAction, ParseMode
@@ -23,34 +21,52 @@ from bot.handlers.group_mode import (
     group_ai_header,
     group_ai_footer,
     group_inline_actions,
-    group_attribution,
     _esc,
 )
 
+MIN_EDIT_INTERVAL = 0.45
+MIN_CHARS_DELTA = 22
+MAX_STREAM_PREVIEW = 3600
 
-# فاصله حداقل بین دو edit (تلگرام محدودیت دارد)
-MIN_EDIT_INTERVAL = 0.55
-# حداقل کاراکتر جدید برای هر ویرایش
-MIN_CHARS_DELTA = 28
-# حداکثر طول پیش‌نمایش استریم
-MAX_STREAM_PREVIEW = 3800
-
-
+# فریم‌های انیمیشن لودینگ (چرخشی)
 LOADING_FRAMES = [
+    "⏳ ░░░░░░░░░░  در حال فکر…",
+    "⏳ ▓░░░░░░░░░  در حال فکر…",
+    "⏳ ▓▓░░░░░░░░  در حال فکر…",
+    "⏳ ▓▓▓░░░░░░░  در حال فکر…",
+    "⏳ ▓▓▓▓░░░░░░  در حال فکر…",
+    "⏳ ▓▓▓▓▓░░░░░  در حال فکر…",
+    "⏳ ▓▓▓▓▓▓░░░░  در حال فکر…",
+    "⏳ ▓▓▓▓▓▓▓░░░  در حال فکر…",
+    "⏳ ▓▓▓▓▓▓▓▓░░  در حال فکر…",
+    "⏳ ▓▓▓▓▓▓▓▓▓░  در حال فکر…",
+    "✍️ ▓▓▓▓▓▓▓▓▓▓  در حال نوشتن…",
+]
+
+WRITING_FRAMES = [
     "✍️ در حال نوشتن",
-    "✍️ در حال نوشتن.",
-    "✍️ در حال نوشتن..",
-    "✍️ در حال نوشتن...",
+    "✍️ در حال نوشتن ·",
+    "✍️ در حال نوشتن ··",
+    "✍️ در حال نوشتن ···",
 ]
 
 
 def _cursor(frame_idx: int = 0) -> str:
-    # نشانگر چشمک‌زن ساده
     return "▋" if (frame_idx % 2 == 0) else " "
 
 
-async def keep_typing(bot, chat_id: int, stop_event: asyncio.Event, interval: float = 4.0):
-    """نگه‌داشتن وضعیت «در حال تایپ» تا پایان تولید پاسخ."""
+GROUP_GROUNDED_SUFFIX = (
+    "\n\n[قوانین سخت گروه]\n"
+    "- فقط بر اساس واقعیت، داده زنده، یا دانش معتبر جواب بده.\n"
+    "- اگر مطمئن نیستی، صریح بگو «نمی‌دانم» یا «اطلاعات کافی ندارم»؛ حدس نزن.\n"
+    "- عدد، قیمت، تاریخ، آمار و اخبار را از خودت نساز.\n"
+    "- جواب کوتاه، مفید و بدون حاشیه باشد (حداکثر چند پاراگراف کوتاه).\n"
+    "- از تعریف الکی و جملات پرکننده پرهیز کن.\n"
+    "- اگر سؤال مبهم است، یک سؤال کوتاه برای شفاف‌سازی بپرس.\n"
+)
+
+
+async def keep_typing(bot, chat_id: int, stop_event: asyncio.Event, interval: float = 3.5):
     while not stop_event.is_set():
         try:
             await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
@@ -62,6 +78,36 @@ async def keep_typing(bot, chat_id: int, stop_event: asyncio.Event, interval: fl
             continue
 
 
+async def _animate_loading(sent: Message, header: str, stop_event: asyncio.Event, in_group: bool):
+    """انیمیشن لودینگ تا وقتی استریم شروع شود."""
+    i = 0
+    while not stop_event.is_set():
+        frame = LOADING_FRAMES[i % len(LOADING_FRAMES)]
+        try:
+            if in_group:
+                text = header + f"<i>{frame}</i>"
+                await sent.edit_text(text, parse_mode=ParseMode.HTML)
+            else:
+                await sent.edit_text(frame)
+        except Exception:
+            pass
+        i += 1
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=0.55)
+        except asyncio.TimeoutError:
+            continue
+
+
+def _build_group_prompt(prompt: str, *, short: bool, max_chars: int) -> str:
+    extra = GROUP_GROUNDED_SUFFIX
+    if short:
+        extra += (
+            f"\n- سقف تقریبی پاسخ: حدود {max_chars} کاراکتر. "
+            "مفصل‌گویی ممنوع مگر کاربر صریحاً بخواهد.\n"
+        )
+    return (prompt or "").strip() + extra
+
+
 async def stream_ai_to_message(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -70,11 +116,6 @@ async def stream_ai_to_message(
     *,
     stream_fn=None,
 ) -> Optional[Message]:
-    """
-    پاسخ AI را به صورت لحظه‌ای روی یک پیام می‌نویسد (edit تدریجی).
-
-    stream_fn باید یک async generator باشد که (piece, label) yield کند.
-    """
     from bot.services.ai_service import ask_ai_stream
     from bot.services.ai_extras import store_answer, get_ai_result_keyboard
 
@@ -87,14 +128,38 @@ async def stream_ai_to_message(
     in_group = is_group_chat(chat)
     bot = context.bot
 
-    # پیام اولیه
+    short = False
+    max_chars = 900
+    if in_group:
+        try:
+            from bot.handlers.group_settings import is_group_ai_enabled, group_wants_short, group_max_chars
+            if not is_group_ai_enabled(chat.id):
+                try:
+                    await message.reply_text(
+                        "⏸ هوش مصنوعی در این گروه توسط ادمین خاموش شده.\n"
+                        "ادمین می‌تواند با /groupsettings فعال کند."
+                    )
+                except Exception:
+                    pass
+                return None
+            short = group_wants_short(chat.id)
+            max_chars = group_max_chars(chat.id)
+        except Exception as exc:
+            logger.debug("group settings read: %s", exc)
+
+    # پرامپت هوشمند + کوتاه
+    final_prompt = prompt
+    if in_group:
+        final_prompt = _build_group_prompt(prompt, short=short, max_chars=max_chars)
+
     if in_group:
         header = group_ai_header(user, streaming=True)
-        initial = header + "✍️ <i>در حال فکر کردن...</i>"
+        initial = header + f"<i>{LOADING_FRAMES[0]}</i>"
         parse_mode = ParseMode.HTML
     else:
-        initial = "✍️ در حال نوشتن..."
+        initial = LOADING_FRAMES[0]
         parse_mode = None
+        header = ""
 
     try:
         sent = await message.reply_text(initial, parse_mode=parse_mode)
@@ -103,26 +168,36 @@ async def stream_ai_to_message(
         return None
 
     stop_typing = asyncio.Event()
+    stop_loading = asyncio.Event()
     typing_task = asyncio.create_task(keep_typing(bot, chat.id, stop_typing))
+    loading_task = asyncio.create_task(_animate_loading(sent, header, stop_loading, in_group))
 
     buf: list[str] = []
-    provider_label = ""
     last_edit = 0.0
     last_len = 0
     last_rendered = initial
     frame = 0
-    final_answer = ""
+    first_token = False
 
     try:
-        gen = stream_fn(user_id, prompt) if stream_fn else ask_ai_stream(user_id, prompt)
+        gen = stream_fn(user_id, final_prompt) if stream_fn else ask_ai_stream(user_id, final_prompt)
         async for piece, label in gen:
             if label:
-                provider_label = label
                 continue
             if not piece:
                 continue
+            if not first_token:
+                first_token = True
+                stop_loading.set()
+                try:
+                    await loading_task
+                except Exception:
+                    pass
             buf.append(piece)
             current = "".join(buf)
+            # در گروه پاسخ را زودتر کوتاه نگه می‌داریم در پیش‌نمایش
+            if in_group and short and len(current) > max_chars + 200:
+                current = current[: max_chars + 200]
             now = time.monotonic()
             delta = len(current) - last_len
 
@@ -132,11 +207,12 @@ async def stream_ai_to_message(
                     preview_body = preview_body[: MAX_STREAM_PREVIEW - 10] + "…"
 
                 if in_group:
-                    header = group_ai_header(user, streaming=True)
-                    preview = header + _esc(preview_body) + _cursor(frame)
+                    h = group_ai_header(user, streaming=True)
+                    preview = h + _esc(preview_body) + _cursor(frame)
                     pm = ParseMode.HTML
                 else:
-                    preview = "🤖 " + preview_body + _cursor(frame)
+                    writing = WRITING_FRAMES[frame % len(WRITING_FRAMES)]
+                    preview = f"{writing}\n\n🤖 " + preview_body + _cursor(frame)
                     pm = None
 
                 if preview != last_rendered:
@@ -147,22 +223,30 @@ async def stream_ai_to_message(
                         last_len = len(current)
                         frame += 1
                     except Exception as edit_err:
-                        # پیام خیلی سریع یا محتوای یکسان
                         logger.debug("stream edit skip: %s", edit_err)
 
         final_answer = "".join(buf).strip()
         if not final_answer:
-            final_answer = "متأسفم، پاسخ خالی برگشت. دوباره امتحان کن."
+            final_answer = "اطلاعات کافی برای پاسخ مطمئن ندارم. سؤال را دقیق‌تر بپرس."
 
-        # ذخیره برای ادامه
+        # کوتاه‌سازی نهایی در گروه
+        if in_group and short and len(final_answer) > max_chars:
+            cut = final_answer[:max_chars]
+            # برش روی مرز جمله اگر ممکن باشد
+            for sep in ("。", ".", "!", "?", "\n", "۔"):
+                pos = cut.rfind(sep)
+                if pos > max_chars * 0.55:
+                    cut = cut[: pos + 1]
+                    break
+            final_answer = cut.rstrip() + "…"
+
         aid = store_answer(user_id, final_answer, prompt=prompt)
 
-        # ساخت پیام نهایی
         if in_group:
-            header = group_ai_header(user, streaming=False)
+            h = group_ai_header(user, streaming=False)
             body = _esc(final_answer)
             footer = group_ai_footer()
-            final_text = f"{header}{body}{footer}"
+            final_text = f"{h}{body}{footer}"
             if len(final_text) > 4090:
                 final_text = final_text[:4080] + "…"
             kb = group_inline_actions(user_id, str(aid) if aid else None)
@@ -171,7 +255,6 @@ async def stream_ai_to_message(
             except Exception:
                 await sent.edit_text(final_answer[:4000], reply_markup=kb)
         else:
-            # پیوی — همان سبک قبلی با بهبود
             offer = len(final_answer) >= 1600
             kb = get_ai_result_keyboard(user_id, aid, offer_continue=offer)
             text = "🤖 " + final_answer
@@ -187,14 +270,15 @@ async def stream_ai_to_message(
     except Exception as exc:
         logger.warning("stream_ai_to_message failed: %s", exc)
         try:
-            err = "⚠️ خطا در تولید پاسخ. چند لحظه بعد دوباره امتحان کن."
-            await sent.edit_text(err)
+            await sent.edit_text("⚠️ خطا در تولید پاسخ. چند لحظه بعد دوباره امتحان کن.")
         except Exception:
             pass
         return sent
     finally:
         stop_typing.set()
-        try:
-            await typing_task
-        except Exception:
-            pass
+        stop_loading.set()
+        for t in (typing_task, loading_task):
+            try:
+                await t
+            except Exception:
+                pass

@@ -19,6 +19,16 @@ async def handle_ai_text(update, context, text, user_id, city=None, first_name=N
     try:
         from bot.handlers.group_mode import is_group_chat
         if is_group_chat(update.effective_chat) and text and not text.startswith(("➕", "🏠", "📅", "🕌", "💰", "🌤", "🛠", "🎮", "🎨", "👤", "🏙", "🌍", "🔙")):
+            # چک فعال بودن AI در این گروه
+            try:
+                from bot.handlers.group_settings import is_group_ai_enabled
+                if not is_group_ai_enabled(update.effective_chat.id):
+                    await update.message.reply_text(
+                        "⏸ هوش مصنوعی در این گروه خاموش است.\nادمین: /groupsettings"
+                    )
+                    return True
+            except Exception:
+                pass
             # قابلیت‌های ویژه + AI استریم
             try:
                 from bot.handlers.messages_ai import _handle_special_ai_intents, _ask_ai_with_typing, _send_ai_answer
