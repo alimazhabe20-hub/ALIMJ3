@@ -87,6 +87,11 @@ class Config:
     AUTO_REACTIONS_MIN_CONFIDENCE = max(0.0, min(1.0, float(os.getenv("AUTO_REACTIONS_MIN_CONFIDENCE", "0.80"))))
     AUTO_REACTIONS_COOLDOWN = max(0.0, float(os.getenv("AUTO_REACTIONS_COOLDOWN", "0")))
     AUTO_REACTIONS_SCOPE = os.getenv("AUTO_REACTIONS_SCOPE", "private,group,supergroup").strip()
+
+    # Group mode (professional)
+    GROUP_TRIGGER_PREFIXES = [p.strip() for p in os.getenv("GROUP_TRIGGER_PREFIXES", "! ,ربات,هوشمند").split(",") if p.strip()]
+    GROUP_AI_ENABLED = os.getenv("GROUP_AI_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+    BOT_USERNAME = os.getenv("BOT_USERNAME", "").strip().lstrip("@")
     AUTO_REACTIONS_MAX_TEXT_LENGTH = max(40, int(os.getenv("AUTO_REACTIONS_MAX_TEXT_LENGTH", "1200")))
     AUTO_REACTIONS_BIG = os.getenv("AUTO_REACTIONS_BIG", "false").strip().lower() in {"1", "true", "yes", "on"}
     AUTO_REACTIONS_TIMEOUT = max(1.0, min(10.0, float(os.getenv("AUTO_REACTIONS_TIMEOUT", "4"))))

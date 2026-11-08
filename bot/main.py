@@ -2,7 +2,7 @@
 import asyncio
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
-    MessageHandler, filters, ContextTypes,
+    MessageHandler, ChatMemberHandler, filters, ContextTypes,
 )
 from telegram import Update
 from bot.config import config
@@ -435,6 +435,49 @@ def main():
     app.add_handler(
         MessageHandler(filters.VOICE | filters.AUDIO, voice_ai_handler)
     )
+    
+    # --- Group mode: detect when bot is added to a group ---
+    try:
+        from bot.handlers.group_mode import handle_my_chat_member
+        app.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
+    except Exception as _gm:
+        logger.warning("group chat_member handler skipped: %s", _gm)
+
+    # Group dismiss / help callbacks
+    async def _group_callback_router(update, context):
+        q = update.callback_query
+        if not q:
+            return
+        data = q.data or ""
+        try:
+            if data == "group_dismiss":
+                await q.answer("حذف شد")
+                try:
+                    await q.message.delete()
+                except Exception:
+                    try:
+                        await q.edit_message_reply_markup(reply_markup=None)
+                    except Exception:
+                        pass
+                return
+            if data == "group_help":
+                await q.answer()
+                uname = (context.bot.username or "bot").lstrip("@")
+                await q.message.reply_text(
+                    f"🧠 در گروه:\n"
+                    f"• منشن کن: @{uname} سؤالت\n"
+                    f"• یا به پیام من ریپلای کن\n"
+                    f"• یا بنویس: ! سؤالت\n\n"
+                    f"برای منوی کامل بهم تو پیوی پیام بده.",
+                    disable_web_page_preview=True,
+                )
+                return
+        except Exception as exc:
+            logger.debug("group callback: %s", exc)
+
+    app.add_handler(CallbackQueryHandler(_group_callback_router, pattern=r"^group_"))
+
+
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_error_handler(error_handler)
     try:
