@@ -2,7 +2,7 @@
 Group Mode — پشتیبانی حرفه‌ای ربات در گروه‌ها و سوپرگروه‌ها.
 
 قوانین UX گروه:
-- فقط با منشن، ریپلای به ربات، دستورات صریح یا پیشوند پاسخ می‌دهد.
+- هوشمند: سؤال و موضوعات مرتبط را بدون منشن هم تشخیص می‌دهد؛ چت معمولی را نادیده می‌گیرد.
 - ReplyKeyboard استفاده نمی‌شود؛ فقط InlineKeyboard.
 - پاسخ‌ها کوتاه‌تر، تمیزتر و با attribution هستند.
 - ادمین گروه می‌تواند AI را فعال/غیرفعال کند.
@@ -54,12 +54,102 @@ def is_reply_to_bot(message: Optional[Message], bot_id: int) -> bool:
     return False
 
 
+# الگوهای سؤال و درخواست که ربات باید جواب دهد (بدون منشن اجباری)
+_QUESTION_MARKERS = re.compile(
+    r"(?:"
+    r"[?؟]"
+    r"|^(?:آیا|چطور|چگونه|چرا|کی|کجا|کدام|چند|چه(?:‌| )?قدر|چی(?:ه)?|کیه|چیه)"
+    r"|(?:چقدر|چندتا|چند تا|چی شد|چه خبر|چخبر)"
+    r")",
+    re.IGNORECASE,
+)
+
+# موضوعات و قابلیت‌هایی که ربات بلد است
+_BOT_TOPICS = re.compile(
+    r"(?:"
+    r"قیمت|دلار|یورو|تومان|تومن|طلا|سکه|ارز|بورس|شاخص"
+    r"|بیت‌?کوین|بیتکوین|اتریوم|رمزارز|کریپتو|تتر|btc|eth|usdt"
+    r"|آب[‌ ]?و[‌ ]?هوا|هوای|دمای|باران|برف"
+    r"|اذان|نماز|اوقات شرعی|قبله|استخاره|آیه|حدیث|اذکار"
+    r"|تقویم|تاریخ|تبدیل تاریخ|سنم|زودیاک|برج"
+    r"|دانلود|یوتیوب|اینستا|استوری"
+    r"|تحلیل|rsi|حمایت|مقاومت|fear.?greed"
+    r"|ساعت|منطقه زمانی"
+    r"|ربات|هوشمند|دستیار|کمک کن|بگو|بگو ببینم"
+    r")",
+    re.IGNORECASE,
+)
+
+# پیام‌های چت معمولی که نباید جواب داده شود
+_IGNORE_CHAT = re.compile(
+    r"^(?:"
+    r"سلام|سلوم|درود|صبح بخیر|شب بخیر|خوبی|خوبم|مرسی|ممنون|ممنونم|عالی|آفرین"
+    r"| Lol|hahaha|هههه|خخخ|😂+|🤣+|😅+|😊+|❤️+|👍+"
+    r"|باشه|باش|اوکی|ok|okay|آها|آهان|هه|نمیخوام|بیخیال"
+    r"|شب خوش|خداحافظ|بای|bye"
+    r")[\s!.،,]*$",
+    re.IGNORECASE,
+)
+
+# خطاب مستقیم به ربات بدون @
+_DIRECT_ADDRESS = re.compile(
+    r"(?:"
+    r"^(?:ای )?ربات"
+    r"|^(?:ای )?هوشمند"
+    r"|بگو\s"
+    r"|بهم بگو"
+    r"|می‌(?:تو)?ونی\s"
+    r"|میتونی\s"
+    r"|کمک(?:م)?(?:\s|$)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def looks_like_bot_request(text: str) -> Tuple[bool, str]:
+    """تشخیص هوشمند: آیا این پیام درخواست از ربات است یا چت معمولی گروه؟"""
+    if not text:
+        return False, "empty"
+    t = text.strip()
+    if len(t) < 2:
+        return False, "too_short"
+    if len(t) > 800:
+        # پیام خیلی بلند معمولاً چت/کپی است نه سؤال سریع گروه
+        if not _QUESTION_MARKERS.search(t[:200]) and not _BOT_TOPICS.search(t[:200]):
+            return False, "too_long"
+
+    if _IGNORE_CHAT.match(t):
+        return False, "casual_chat"
+
+    if _DIRECT_ADDRESS.search(t):
+        return True, "direct_address"
+
+    if _QUESTION_MARKERS.search(t) and _BOT_TOPICS.search(t):
+        return True, "question_topic"
+
+    # جملات موضوع‌محور بدون علامت سؤال، مثل «قیمت دلار» یا «هوای تهران»
+    if _BOT_TOPICS.search(t) and len(t) <= 80:
+        # حداقل یک کلمه معنادار غیر از salutation
+        words = re.findall(r"[\w؀-ۿ]+", t)
+        if len(words) >= 1:
+            return True, "topic_phrase"
+
+    return False, "no_intent"
+
+
 def should_respond_in_group(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     *,
     allow_commands: bool = True,
 ) -> Tuple[bool, str]:
+    """
+    تصمیم هوشمند پاسخ در گروه.
+
+    اولویت:
+    1) دستور /  2) منشن  3) ریپلای به ربات  4) پیشوند
+    5) تشخیص هوشمند سؤال/موضوع (بدون نیاز به منشن)
+    """
     message = update.effective_message
     chat = update.effective_chat
     if not message or not chat or not is_group_chat(chat):
@@ -86,6 +176,13 @@ def should_respond_in_group(
             continue
         if low.startswith(p.lower() + " ") or low == p.lower():
             return True, f"prefix:{p}"
+
+    # حالت هوشمند: بدون منشن/دستور هم اگر سؤال یا موضوع مرتبط بود جواب بده
+    smart_on = getattr(config, "GROUP_SMART_REPLY", True)
+    if smart_on:
+        ok, reason = looks_like_bot_request(text)
+        if ok:
+            return True, f"smart:{reason}"
 
     return False, "ignored"
 
