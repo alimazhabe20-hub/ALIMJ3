@@ -15,6 +15,31 @@ def _is_back_more(text):
     return "بازگشت به بیشتر" in text
 
 async def handle_ai_text(update, context, text, user_id, city=None, first_name=None):
+    # در گروه: هر پیامی که از gate رد شده، مستقیم به AI برود (بدون نیاز به ai_mode)
+    try:
+        from bot.handlers.group_mode import is_group_chat
+        if is_group_chat(update.effective_chat) and text and not text.startswith(("➕", "🏠", "📅", "🕌", "💰", "🌤", "🛠", "🎮", "🎨", "👤", "🏙", "🌍", "🔙")):
+            # قابلیت‌های ویژه + AI استریم
+            try:
+                from bot.handlers.messages_ai import _handle_special_ai_intents, _ask_ai_with_typing, _send_ai_answer
+                handled = await _handle_special_ai_intents(update, context, user_id, text)
+                if handled:
+                    return True
+                answer, provider = await _ask_ai_with_typing(update, context, user_id, text)
+                if context.user_data is not None:
+                    context.user_data["last_ai_answer"] = answer
+                if not (context.user_data or {}).get("_ai_already_sent"):
+                    await _send_ai_answer(update, user_id, answer, prompt=text)
+                if context.user_data is not None:
+                    context.user_data.pop("_ai_already_sent", None)
+                return True
+            except Exception as ge:
+                from bot.logger import logger
+                logger.warning("group AI path: %s", ge)
+                return True
+    except Exception:
+        pass
+
     if context.user_data.get("ai_mode"):
         if _is_back(text) or _is_back_more(text):
             context.user_data.pop("ai_mode", None)

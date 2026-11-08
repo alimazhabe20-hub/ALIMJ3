@@ -321,7 +321,7 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
                 buf.append(piece)
                 current = "".join(buf)
                 now = time.monotonic()
-                if now - last_edit >= 0.8 and len(current) - last_len >= 80:
+                if now - last_edit >= 0.55 and len(current) - last_len >= 36:
                     preview = "🤖 " + current
                     if len(preview) > 4000:
                         preview = preview[:3990] + "…"
@@ -411,7 +411,22 @@ async def _send_ai_voice(update_or_msg, text: str, user_id: int, reply_markup=No
         except Exception as _exc:
             logger.debug("%s: %s", __name__, _exc)
 async def _ask_ai_with_typing(update, context, user_id, text):
-    """AI request with stable chunked output and safe fallback semantics."""
+    """AI با استریم لحظه‌ای — در گروه از streamer حرفه‌ای استفاده می‌کند."""
+    try:
+        from bot.handlers.group_mode import is_group_chat
+        from bot.handlers.group_stream import stream_ai_to_message
+        if is_group_chat(update.effective_chat):
+            sent = await stream_ai_to_message(update, context, user_id, text)
+            if context.user_data is not None:
+                context.user_data["_ai_already_sent"] = True
+            # برگرداندن متن نهایی برای سازگاری با callerهای قدیمی
+            if sent and getattr(sent, "text", None):
+                return sent.text, "group-stream"
+            return "", "group-stream"
+    except Exception as _gs:
+        from bot.logger import logger
+        logger.debug("group stream fallback: %s", _gs)
+    # Fallback to private/chunked stream path
     import asyncio
     stop_event = asyncio.Event()
     chat_id = update.effective_chat.id
