@@ -169,8 +169,13 @@ async def check_and_rate_limit(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception:
         set_current_language("fa")
 
-    # Force-join is enforced for every user-facing update, including /start.
-    # This prevents the entry-point from becoming a bypass around the channel lock.
+    # Force-join فقط در چت خصوصی — در گروه/سوپرگروه اعمال نمی‌شود.
+    chat = update.effective_chat
+    is_group = bool(chat and getattr(chat, "type", None) in ("group", "supergroup"))
+    if is_group:
+        return await rate_limit_middleware(update, context)
+
+    # Force-join is enforced for every user-facing update in private chats, including /start.
     if not await check_membership(update, context):
         lang = get_user_language(update.effective_user.id)
         text = TEXTS.get(lang, TEXTS["fa"])["not_member"].format(
