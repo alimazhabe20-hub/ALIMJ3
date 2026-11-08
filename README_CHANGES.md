@@ -1,18 +1,19 @@
-# فایل‌های جدید و تغییر یافته — پشتیبانی گروه + استریم لحظه‌ای
+# تغییرات گروه v2
 
-## فایل‌های جدید
-- `bot/handlers/group_mode.py` — تشخیص گروه، تریگر منشن/ریپلای/پیشوند، خوش‌آمدگویی
-- `bot/handlers/group_stream.py` — استریم حرفه‌ای لحظه‌ای با UI گروه
+## جدید
+- bot/handlers/group_settings.py — تنظیمات هر گروه در SQLite
+- bot/handlers/group_commands.py — /ask /ai /groupsettings + callbackها
 
-## فایل‌های تغییر یافته
-- `bot/handlers/messages_routing.py` — گیت گروه در ابتدای هندلر متن
-- `bot/handlers/messages_ai_router.py` — مسیر مستقیم AI برای گروه
-- `bot/handlers/messages_ai.py` — استفاده از streamer گروه + cadence بهتر
-- `bot/handlers/messages.py` — همان بهبودها (نسخه facade/legacy)
-- `bot/main.py` — ثبت ChatMemberHandler و callbackهای گروه
-- `bot/config.py` — تنظیمات GROUP_*
-- `bot/utils/helpers.py` — تابع group_safe_markup
-- `.env.example` — متغیرهای جدید گروه
+## به‌روز شده
+- bot/handlers/group_mode.py — ادمین، تنظیمات، خوش‌آمدگویی
+- bot/handlers/group_stream.py — انیمیشن لودینگ، پاسخ کوتاه، پرامپت ضدتوهم
+- bot/handlers/messages_*.py — گیت گروه + چک AI
+- bot/main.py — ثبت دستورات و کالبک‌ها
+- bot/config.py — GROUP_*
+- bot/services/ai_service*.py — تقویت ضد حدس‌زدن
+- bot/utils/helpers.py — group_safe_markup
+- .env.example
 
-## نصب
-فایل‌ها را با حفظ مسیر روی پروژه اصلی کپی کنید.
+## دستورات گروه
+- /ask سؤال   یا   /ai سؤال
+- /groupsettings  (فقط ادمین) — روشن/خاموش AI و پاسخ کوتاه
