@@ -32,7 +32,7 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     if not ok:
         # اجبار برای کلیدواژه‌های واضح حتی اگر gate رد کند
         t = (text or "").strip()
-        force_keys = ("قیمت", "دلار", "طلا", "هوا", "ربات", "بیتکوین", "بیت‌کوین", "/ask", "/ai", "http://", "https://", "tiktok", "instagram", "youtube", "دانلود")
+        force_keys = ("قیمت", "دلار", "طلا", "هوا", "ربات", "بیتکوین", "بیت‌کوین", "/ask", "/ai", "http://", "https://", "tiktok", "instagram", "youtube", "دانلود", "تحلیل", "اینو", "اینا", "عکس", "تصویر")
         if not any(k in t for k in force_keys):
             return False
         logger.info("group_reply force-override for clear keyword")
@@ -47,6 +47,58 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         except Exception as exc:
             logger.warning("group empty prompt reply failed: %s", exc)
         return True
+
+
+    # 0b) تحلیل عکس/ویدیو وقتی به مدیا ریپلای شده
+    try:
+        reply = message.reply_to_message
+        wants_vision = bool(re.search(r"تحلیل|اینو|اینا|ببین|چیه|چی میبینی|توضیح|describe|analyze", prompt, re.I))
+        if reply and (wants_vision or "ربات" in (text or "")):
+            photo = None
+            video = None
+            if reply.photo:
+                photo = reply.photo[-1]
+            elif reply.document and (reply.document.mime_type or "").startswith("image/"):
+                photo = reply.document
+            elif reply.video or reply.video_note:
+                video = reply.video or reply.video_note
+            if photo or video:
+                logger.info("group_reply vision analyze reply media")
+                notice = await message.reply_text("🔎 در حال تحلیل تصویر...")
+                try:
+                    if photo:
+                        tg_file = await photo.get_file()
+                        data = bytes(await tg_file.download_as_bytearray())
+                        from bot.services.ai_service import ask_ai_media
+                        result = await ask_ai_media(
+                            user.id,
+                            prompt or "این تصویر را کوتاه و دقیق تحلیل کن.",
+                            images=[(data, "image/jpeg")],
+                        )
+                        if isinstance(result, tuple):
+                            result = result[0]
+                        await message.reply_text(f"🤖 {str(result)[:4000]}")
+                    else:
+                        tg_file = await video.get_file()
+                        data = bytes(await tg_file.download_as_bytearray())
+                        from bot.services.ai_service import analyze_video
+                        mime = getattr(video, "mime_type", None) or "video/mp4"
+                        result = await analyze_video(data, prompt or "این ویدیو را کوتاه تحلیل کن.", mime=mime)
+                        await message.reply_text(f"🤖 {str(result)[:4000]}")
+                except Exception as exc:
+                    logger.warning("group vision failed: %s", exc)
+                    try:
+                        await message.reply_text("⚠️ تحلیل تصویر/ویدیو الان ممکن نشد. دوباره امتحان کن.")
+                    except Exception:
+                        pass
+                finally:
+                    try:
+                        await notice.delete()
+                    except Exception:
+                        pass
+                return True
+    except Exception as exc:
+        logger.warning("group_reply vision branch error: %s", exc)
 
     # 0) دانلودر واقعی برای لینک‌های سوشال/ویدیو
     try:

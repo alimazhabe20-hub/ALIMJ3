@@ -23,9 +23,21 @@ async def media_ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_and_rate_limit(update, context):
         return
 
-    # فقط در حالت AI
+    # در پیوی فقط حالت AI؛ در گروه با کپشن/درخواست مرتبط هم کار کند
+    try:
+        from bot.handlers.group_mode import is_group_chat
+        in_group = is_group_chat(update.effective_chat)
+    except Exception:
+        in_group = False
     if not context.user_data.get("ai_mode"):
-        return
+        if not in_group:
+            return
+        # گروه: اگر کپشن خالی و درخواست واضحی نیست، ورود نکن
+        cap = ((update.message.caption if update.message else "") or "").strip()
+        if not cap or not any(k in cap for k in ("ربات", "تحلیل", "اینو", "اینا", "ببین", "چیه")):
+            # هنوز هم اگر فقط عکس بدون کپشن است، می‌تواند بی‌صدا رد شود
+            if not cap:
+                return
 
     user_id = update.effective_user.id
     msg = update.message
