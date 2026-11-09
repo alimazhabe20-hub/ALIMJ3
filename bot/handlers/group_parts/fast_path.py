@@ -88,6 +88,57 @@ def _extract_city(text: str) -> str:
     return "تهران"
 
 
+
+def _format_weather(city: str, w) -> str:
+    """تبدیل خروجی get_weather (dict یا str) به متن خوانا."""
+    if w is None:
+        return ""
+    if isinstance(w, str):
+        s = w.strip()
+        if s.startswith("{") and "temp" in s:
+            # احتمالاً str(dict)
+            try:
+                import ast
+                w = ast.literal_eval(s)
+            except Exception:
+                return s
+        else:
+            return s
+    if not isinstance(w, dict):
+        return str(w)
+
+    def g(*keys, default="—"):
+        for k in keys:
+            if k in w and w[k] is not None and str(w[k]).strip() != "":
+                return w[k]
+        return default
+
+    temp = g("temp", "temperature", "temperature_2m")
+    feels = g("feels_like", "apparent_temperature", default=None)
+    cond = g("condition", "desc", "description", "weather")
+    humidity = g("humidity", "relative_humidity_2m")
+    wind = g("wind", "wind_speed", "wind_speed_10m")
+    pressure = g("pressure", "surface_pressure")
+    high = g("high", "temp_max", default=None)
+    low = g("low", "temp_min", default=None)
+    source = g("source", default="")
+
+    lines = [f"🌤️ <b>آب‌وهوا · {city}</b>", "━━━━━━━━━━━━━━"]
+    lines.append(f"🌡️ دما: <b>{temp}</b>°C")
+    if feels is not None:
+        lines.append(f"🤚 حس واقعی: {feels}°C")
+    lines.append(f"☁️ وضعیت: {cond}")
+    lines.append(f"💧 رطوبت: {humidity}%")
+    lines.append(f"💨 باد: {wind} m/s")
+    if pressure not in ("—", None):
+        lines.append(f"🔵 فشار: {pressure} hPa")
+    if high is not None or low is not None:
+        lines.append(f"⬆️⬇️ بیشینه/کمینه: {high if high is not None else '—'} / {low if low is not None else '—'}°C")
+    if source:
+        lines.append(f"<i>منبع: {source}</i>")
+    return "\n".join(lines)
+
+
 async def run_fast_path(text: str) -> Optional[str]:
     """اجرای fast-path؛ در صورت موفقیت متن آماده برمی‌گرداند."""
     intent = detect_fast_intent(text)
@@ -180,7 +231,9 @@ async def run_fast_path(text: str) -> Optional[str]:
                 w = await asyncio.to_thread(get_weather, city)
             if not w:
                 return None
-            msg = f"🌤️ <b>آب‌وهوا · {city}</b>\n━━━━━━━━━━━━━━\n{w}"
+            msg = _format_weather(city, w)
+            if not msg:
+                return None
             _cache_set(cache_key, msg)
             return msg
 
