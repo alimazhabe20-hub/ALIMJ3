@@ -92,6 +92,9 @@ class Config:
     GROUP_TRIGGER_PREFIXES = [p.strip() for p in os.getenv("GROUP_TRIGGER_PREFIXES", "! ,ربات,هوشمند").split(",") if p.strip()]
     GROUP_AI_ENABLED = os.getenv("GROUP_AI_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
     GROUP_SMART_REPLY = os.getenv("GROUP_SMART_REPLY", "true").strip().lower() not in {"0", "false", "no", "off"}
+    GROUP_SHOP_TIMEOUT = float(os.getenv("GROUP_SHOP_TIMEOUT", "12") or 12)
+    GROUP_STREAM_EDIT_INTERVAL = float(os.getenv("GROUP_STREAM_EDIT_INTERVAL", "0.35") or 0.35)
+    GROUP_FAST_MODEL = os.getenv("GROUP_FAST_MODEL", "").strip()
     BOT_USERNAME = os.getenv("BOT_USERNAME", "").strip().lstrip("@")
     AUTO_REACTIONS_MAX_TEXT_LENGTH = max(40, int(os.getenv("AUTO_REACTIONS_MAX_TEXT_LENGTH", "1200")))
     AUTO_REACTIONS_BIG = os.getenv("AUTO_REACTIONS_BIG", "false").strip().lower() in {"1", "true", "yes", "on"}
