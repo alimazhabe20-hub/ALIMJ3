@@ -32,7 +32,7 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     if not ok:
         # اجبار برای کلیدواژه‌های واضح حتی اگر gate رد کند
         t = (text or "").strip()
-        force_keys = ("قیمت", "دلار", "طلا", "هوا", "ربات", "بیتکوین", "بیت‌کوین", "/ask", "/ai")
+        force_keys = ("قیمت", "دلار", "طلا", "هوا", "ربات", "بیتکوین", "بیت‌کوین", "/ask", "/ai", "http://", "https://", "tiktok", "instagram", "youtube", "دانلود")
         if not any(k in t for k in force_keys):
             return False
         logger.info("group_reply force-override for clear keyword")
@@ -47,6 +47,45 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         except Exception as exc:
             logger.warning("group empty prompt reply failed: %s", exc)
         return True
+
+    # 0) دانلودر واقعی برای لینک‌های سوشال/ویدیو
+    try:
+        import re
+        has_url = bool(re.search(r"https?://|www\.", prompt, re.I))
+        social = bool(re.search(
+            r"(instagram|tiktok|facebook|twitter|x\.com|youtube|youtu\.be|vimeo|dailymotion)",
+            prompt,
+            re.I,
+        ))
+        if has_url and social:
+            logger.info("group_reply downloader url=%r", prompt[:140])
+            handled = False
+            try:
+                from bot.handlers.v70_handlers import handle_downloader_url
+                handled = await handle_downloader_url(update, context, prompt)
+            except Exception as exc:
+                logger.warning("group v70 downloader failed: %s", exc)
+            if handled:
+                return True
+            try:
+                from bot.services.downloader import extract_url
+                from bot.services.insta_downloader import is_social_url
+                from bot.handlers.v71_handlers import _download_social_direct
+                url = extract_url(prompt) or prompt.strip()
+                if url and is_social_url(url):
+                    await _download_social_direct(update, context, url)
+                    return True
+            except Exception as exc:
+                logger.warning("group v71 social download failed: %s", exc)
+            try:
+                await message.reply_text(
+                    "⚠️ دانلود این لینک الان ممکن نشد. دوباره بفرست یا در پیوی امتحان کن."
+                )
+            except Exception:
+                pass
+            return True
+    except Exception as exc:
+        logger.warning("group_reply download branch error: %s", exc)
 
     # 1) Fast-path
     try:
