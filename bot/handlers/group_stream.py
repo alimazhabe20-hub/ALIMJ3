@@ -24,7 +24,11 @@ from bot.handlers.group_mode import (
     _esc,
 )
 
-MIN_EDIT_INTERVAL = 0.35
+try:
+    from bot.config import config as _cfg
+    MIN_EDIT_INTERVAL = float(getattr(_cfg, "GROUP_STREAM_EDIT_INTERVAL", 0.35) or 0.35)
+except Exception:
+    MIN_EDIT_INTERVAL = 0.35
 MIN_CHARS_DELTA = 22
 MAX_STREAM_PREVIEW = 3600
 

@@ -46,6 +46,23 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     bot_uname = get_bot_username(context)
     prompt = clean_group_prompt(text, bot_uname) or (text or "").strip()
 
+    # Intent هوشمند
+    try:
+        from bot.handlers.group_parts.intent import detect_intent
+        intent, intent_q = detect_intent(prompt or text)
+        logger.info("group_reply intent=%s q=%r", intent, (intent_q or "")[:80])
+    except Exception:
+        intent, intent_q = "ai", prompt
+
+    if intent == "help" or not (prompt or "").strip() or (prompt or "").strip() in {"ربات", "هوشمند", "!", "bot"}:
+        try:
+            from bot.handlers.group_parts.group_ui import group_help_text
+            await message.reply_text(group_help_text(), parse_mode="HTML", disable_web_page_preview=True)
+        except Exception as exc:
+            logger.warning("group help failed: %s", exc)
+            await message.reply_text("👋 من اینجام. مثال: قیمت دلار · هوای قم · /ask سؤال")
+        return True
+
     # Explicit group conversation summary command.
     if re.search(r"(?:خلاصه|جمع.?بندی).{0,18}(?:مکالمه|گفتگو|گروه)|(?:مکالمه|گفتگو).{0,18}(?:خلاصه|جمع.?بندی)", prompt, re.I):
         try:
