@@ -65,16 +65,15 @@ def _cursor(frame_idx: int = 0) -> str:
     return "▋" if (frame_idx % 2 == 0) else " "
 
 
-GROUP_GROUNDED_SUFFIX = (
-    "\n\n[قوانین سخت گروه]\n"
-    "- فقط بر اساس واقعیت، داده زنده، یا دانش معتبر جواب بده.\n"
-    "- اگر مطمئن نیستی، صریح بگو «نمی‌دانم» یا «اطلاعات کافی ندارم»؛ حدس نزن.\n"
-    "- عدد، قیمت، تاریخ، آمار و اخبار را از خودت نساز.\n"
-    "- جواب کوتاه، مفید و بدون حاشیه باشد (حداکثر چند پاراگراف کوتاه).\n"
-    "- از تعریف الکی و جملات پرکننده پرهیز کن.\n"
-    "- اگر سؤال مبهم است، یک سؤال کوتاه برای شفاف‌سازی بپرس.\n"
-)
+GROUP_GROUNDED_SUFFIX = """
 
+[قوانین پاسخ گروه]
+- فقط به سؤال فعلی جواب بده؛ متن‌های قبلی را تکرار نکن.
+- اگر داده زنده (قیمت/محصول) نداری، صادقانه بگو و حدس نزن.
+- جواب کوتاه، مرتب و قابل‌استفاده باشد.
+- لینک یا قیمت ساختگی نساز.
+- از کپی کردن تاریخچه مکالمه در جواب خودداری کن.
+"""
 
 async def keep_typing(bot, chat_id: int, stop_event: asyncio.Event, interval: float = 3.5):
     while not stop_event.is_set():
@@ -144,9 +143,9 @@ async def stream_ai_to_message(
         try:
             from bot.handlers.group_parts.group_memory import get_context, add_turn
             ctx = get_context(chat.id)
-            base = prompt
-            if ctx:
-                base = f"맥락 کوتاه گروه:\n{ctx}\n\nسؤال:\n{prompt}"
+            base = (prompt or "").strip()
+            if ctx and len(ctx) < 180:
+                base = (ctx + "\n\nسؤال فعلی: " + base) if (ctx and len(ctx) < 180) else base
             final_prompt = _build_group_prompt(base, short=short, max_chars=max_chars)
             add_turn(chat.id, "user", prompt)
         except Exception:
