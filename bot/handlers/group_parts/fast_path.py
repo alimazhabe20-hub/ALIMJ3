@@ -76,7 +76,10 @@ def detect_fast_intent(text: str) -> Optional[str]:
     # هوا
     if re.search(r"هوا|آب\s*و\s*هوا|دما|باران", t, re.I):
         return "weather"
-    if re.search(r"(?:پیدا\s*کن|بخر|خرید|باتری|باطری|شارژر|ترب|دیجی)", t, re.I) and "دلار" not in t and "طلا" not in t:
+    # خرید فقط با درخواست واضح — نه فقط نام کالا
+    if re.search(r"(?:پیدا\s*کن|برام\s*بخر|میخوام\s*بخرم|لینک\s*بده)", t, re.I):
+        return "shop"
+    if re.search(r"(?:باتری|باطری|شارژر|گوشی)", t, re.I) and re.search(r"(?:پیدا|بخر|قیمت|چند|میخوام)", t, re.I):
         return "shop"
     return None
 
