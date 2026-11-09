@@ -149,7 +149,7 @@ async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
             return
 
         if data.startswith("gset:"):
-            # gset:ai:CHATID  or  gset:short:CHATID
+            # gset:KEY:CHATID
             if not await user_is_group_admin(update, context):
                 await q.answer("فقط ادمین گروه", show_alert=True)
                 return
@@ -158,32 +158,38 @@ async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
                 await q.answer()
                 return
             kind, chat_id_s = parts[1], parts[2]
+            # سازگاری با کلیدهای قدیمی
+            alias = {"ai": "ai_enabled", "short": "short_replies"}
+            kind = alias.get(kind, kind)
             try:
                 chat_id = int(chat_id_s)
             except ValueError:
                 await q.answer()
                 return
             settings = get_group_settings(chat_id)
-            if kind == "ai":
-                new_val = 0 if settings.get("ai_enabled") else 1
-                set_group_setting(chat_id, "ai_enabled", new_val, updated_by=user.id if user else None)
-                await q.answer("AI " + ("فعال شد ✅" if new_val else "خاموش شد"))
-            elif kind == "short":
-                new_val = 0 if settings.get("short_replies") else 1
-                set_group_setting(chat_id, "short_replies", new_val, updated_by=user.id if user else None)
-                await q.answer("پاسخ کوتاه " + ("فعال ✅" if new_val else "خاموش"))
-            else:
+            if kind not in settings and kind not in ("ai_enabled", "short_replies", "fast_path", "mention_only", "admin_only"):
                 await q.answer()
                 return
+            cur = int(settings.get(kind, 0) or 0)
+            new_val = 0 if cur else 1
+            set_group_setting(chat_id, kind, new_val, updated_by=user.id if user else None)
+            labels = {
+                "ai_enabled": "AI",
+                "short_replies": "پاسخ کوتاه",
+                "fast_path": "Fast-path",
+                "mention_only": "فقط منشن",
+                "admin_only": "فقط ادمین",
+            }
+            await q.answer(f"{labels.get(kind, kind)} → {'روشن' if new_val else 'خاموش'}")
             settings = get_group_settings(chat_id)
-            ai = "✅ فعال" if settings.get("ai_enabled") else "❌ خاموش"
-            short = "✅ بله" if settings.get("short_replies") else "❌ خیر"
             text = (
                 f"⚙️ <b>تنظیمات گروه</b>\n"
                 f"━━━━━━━━━━━━━━\n"
-                f"🧠 هوش مصنوعی: <b>{ai}</b>\n"
-                f"✂️ پاسخ کوتاه: <b>{short}</b>\n"
-                f"📏 سقف: <code>{settings.get('max_answer_chars', 900)}</code>"
+                f"🧠 AI: <b>{'✅' if settings.get('ai_enabled') else '❌'}</b>\n"
+                f"✂️ کوتاه: <b>{'✅' if settings.get('short_replies') else '❌'}</b>\n"
+                f"⚡ Fast-path: <b>{'✅' if settings.get('fast_path') else '❌'}</b>\n"
+                f"📌 فقط منشن: <b>{'✅' if settings.get('mention_only') else '❌'}</b>\n"
+                f"👮 فقط ادمین: <b>{'✅' if settings.get('admin_only') else '❌'}</b>"
             )
             try:
                 await q.edit_message_text(

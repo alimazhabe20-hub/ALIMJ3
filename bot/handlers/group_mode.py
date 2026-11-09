@@ -159,6 +159,33 @@ def should_respond_in_group(
     bot_id = context.bot.id
     bot_uname = get_bot_username(context)
 
+    # محدودیت‌های تنظیمات گروه
+    try:
+        from bot.handlers.group_settings import group_mention_only, group_admin_only, is_group_ai_enabled
+        if not is_group_ai_enabled(chat.id):
+            if allow_commands and text.startswith("/"):
+                pass  # دستورات تنظیمات باید کار کنند
+            else:
+                return False, "ai_disabled"
+        if group_admin_only(chat.id):
+            # فقط در should_respond نمی‌توانیم await کنیم؛ چک سبک
+            user = update.effective_user
+            admin_ids = set(getattr(config, "ADMIN_IDS", []) or [])
+            if user and user.id not in admin_ids:
+                # ادمین تلگرام بودن در لایه handler چک می‌شود؛ اینجا فقط فلگ می‌گذاریم
+                context.chat_data["group_admin_only"] = True
+        if group_mention_only(chat.id):
+            # فقط منشن / ریپلای / دستور
+            if allow_commands and text.startswith("/"):
+                return True, "command"
+            if is_bot_mentioned(text, bot_uname):
+                return True, "mention"
+            if is_reply_to_bot(message, bot_id):
+                return True, "reply"
+            return False, "mention_only"
+    except Exception as _se:
+        logger.debug("group settings gate: %s", _se)
+
     if allow_commands and text.startswith("/"):
         return True, "command"
 
@@ -246,11 +273,15 @@ def group_inline_actions(user_id: int, answer_id: Optional[str] = None) -> Inlin
 def settings_keyboard(chat_id: int, settings: dict) -> InlineKeyboardMarkup:
     ai_on = bool(settings.get("ai_enabled", 1))
     short_on = bool(settings.get("short_replies", 1))
-    ai_label = "✅ AI فعال" if ai_on else "❌ AI خاموش"
-    short_label = "✅ پاسخ کوتاه" if short_on else "📝 پاسخ کامل"
+    mention_on = bool(settings.get("mention_only", 0))
+    admin_on = bool(settings.get("admin_only", 0))
+    fast_on = bool(settings.get("fast_path", 1))
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(ai_label, callback_data=f"gset:ai:{chat_id}")],
-        [InlineKeyboardButton(short_label, callback_data=f"gset:short:{chat_id}")],
+        [InlineKeyboardButton("✅ AI فعال" if ai_on else "❌ AI خاموش", callback_data=f"gset:ai_enabled:{chat_id}")],
+        [InlineKeyboardButton("✅ پاسخ کوتاه" if short_on else "📝 پاسخ کامل", callback_data=f"gset:short_replies:{chat_id}")],
+        [InlineKeyboardButton("⚡ Fast-path روشن" if fast_on else "⚡ Fast-path خاموش", callback_data=f"gset:fast_path:{chat_id}")],
+        [InlineKeyboardButton("📌 فقط منشن" if mention_on else "🧠 هوشمند (بدون منشن)", callback_data=f"gset:mention_only:{chat_id}")],
+        [InlineKeyboardButton("👮 فقط ادمین" if admin_on else "👥 همه اعضا", callback_data=f"gset:admin_only:{chat_id}")],
         [InlineKeyboardButton("بستن", callback_data="group_dismiss")],
     ])
 

@@ -147,10 +147,19 @@ async def stream_ai_to_message(
         except Exception as exc:
             logger.debug("group settings read: %s", exc)
 
-    # پرامپت هوشمند + کوتاه
+    # پرامپت هوشمند + کوتاه + حافظه گروه
     final_prompt = prompt
     if in_group:
-        final_prompt = _build_group_prompt(prompt, short=short, max_chars=max_chars)
+        try:
+            from bot.handlers.group_parts.group_memory import get_context, add_turn
+            ctx = get_context(chat.id)
+            base = prompt
+            if ctx:
+                base = f"맥락 کوتاه گروه:\n{ctx}\n\nسؤال:\n{prompt}"
+            final_prompt = _build_group_prompt(base, short=short, max_chars=max_chars)
+            add_turn(chat.id, "user", prompt)
+        except Exception:
+            final_prompt = _build_group_prompt(prompt, short=short, max_chars=max_chars)
 
     if in_group:
         header = group_ai_header(user, streaming=True)
@@ -241,6 +250,14 @@ async def stream_ai_to_message(
             final_answer = cut.rstrip() + "…"
 
         aid = store_answer(user_id, final_answer, prompt=prompt)
+        if in_group:
+            try:
+                from bot.handlers.group_parts.group_memory import add_turn
+                add_turn(chat.id, "bot", final_answer)
+                from bot.handlers.group_parts.metrics import mark
+                mark("group_ai_reply")
+            except Exception:
+                pass
 
         if in_group:
             h = group_ai_header(user, streaming=False)

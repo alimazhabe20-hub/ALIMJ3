@@ -29,6 +29,37 @@ async def handle_ai_text(update, context, text, user_id, city=None, first_name=N
                     return True
             except Exception:
                 pass
+            # Fast-path: قیمت/هوا بدون LLM (سریع)
+            try:
+                from bot.handlers.group_settings import group_fast_path_enabled
+                from bot.handlers.group_parts.fast_path import run_fast_path
+                from bot.handlers.group_parts.metrics import Timer, mark
+                from bot.handlers.group_parts.group_memory import add_turn
+                if group_fast_path_enabled(update.effective_chat.id):
+                    with Timer("group_fast_path"):
+                        fp = await run_fast_path(text)
+                    if fp:
+                        mark("group_fast_path_hit")
+                        add_turn(update.effective_chat.id, "user", text)
+                        add_turn(update.effective_chat.id, "bot", fp)
+                        try:
+                            await update.message.reply_text(fp, parse_mode="HTML", disable_web_page_preview=True)
+                        except Exception:
+                            await update.message.reply_text(str(fp)[:4000])
+                        try:
+                            await context.bot.set_message_reaction(
+                                chat_id=update.effective_chat.id,
+                                message_id=update.message.message_id,
+                                reaction="⚡",
+                            )
+                        except Exception:
+                            pass
+                        return True
+                    mark("group_fast_path_miss")
+            except Exception as _fp:
+                from bot.logger import logger
+                logger.debug("fast_path: %s", _fp)
+
             # قابلیت‌های ویژه + AI استریم
             try:
                 from bot.handlers.messages_ai import _handle_special_ai_intents, _ask_ai_with_typing, _send_ai_answer
