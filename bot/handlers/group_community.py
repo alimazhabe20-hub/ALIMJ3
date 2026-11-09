@@ -136,6 +136,7 @@ def _dashboard_markup(chat_id: int) -> InlineKeyboardMarkup:
          InlineKeyboardButton("🔄 روشن/خاموش خوشامد", callback_data=f"gh:welcome_toggle:{chat_id}")],
         [InlineKeyboardButton("🏆 رتبه‌بندی اعضا", callback_data=f"gh:rank:{chat_id}"),
          InlineKeyboardButton("📊 آمار گروه", callback_data=f"gh:stats:{chat_id}")],
+        [InlineKeyboardButton("🛠 مرکز مدیریت پیشرفته", callback_data=f"ga:dashboard:{chat_id}")],
     ])
 
 
