@@ -421,6 +421,25 @@ def main():
     except Exception as _gcommunity:
         logger.exception("Group community features initialization failed: %s", _gcommunity)
 
+    # Advanced group dashboard, missions and analytics
+    try:
+        from bot.handlers.group_advanced import (
+            ensure_group_advanced_tables, group_control_command,
+            group_stats_command, missions_command, mission_create_command,
+            group_advanced_callback, group_advanced_activity_handler,
+        )
+        ensure_group_advanced_tables()
+        app.add_handler(CommandHandler("groupcontrol", group_control_command))
+        app.add_handler(CommandHandler("groupstats", group_stats_command))
+        app.add_handler(CommandHandler("missions", missions_command))
+        app.add_handler(CommandHandler("missioncreate", mission_create_command))
+        app.add_handler(CallbackQueryHandler(group_advanced_callback, pattern=r"^ga:"))
+        # Run before the existing group activity collector; neither handler consumes updates.
+        app.add_handler(MessageHandler(filters.ALL, group_advanced_activity_handler), group=-2)
+        logger.info("Advanced group dashboard, missions and analytics initialized")
+    except Exception as _group_advanced_exc:
+        logger.exception("Advanced group features initialization failed: %s", _group_advanced_exc)
+
     # V61-V65 platform commands
     app.add_handler(CommandHandler("features", features_command))
     app.add_handler(CommandHandler("watchlist", watchlist_command))
