@@ -28,6 +28,37 @@ MIN_EDIT_INTERVAL = 0.45
 MIN_CHARS_DELTA = 22
 MAX_STREAM_PREVIEW = 3600
 
+
+async def _safe_edit_or_reply(sent, text, *, parse_mode=None, reply_markup=None, fallback_message=None):
+    """ویرایش امن؛ اگر پیام حذف شده بود، پیام جدید می‌فرستد."""
+    try:
+        kwargs = {}
+        if parse_mode is not None:
+            kwargs["parse_mode"] = parse_mode
+        if reply_markup is not None:
+            kwargs["reply_markup"] = reply_markup
+        return await sent.edit_text(text, **kwargs)
+    except Exception as exc:
+        err = str(exc).lower()
+        if "message to edit not found" in err or "message is not modified" in err or "not found" in err:
+            try:
+                chat_id = sent.chat_id
+                bot = sent.get_bot() if hasattr(sent, "get_bot") else None
+                if fallback_message is not None:
+                    return await fallback_message.reply_text(
+                        text, parse_mode=parse_mode, reply_markup=reply_markup
+                    )
+                if bot is not None:
+                    return await bot.send_message(
+                        chat_id=chat_id, text=text, parse_mode=parse_mode, reply_markup=reply_markup
+                    )
+            except Exception as exc2:
+                logger.debug("safe_edit fallback failed: %s", exc2)
+                return None
+        logger.debug("safe_edit skip: %s", exc)
+        return None
+
+
 # فریم‌های انیمیشن لودینگ (چرخشی)
 LOADING_FRAMES = [
     "⏳ ░░░░░░░░░░  در حال فکر…",
@@ -226,7 +257,7 @@ async def stream_ai_to_message(
 
                 if preview != last_rendered:
                     try:
-                        await sent.edit_text(preview, parse_mode=pm)
+                        await _safe_edit_or_reply(sent, preview, parse_mode=pm, fallback_message=message)
                         last_rendered = preview
                         last_edit = now
                         last_len = len(current)
@@ -268,9 +299,9 @@ async def stream_ai_to_message(
                 final_text = final_text[:4080] + "…"
             kb = group_inline_actions(user_id, str(aid) if aid else None)
             try:
-                await sent.edit_text(final_text, parse_mode=ParseMode.HTML, reply_markup=kb)
+                await _safe_edit_or_reply(sent, final_text, parse_mode=ParseMode.HTML, reply_markup=kb, fallback_message=message)
             except Exception:
-                await sent.edit_text(final_answer[:4000], reply_markup=kb)
+                await _safe_edit_or_reply(sent, final_answer[:4000], reply_markup=kb, fallback_message=message)
         else:
             offer = len(final_answer) >= 1600
             kb = get_ai_result_keyboard(user_id, aid, offer_continue=offer)
@@ -278,7 +309,7 @@ async def stream_ai_to_message(
             if len(text) > 4090:
                 text = text[:4080] + "…"
             try:
-                await sent.edit_text(text, reply_markup=kb)
+                await _safe_edit_or_reply(sent, text, reply_markup=kb, fallback_message=message)
             except Exception:
                 await sent.reply_text(text[:4000], reply_markup=kb)
 
@@ -287,9 +318,16 @@ async def stream_ai_to_message(
     except Exception as exc:
         logger.warning("stream_ai_to_message failed: %s", exc)
         try:
-            await sent.edit_text("⚠️ خطا در تولید پاسخ. چند لحظه بعد دوباره امتحان کن.")
+            await _safe_edit_or_reply(
+                sent,
+                "⚠️ خطا در تولید پاسخ. چند لحظه بعد دوباره امتحان کن.",
+                fallback_message=message,
+            )
         except Exception:
-            pass
+            try:
+                await message.reply_text("⚠️ خطا در تولید پاسخ. چند لحظه بعد دوباره امتحان کن.")
+            except Exception:
+                pass
         return sent
     finally:
         stop_typing.set()

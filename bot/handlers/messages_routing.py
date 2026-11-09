@@ -47,6 +47,8 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         chat = update.effective_chat
         if is_group_chat(chat):
             ok, reason = should_respond_in_group(update, context)
+            from bot.logger import logger
+            logger.info("group msg chat=%s ok=%s reason=%s text=%r", getattr(chat, "id", None), ok, reason, (text or "")[:80])
             if not ok:
                 return  # سکوت حرفه‌ای در گروه
             # تمیز کردن منشن از متن برای AI
