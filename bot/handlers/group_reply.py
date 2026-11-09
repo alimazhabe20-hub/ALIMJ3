@@ -30,19 +30,25 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     ok, reason = should_respond_in_group(update, context)
     logger.info("group_reply gate chat=%s ok=%s reason=%s text=%r", chat.id, ok, reason, (text or "")[:100])
     if not ok:
-        # اجبار برای کلیدواژه‌های واضح حتی اگر gate رد کند
+        # فقط اگر خطاب واضح به ربات باشد اجبار کن — نه هر کلمه‌ای مثل «باتری»
         t = (text or "").strip()
-        force_keys = ("قیمت", "دلار", "طلا", "هوا", "ربات", "بیتکوین", "بیت‌کوین", "/ask", "/ai", "http://", "https://", "tiktok", "instagram", "youtube", "دانلود", "تحلیل", "اینو", "اینا", "عکس", "تصویر", "پیدا", "بخر", "باتری", "باطری")
-        if not any(k in t for k in force_keys):
+        explicit = bool(
+            re.search(
+                r"(?:^|\s)(?:ربات|هوشمند|@\w*bot)\b|^/(?:ask|ai)\b|\bپیدا\s*کن\b|\bبرام\s*بخر\b",
+                t,
+                re.I,
+            )
+        )
+        if not explicit:
             return False
-        logger.info("group_reply force-override for clear keyword")
+        logger.info("group_reply force-override explicit address")
 
     bot_uname = get_bot_username(context)
     prompt = clean_group_prompt(text, bot_uname) or (text or "").strip()
-    if not prompt:
+    if not prompt or prompt in {"ربات", "هوشمند", "!", "bot"}:
         try:
             await message.reply_text(
-                "👋 من اینجام.\nبپرس مثلاً: قیمت دلار · هوای قم · /ask سؤال"
+                "👋 من اینجام.\nمثال‌ها:\n• قیمت دلار\n• هوای قم\n• ربات باتری ایفون ۶ پلاس پیدا کن\n• روی عکس Reply کن: ربات اینو تحلیل کن\n• /ask سؤال آزاد"
             )
         except Exception as exc:
             logger.warning("group empty prompt reply failed: %s", exc)
