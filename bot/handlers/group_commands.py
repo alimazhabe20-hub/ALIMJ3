@@ -46,8 +46,10 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if is_group_chat(chat):
-        if not is_group_ai_enabled(chat.id):
-            await message.reply_text("⏸ AI در این گروه خاموش است. ادمین: /groupsettings")
+        from bot.handlers.group_guard import group_ai_access_allowed, claim_group_update
+        if not await group_ai_access_allowed(update, context, notify=True):
+            return
+        if not claim_group_update(update, context, namespace="command"):
             return
         bot_uname = get_bot_username(context)
         text = clean_group_prompt(text, bot_uname) or text
@@ -129,12 +131,13 @@ async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
             return
 
         if data == "group_settings_open":
-            await q.answer()
             if not is_group_chat(chat):
+                await q.answer("این دکمه فقط داخل گروه معتبر است.", show_alert=True)
                 return
             if not await user_is_group_admin(update, context):
                 await q.answer("فقط ادمین", show_alert=True)
                 return
+            await q.answer()
             settings = get_group_settings(chat.id)
             ai = "✅ فعال" if settings.get("ai_enabled") else "❌ خاموش"
             short = "✅ بله" if settings.get("short_replies") else "❌ خیر"
@@ -165,6 +168,10 @@ async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
                 chat_id = int(chat_id_s)
             except ValueError:
                 await q.answer()
+                return
+            # دکمه‌های یک گروه نباید از گروه/گفت‌وگوی دیگری قابل استفاده باشند.
+            if not chat or not is_group_chat(chat) or int(chat.id) != chat_id:
+                await q.answer("این دکمه متعلق به گروه دیگری است.", show_alert=True)
                 return
             settings = get_group_settings(chat_id)
             if kind not in settings and kind not in ("ai_enabled", "short_replies", "fast_path", "mention_only", "admin_only"):

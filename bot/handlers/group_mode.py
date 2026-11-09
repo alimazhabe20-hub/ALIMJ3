@@ -94,8 +94,8 @@ _IGNORE_CHAT = re.compile(
 # خطاب مستقیم به ربات بدون @
 _DIRECT_ADDRESS = re.compile(
     r"(?:"
-    r"^(?:ای )?ربات"
-    r"|^(?:ای )?هوشمند"
+    r"^(?:ای )?ربات\b"
+    r"|^(?:ای )?هوشمند\b"
     r"|بگو\s"
     r"|بهم بگو"
     r"|می‌(?:تو)?ونی\s"
@@ -167,13 +167,6 @@ def should_respond_in_group(
                 pass  # دستورات تنظیمات باید کار کنند
             else:
                 return False, "ai_disabled"
-        if group_admin_only(chat.id):
-            # فقط در should_respond نمی‌توانیم await کنیم؛ چک سبک
-            user = update.effective_user
-            admin_ids = set(getattr(config, "ADMIN_IDS", []) or [])
-            if user and user.id not in admin_ids:
-                # ادمین تلگرام بودن در لایه handler چک می‌شود؛ اینجا فقط فلگ می‌گذاریم
-                context.chat_data["group_admin_only"] = True
         if group_mention_only(chat.id):
             # فقط منشن / ریپلای / دستور
             if allow_commands and text.startswith("/"):
@@ -184,7 +177,8 @@ def should_respond_in_group(
                 return True, "reply"
             return False, "mention_only"
     except Exception as _se:
-        logger.debug("group settings gate: %s", _se)
+        logger.warning("group settings gate failed closed: %s", _se)
+        return False, "settings_unavailable"
 
     if allow_commands and text.startswith("/"):
         return True, "command"
@@ -292,17 +286,16 @@ async def user_is_group_admin(update: Update, context: ContextTypes.DEFAULT_TYPE
     chat = update.effective_chat
     if not user or not chat:
         return False
-    if user.id in getattr(config, "ADMIN_IDS", []):
+    try:
+        global_admin_ids = {int(x) for x in (getattr(config, "ADMIN_IDS", []) or [])}
+    except Exception:
+        global_admin_ids = set()
+    if user.id in global_admin_ids:
         return True
     try:
         member = await context.bot.get_chat_member(chat.id, user.id)
-        status = member.status
-        return status in (
-            ChatMemberStatus.ADMINISTRATOR,
-            ChatMemberStatus.OWNER,
-            "administrator",
-            "creator",
-        )
+        status = getattr(member, "status", "")
+        return str(status).lower() in ("administrator", "creator", "owner")
     except Exception as exc:
         logger.debug("user_is_group_admin: %s", exc)
         return False

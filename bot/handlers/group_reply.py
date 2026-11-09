@@ -30,24 +30,21 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     ok, reason = should_respond_in_group(update, context)
     logger.info("group_reply gate chat=%s ok=%s reason=%s text=%r", chat.id, ok, reason, (text or "")[:100])
     if not ok:
-        # فقط اگر خطاب واضح به ربات باشد اجبار کن — نه هر کلمه‌ای مثل «باتری»
-        t = (text or "").strip()
-        explicit = bool(
-            re.search(
-                r"(?:^|\s)(?:ربات|هوشمند|@\w*bot)\b|^/(?:ask|ai)\b|\bپیدا\s*کن\b|\bبرام\s*بخر\b",
-                t,
-                re.I,
-            )
-        )
-        if not explicit:
-            return False
-        logger.info("group_reply force-override explicit address")
+        return False
+
+    from bot.handlers.group_guard import claim_group_update, group_ai_access_allowed
+    if not await group_ai_access_allowed(update, context, notify=True):
+        return True
+    if not claim_group_update(update, context, namespace="text"):
+        logger.info("duplicate group update ignored chat=%s message=%s", chat.id, message.message_id)
+        return True
 
     bot_uname = get_bot_username(context)
     prompt = clean_group_prompt(text, bot_uname) or (text or "").strip()
     if not prompt or prompt in {"ربات", "هوشمند", "!", "bot"}:
         try:
-            await message.reply_text(
+            from bot.handlers.group_guard import safe_group_reply
+            await safe_group_reply(message,
                 "👋 من اینجام.\nمثال‌ها:\n• قیمت دلار\n• هوای قم\n• ربات باتری ایفون ۶ پلاس پیدا کن\n• روی عکس Reply کن: ربات اینو تحلیل کن\n• /ask سؤال آزاد"
             )
         except Exception as exc:
