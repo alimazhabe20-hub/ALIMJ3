@@ -142,24 +142,17 @@ async def stream_ai_to_message(
     if in_group:
         try:
             from bot.handlers.group_parts.group_memory import get_context, add_turn
-            from bot.handlers.group_mode import group_attribution
-            reply = getattr(message, "reply_to_message", None)
-            ctx = get_context(
-                chat.id,
-                user_id=user_id,
-                reply_to_message_id=getattr(reply, "message_id", None),
-            )
-            speaker = group_attribution(user)
+            ctx = get_context(chat.id)
             base = (prompt or "").strip()
-            if ctx:
-                base = ("زمینهٔ مکالمه گروه:\n" + ctx[-6500:] +
-                        f"\n\nپیام فعلی از طرف {speaker}:\n" + base)
+            if ctx and len(ctx) < 180:
+                base = (ctx + "\n\nسؤال فعلی: " + base) if (ctx and len(ctx) < 180) else base
             final_prompt = _build_group_prompt(base, short=short, max_chars=max_chars)
-            add_turn(
-                chat.id, "user", prompt, user_id=user_id, speaker=speaker,
-                message_id=getattr(message, "message_id", None),
-                reply_to_message_id=getattr(reply, "message_id", None),
-            )
+            try:
+                from bot.handlers.group_community import get_group_assistant_prompt
+                final_prompt += get_group_assistant_prompt(chat.id)
+            except Exception as profile_exc:
+                logger.debug("group assistant profile unavailable: %s", profile_exc)
+            add_turn(chat.id, "user", prompt)
         except Exception:
             final_prompt = _build_group_prompt(prompt, short=short, max_chars=max_chars)
 
@@ -248,7 +241,7 @@ async def stream_ai_to_message(
         if in_group:
             try:
                 from bot.handlers.group_parts.group_memory import add_turn
-                add_turn(chat.id, "bot", final_answer, speaker="روز زیبا", message_id=getattr(sent, "message_id", None))
+                add_turn(chat.id, "bot", final_answer)
                 from bot.handlers.group_parts.metrics import mark
                 mark("group_ai_reply")
             except Exception:
