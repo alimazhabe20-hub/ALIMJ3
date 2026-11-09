@@ -32,7 +32,7 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     if not ok:
         # اجبار برای کلیدواژه‌های واضح حتی اگر gate رد کند
         t = (text or "").strip()
-        force_keys = ("قیمت", "دلار", "طلا", "هوا", "ربات", "بیتکوین", "بیت‌کوین", "/ask", "/ai", "http://", "https://", "tiktok", "instagram", "youtube", "دانلود", "تحلیل", "اینو", "اینا", "عکس", "تصویر")
+        force_keys = ("قیمت", "دلار", "طلا", "هوا", "ربات", "بیتکوین", "بیت‌کوین", "/ask", "/ai", "http://", "https://", "tiktok", "instagram", "youtube", "دانلود", "تحلیل", "اینو", "اینا", "عکس", "تصویر", "پیدا", "بخر", "باتری", "باطری")
         if not any(k in t for k in force_keys):
             return False
         logger.info("group_reply force-override for clear keyword")
