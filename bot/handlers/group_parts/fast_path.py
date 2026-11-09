@@ -222,27 +222,38 @@ async def run_fast_path(text: str) -> Optional[str]:
             return msg
 
 
+
         if intent == "shop":
+            import asyncio
+            from urllib.parse import quote
+            # کوئری تمیز برای جستجو
+            q_clean = re.sub(r"^(?:ربات|هوشمند)\s*", "", text or "", flags=re.I).strip()
+            q_clean = re.sub(r"\b(?:برام|برای من|لینکش?\s*بفرست|پیدا\s*کن)\b", " ", q_clean)
+            q_clean = " ".join(q_clean.split())
             try:
                 from bot.features.market import shopping as _sh
                 if hasattr(_sh, "_CIRCUIT"):
+                    # فقط مدارهای مرده را کمی باز کن
                     _sh._CIRCUIT.clear()
             except Exception:
                 pass
-            from bot.features.market.shopping import search_shopping
-            result = await search_shopping(text, source="all", max_results=5)
-            if not result or "پیدا نشد" in str(result) or "مشخص نیست" in str(result):
-                from urllib.parse import quote
-                q = quote((text or "").replace("ربات", "").strip())
-                return (
-                    "🛒 <b>جستجوی خرید</b>\n"
-                    "━━━━━━━━━━━━━━\n"
-                    "نتیجه فروشگاه‌ها کامل نبود.\n"
-                    f"ترب: https://torob.com/search/?query={q}\n"
-                    f"دیجی‌کالا: https://www.digikala.com/search/?q={q}"
+            result = None
+            try:
+                from bot.features.market.shopping import search_shopping
+                result = await asyncio.wait_for(
+                    search_shopping(q_clean or text, source="torob", max_results=5),
+                    timeout=12.0,
                 )
-            return f"🛒 <b>نتایج خرید</b>\n━━━━━━━━━━━━━━\n{result}"
-
+            except Exception as exc:
+                logger.warning("shop fast_path search failed: %s", exc)
+                result = None
+            # اگر نتیجه واقعی و مفید بود
+            if result and len(str(result)) > 40 and "کامل نبود" not in str(result):
+                bad = ("پیدا نشد" in str(result)) or ("مشخص نیست" in str(result))
+                if not bad:
+                    return f"🛒 <b>نتایج خرید</b>\n━━━━━━━━━━━━━━\n{result}"
+            # شکست: None برگردان تا AI مسیر قبلی (بهتر) فعال شود
+            return None
         if intent == "weather":
             city = _extract_city(text)
             cache_key = f"weather:{city}"
