@@ -30,7 +30,12 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     ok, reason = should_respond_in_group(update, context)
     logger.info("group_reply gate chat=%s ok=%s reason=%s text=%r", chat.id, ok, reason, (text or "")[:100])
     if not ok:
-        return False
+        # اجبار برای کلیدواژه‌های واضح حتی اگر gate رد کند
+        t = (text or "").strip()
+        force_keys = ("قیمت", "دلار", "طلا", "هوا", "ربات", "بیتکوین", "بیت‌کوین", "/ask", "/ai")
+        if not any(k in t for k in force_keys):
+            return False
+        logger.info("group_reply force-override for clear keyword")
 
     bot_uname = get_bot_username(context)
     prompt = clean_group_prompt(text, bot_uname) or (text or "").strip()
