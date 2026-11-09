@@ -394,6 +394,33 @@ def main():
     except Exception as _gc:
         logger.warning("group commands skipped: %s", _gc)
 
+    # Group community features: per-group assistant, polls, games, XP and dashboard
+    try:
+        from bot.handlers.group_community import (
+            ensure_group_community_tables, group_admin_command, set_group_assistant_command,
+            set_group_welcome_command, welcome_toggle_command, rank_command, poll_command,
+            quiz_command, game_command, group_member_join_handler, group_activity_handler,
+            group_community_callback, group_poll_answer_handler,
+        )
+        from telegram.ext import PollAnswerHandler
+        ensure_group_community_tables()
+        app.add_handler(CommandHandler("groupadmin", group_admin_command))
+        app.add_handler(CommandHandler("setassistant", set_group_assistant_command))
+        app.add_handler(CommandHandler("setwelcome", set_group_welcome_command))
+        app.add_handler(CommandHandler("welcometoggle", welcome_toggle_command))
+        app.add_handler(CommandHandler("rank", rank_command))
+        app.add_handler(CommandHandler("poll", poll_command))
+        app.add_handler(CommandHandler("quiz", quiz_command))
+        app.add_handler(CommandHandler("game", game_command))
+        app.add_handler(CallbackQueryHandler(group_community_callback, pattern=r"^gh:"))
+        app.add_handler(PollAnswerHandler(group_poll_answer_handler))
+        # group=-1 records activity before the regular message handlers; it does not consume updates.
+        app.add_handler(MessageHandler(filters.ALL, group_activity_handler), group=-1)
+        app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, group_member_join_handler), group=2)
+        logger.info("Group community features initialized")
+    except Exception as _gcommunity:
+        logger.exception("Group community features initialization failed: %s", _gcommunity)
+
     # V61-V65 platform commands
     app.add_handler(CommandHandler("features", features_command))
     app.add_handler(CommandHandler("watchlist", watchlist_command))
