@@ -24,7 +24,7 @@ from bot.handlers.group_mode import (
     _esc,
 )
 
-MIN_EDIT_INTERVAL = 0.45
+MIN_EDIT_INTERVAL = 0.35
 MIN_CHARS_DELTA = 22
 MAX_STREAM_PREVIEW = 3600
 
