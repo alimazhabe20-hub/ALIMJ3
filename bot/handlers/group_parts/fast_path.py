@@ -76,6 +76,8 @@ def detect_fast_intent(text: str) -> Optional[str]:
     # هوا
     if re.search(r"هوا|آب\s*و\s*هوا|دما|باران", t, re.I):
         return "weather"
+    if re.search(r"(?:پیدا\s*کن|بخر|خرید|باتری|باطری|شارژر|ترب|دیجی)", t, re.I) and "دلار" not in t and "طلا" not in t:
+        return "shop"
     return None
 
 
@@ -215,6 +217,28 @@ async def run_fast_path(text: str) -> Optional[str]:
             msg = f"🪙 <b>{sym.upper()}</b>\n━━━━━━━━━━━━━━\n{result}"
             _cache_set(intent, msg)
             return msg
+
+
+        if intent == "shop":
+            try:
+                from bot.features.market import shopping as _sh
+                if hasattr(_sh, "_CIRCUIT"):
+                    _sh._CIRCUIT.clear()
+            except Exception:
+                pass
+            from bot.features.market.shopping import search_shopping
+            result = await search_shopping(text, source="all", max_results=5)
+            if not result or "پیدا نشد" in str(result) or "مشخص نیست" in str(result):
+                from urllib.parse import quote
+                q = quote((text or "").replace("ربات", "").strip())
+                return (
+                    "🛒 <b>جستجوی خرید</b>\n"
+                    "━━━━━━━━━━━━━━\n"
+                    "نتیجه فروشگاه‌ها کامل نبود.\n"
+                    f"ترب: https://torob.com/search/?query={q}\n"
+                    f"دیجی‌کالا: https://www.digikala.com/search/?q={q}"
+                )
+            return f"🛒 <b>نتایج خرید</b>\n━━━━━━━━━━━━━━\n{result}"
 
         if intent == "weather":
             city = _extract_city(text)
