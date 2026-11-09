@@ -91,6 +91,7 @@ def _extract_city(text: str) -> str:
 async def run_fast_path(text: str) -> Optional[str]:
     """اجرای fast-path؛ در صورت موفقیت متن آماده برمی‌گرداند."""
     intent = detect_fast_intent(text)
+    logger.info("fast_path intent=%s text=%r", intent, (text or "")[:60])
     if not intent:
         return None
 
