@@ -161,12 +161,8 @@ async def run_fast_path(text: str) -> Optional[str]:
             price = await get_dollar_price()
             if not price:
                 return None
-            msg = (
-                f"💵 <b>قیمت دلار</b>\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"نرخ: <b>{_fmt_toman(price)}</b> تومان\n"
-                f"<i>منبع: TGJU · به‌روز</i>"
-            )
+            from bot.handlers.group_parts.group_ui import price_card
+            msg = price_card("قیمت دلار", _fmt_toman(price) + " تومان", source="TGJU · به‌روز")
             _cache_set("dollar", msg)
             return msg
 
@@ -251,7 +247,8 @@ async def run_fast_path(text: str) -> Optional[str]:
             if result and len(str(result)) > 40 and "کامل نبود" not in str(result):
                 bad = ("پیدا نشد" in str(result)) or ("مشخص نیست" in str(result))
                 if not bad:
-                    return f"🛒 <b>نتایج خرید</b>\n━━━━━━━━━━━━━━\n{result}"
+                    from bot.handlers.group_parts.group_ui import shop_card
+                return shop_card(str(result))
             # شکست: None برگردان تا AI مسیر قبلی (بهتر) فعال شود
             return None
         if intent == "weather":
