@@ -178,7 +178,6 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
 
     # 0) دانلودر واقعی برای لینک‌های سوشال/ویدیو
     try:
-        import re
         has_url = bool(re.search(r"https?://|www\.", prompt, re.I))
         social = bool(re.search(
             r"(instagram|tiktok|facebook|twitter|x\.com|youtube|youtu\.be|vimeo|dailymotion)",
