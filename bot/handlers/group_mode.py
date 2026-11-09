@@ -20,6 +20,16 @@ from bot.logger import logger
 from bot.config import config
 
 
+def normalize_persian_text(text: str) -> str:
+    """Normalize common Arabic/Persian variants for intent matching only."""
+    value = str(text or "")
+    value = value.translate(str.maketrans({"ي": "ی", "ى": "ی", "ك": "ک", "ۀ": "ه", "ة": "ه", "ؤ": "و", "إ": "ا", "أ": "ا"}))
+    value = re.sub(r"[\u064B-\u065F\u0670\u0640]", "", value)
+    value = value.replace("\u200c", " ").replace("\u200f", "").replace("\u200e", "")
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
 def is_group_chat(chat: Optional[Chat]) -> bool:
     if not chat:
         return False
@@ -74,7 +84,7 @@ _BOT_TOPICS = re.compile(
     r"|تقویم|تاریخ|تبدیل تاریخ|سنم|زودیاک|برج"
     r"|دانلود|یوتیوب|اینستا|استوری"
     r"|تحلیل|rsi|حمایت|مقاومت|fear.?greed"
-    r"|ساعت|منطقه زمانی"
+    r"|ساعت|منطقه زمانی|خلاصه مکالمه|خلاصه گفتگو|جمع بندی مکالمه|جمع بندی گفتگو"
     r"|ربات|هوشمند|دستیار|کمک کن|بگو|بگو ببینم|کاربرد|چیکار|چه‌کار|چه کار"
     r")",
     re.IGNORECASE,
@@ -110,7 +120,7 @@ def looks_like_bot_request(text: str) -> Tuple[bool, str]:
     """تشخیص هوشمند: آیا این پیام درخواست از ربات است یا چت معمولی گروه؟"""
     if not text:
         return False, "empty"
-    t = text.strip()
+    t = normalize_persian_text(text)
     if len(t) < 2:
         return False, "too_short"
     if len(t) > 800:
@@ -155,7 +165,7 @@ def should_respond_in_group(
     if not message or not chat or not is_group_chat(chat):
         return True, "private_or_unknown"
 
-    text = (message.text or message.caption or "").strip()
+    text = normalize_persian_text(message.text or message.caption or "")
     bot_id = context.bot.id
     bot_uname = get_bot_username(context)
 
@@ -167,6 +177,13 @@ def should_respond_in_group(
                 pass  # دستورات تنظیمات باید کار کنند
             else:
                 return False, "ai_disabled"
+        if group_admin_only(chat.id):
+            # فقط در should_respond نمی‌توانیم await کنیم؛ چک سبک
+            user = update.effective_user
+            admin_ids = set(getattr(config, "ADMIN_IDS", []) or [])
+            if user and user.id not in admin_ids:
+                # ادمین تلگرام بودن در لایه handler چک می‌شود؛ اینجا فقط فلگ می‌گذاریم
+                context.chat_data["group_admin_only"] = True
         if group_mention_only(chat.id):
             # فقط منشن / ریپلای / دستور
             if allow_commands and text.startswith("/"):
@@ -177,8 +194,7 @@ def should_respond_in_group(
                 return True, "reply"
             return False, "mention_only"
     except Exception as _se:
-        logger.warning("group settings gate failed closed: %s", _se)
-        return False, "settings_unavailable"
+        logger.debug("group settings gate: %s", _se)
 
     if allow_commands and text.startswith("/"):
         return True, "command"
@@ -286,16 +302,17 @@ async def user_is_group_admin(update: Update, context: ContextTypes.DEFAULT_TYPE
     chat = update.effective_chat
     if not user or not chat:
         return False
-    try:
-        global_admin_ids = {int(x) for x in (getattr(config, "ADMIN_IDS", []) or [])}
-    except Exception:
-        global_admin_ids = set()
-    if user.id in global_admin_ids:
+    if user.id in getattr(config, "ADMIN_IDS", []):
         return True
     try:
         member = await context.bot.get_chat_member(chat.id, user.id)
-        status = getattr(member, "status", "")
-        return str(status).lower() in ("administrator", "creator", "owner")
+        status = member.status
+        return status in (
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.OWNER,
+            "administrator",
+            "creator",
+        )
     except Exception as exc:
         logger.debug("user_is_group_admin: %s", exc)
         return False

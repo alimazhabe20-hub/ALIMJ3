@@ -20,19 +20,20 @@ async def media_ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     if not update.message:
         return
-    if not await check_and_rate_limit(update, context):
-        return
 
-    # همه رسانه‌های گروه از همان دروازه دسترسی/تشخیص/جلوگیری از تکرار عبور کنند.
+    # Group media uses the same group gate, persistent group memory and multimodal pipeline.
     try:
         from bot.handlers.group_mode import is_group_chat
         if is_group_chat(update.effective_chat):
-            from bot.handlers.group_media import group_media_handler
-            await group_media_handler(update, context)
+            from bot.handlers.group_parts.group_media import handle_group_media
+            await handle_group_media(update, context)
             return
-    except Exception as group_media_exc:
+    except Exception as group_exc:
         from bot.logger import logger
-        logger.warning("group media router failed: %s", group_media_exc, exc_info=True)
+        logger.warning("group media dispatch failed: %s", group_exc)
+        return
+
+    if not await check_and_rate_limit(update, context):
         return
 
     # در پیوی فقط حالت AI؛ در گروه با کپشن/درخواست مرتبط هم کار کند
@@ -242,6 +243,19 @@ async def voice_ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     if not update.message:
         return
+
+    # Group voice/audio is transcribed and answered in the group context, independent of private AI mode.
+    try:
+        from bot.handlers.group_mode import is_group_chat
+        if is_group_chat(update.effective_chat):
+            from bot.handlers.group_parts.group_media import handle_group_media
+            await handle_group_media(update, context)
+            return
+    except Exception as group_exc:
+        from bot.logger import logger
+        logger.warning("group voice dispatch failed: %s", group_exc)
+        return
+
     if not await check_and_rate_limit(update, context):
         return
     if not context.user_data.get("ai_mode"):

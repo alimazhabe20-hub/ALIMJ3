@@ -32,19 +32,50 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     if not ok:
         return False
 
-    from bot.handlers.group_guard import claim_group_update, group_ai_access_allowed
-    if not await group_ai_access_allowed(update, context, notify=True):
-        return True
-    if not claim_group_update(update, context, namespace="text"):
-        logger.info("duplicate group update ignored chat=%s message=%s", chat.id, message.message_id)
-        return True
+    # Enforce admin-only mode against Telegram's actual group membership.
+    try:
+        from bot.handlers.group_settings import group_admin_only
+        if group_admin_only(chat.id):
+            from bot.handlers.group_mode import user_is_group_admin
+            if not await user_is_group_admin(update, context):
+                return False
+    except Exception as exc:
+        logger.warning("group admin gate failed closed: %s", exc)
+        return False
 
     bot_uname = get_bot_username(context)
     prompt = clean_group_prompt(text, bot_uname) or (text or "").strip()
+
+    # Explicit group conversation summary command.
+    if re.search(r"(?:خلاصه|جمع.?بندی).{0,18}(?:مکالمه|گفتگو|گروه)|(?:مکالمه|گفتگو).{0,18}(?:خلاصه|جمع.?بندی)", prompt, re.I):
+        try:
+            from bot.handlers.group_parts.group_memory import summarize_group
+            notice = await message.reply_text("🧠 در حال خلاصه‌سازی مکالمات گروه...")
+            try:
+                summary = await summarize_group(chat.id, user.id)
+                await message.reply_text("📚 خلاصهٔ مکالمه گروه:\n" + str(summary)[:3800])
+            finally:
+                try:
+                    await notice.delete()
+                except Exception:
+                    pass
+        except Exception as exc:
+            logger.warning("group conversation summary failed: %s", exc)
+            await message.reply_text("⚠️ خلاصه‌سازی مکالمه فعلاً ممکن نشد.")
+        return True
+
+    # A text request may refer to an image, video, document or audio in the replied message.
+    reply_media = message.reply_to_message
+    if reply_media and any(getattr(reply_media, name, None) for name in ("photo", "video", "video_note", "document", "voice", "audio", "sticker")):
+        try:
+            from bot.handlers.group_parts.group_media import handle_group_media
+            if await handle_group_media(update, context, source_message=reply_media, prompt=prompt):
+                return True
+        except Exception as exc:
+            logger.warning("group reply media pipeline failed: %s", exc)
     if not prompt or prompt in {"ربات", "هوشمند", "!", "bot"}:
         try:
-            from bot.handlers.group_guard import safe_group_reply
-            await safe_group_reply(message,
+            await message.reply_text(
                 "👋 من اینجام.\nمثال‌ها:\n• قیمت دلار\n• هوای قم\n• ربات باتری ایفون ۶ پلاس پیدا کن\n• روی عکس Reply کن: ربات اینو تحلیل کن\n• /ask سؤال آزاد"
             )
         except Exception as exc:

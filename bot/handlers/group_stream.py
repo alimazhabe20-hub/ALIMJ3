@@ -29,35 +29,33 @@ MIN_CHARS_DELTA = 22
 MAX_STREAM_PREVIEW = 3600
 
 
-async def _safe_edit_or_reply(sent, text, *, parse_mode=None, reply_markup=None, fallback_message=None, fallback_on_error=False):
-    """ویرایش مقاوم؛ در خطای تلگرام، در صورت امکان یک پاسخ جایگزین می‌فرستد."""
-    kwargs = {}
-    if parse_mode is not None:
-        kwargs["parse_mode"] = parse_mode
-    if reply_markup is not None:
-        kwargs["reply_markup"] = reply_markup
+async def _safe_edit_or_reply(sent, text, *, parse_mode=None, reply_markup=None, fallback_message=None):
+    """ویرایش امن؛ اگر پیام حذف شده بود، پیام جدید می‌فرستد."""
     try:
+        kwargs = {}
+        if parse_mode is not None:
+            kwargs["parse_mode"] = parse_mode
+        if reply_markup is not None:
+            kwargs["reply_markup"] = reply_markup
         return await sent.edit_text(text, **kwargs)
     except Exception as exc:
         err = str(exc).lower()
-        if "message is not modified" in err:
-            return sent
-        logger.debug("stream edit failed: %s", exc)
-        if not fallback_on_error:
-            return None
-        if fallback_message is not None:
+        if "message to edit not found" in err or "message is not modified" in err or "not found" in err:
             try:
-                from bot.handlers.group_guard import safe_group_reply
-                return await safe_group_reply(fallback_message, text, **kwargs)
-            except Exception as fallback_exc:
-                logger.warning("stream fallback reply failed: %s", fallback_exc)
-        else:
-            try:
+                chat_id = sent.chat_id
                 bot = sent.get_bot() if hasattr(sent, "get_bot") else None
+                if fallback_message is not None:
+                    return await fallback_message.reply_text(
+                        text, parse_mode=parse_mode, reply_markup=reply_markup
+                    )
                 if bot is not None:
-                    return await bot.send_message(chat_id=sent.chat_id, text=text, **kwargs)
-            except Exception as fallback_exc:
-                logger.warning("stream bot-send fallback failed: %s", fallback_exc)
+                    return await bot.send_message(
+                        chat_id=chat_id, text=text, parse_mode=parse_mode, reply_markup=reply_markup
+                    )
+            except Exception as exc2:
+                logger.debug("safe_edit fallback failed: %s", exc2)
+                return None
+        logger.debug("safe_edit skip: %s", exc)
         return None
 
 
@@ -119,10 +117,6 @@ async def stream_ai_to_message(
 
     in_group = is_group_chat(chat)
     bot = context.bot
-    if in_group:
-        from bot.handlers.group_guard import group_ai_access_allowed
-        if not await group_ai_access_allowed(update, context, notify=True):
-            return None
 
     short = False
     max_chars = 900
@@ -148,12 +142,24 @@ async def stream_ai_to_message(
     if in_group:
         try:
             from bot.handlers.group_parts.group_memory import get_context, add_turn
-            ctx = get_context(chat.id)
+            from bot.handlers.group_mode import group_attribution
+            reply = getattr(message, "reply_to_message", None)
+            ctx = get_context(
+                chat.id,
+                user_id=user_id,
+                reply_to_message_id=getattr(reply, "message_id", None),
+            )
+            speaker = group_attribution(user)
             base = (prompt or "").strip()
-            if ctx and len(ctx) < 180:
-                base = (ctx + "\n\nسؤال فعلی: " + base) if (ctx and len(ctx) < 180) else base
+            if ctx:
+                base = ("زمینهٔ مکالمه گروه:\n" + ctx[-6500:] +
+                        f"\n\nپیام فعلی از طرف {speaker}:\n" + base)
             final_prompt = _build_group_prompt(base, short=short, max_chars=max_chars)
-            add_turn(chat.id, "user", prompt)
+            add_turn(
+                chat.id, "user", prompt, user_id=user_id, speaker=speaker,
+                message_id=getattr(message, "message_id", None),
+                reply_to_message_id=getattr(reply, "message_id", None),
+            )
         except Exception:
             final_prompt = _build_group_prompt(prompt, short=short, max_chars=max_chars)
 
@@ -242,7 +248,7 @@ async def stream_ai_to_message(
         if in_group:
             try:
                 from bot.handlers.group_parts.group_memory import add_turn
-                add_turn(chat.id, "bot", final_answer)
+                add_turn(chat.id, "bot", final_answer, speaker="روز زیبا", message_id=getattr(sent, "message_id", None))
                 from bot.handlers.group_parts.metrics import mark
                 mark("group_ai_reply")
             except Exception:
@@ -256,10 +262,10 @@ async def stream_ai_to_message(
             if len(final_text) > 4090:
                 final_text = final_text[:4080] + "…"
             kb = group_inline_actions(user_id, str(aid) if aid else None)
-            updated = await _safe_edit_or_reply(sent, final_text, parse_mode=ParseMode.HTML, reply_markup=kb, fallback_message=message, fallback_on_error=True)
-            if updated is None:
-                from bot.handlers.group_guard import safe_group_reply
-                await safe_group_reply(message, final_text, parse_mode=ParseMode.HTML, reply_markup=kb)
+            try:
+                await _safe_edit_or_reply(sent, final_text, parse_mode=ParseMode.HTML, reply_markup=kb, fallback_message=message)
+            except Exception:
+                await _safe_edit_or_reply(sent, final_answer[:4000], reply_markup=kb, fallback_message=message)
         else:
             offer = len(final_answer) >= 1600
             kb = get_ai_result_keyboard(user_id, aid, offer_continue=offer)
@@ -275,11 +281,17 @@ async def stream_ai_to_message(
 
     except Exception as exc:
         logger.warning("stream_ai_to_message failed: %s", exc)
-        error_text = "⚠️ خطا در تولید پاسخ. چند لحظه بعد دوباره امتحان کن."
-        updated = await _safe_edit_or_reply(sent, error_text, fallback_message=message, fallback_on_error=True)
-        if updated is None:
-            from bot.handlers.group_guard import safe_group_reply
-            await safe_group_reply(message, error_text)
+        try:
+            await _safe_edit_or_reply(
+                sent,
+                "⚠️ خطا در تولید پاسخ. چند لحظه بعد دوباره امتحان کن.",
+                fallback_message=message,
+            )
+        except Exception:
+            try:
+                await message.reply_text("⚠️ خطا در تولید پاسخ. چند لحظه بعد دوباره امتحان کن.")
+            except Exception:
+                pass
         return sent
     finally:
         stop_typing.set()
