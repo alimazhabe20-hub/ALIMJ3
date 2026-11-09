@@ -306,13 +306,13 @@ async def _ask_ai_stream_and_send(update, context, user_id: int, text: str):
     import asyncio
     from bot.services.ai_service import ask_ai_stream
     msg = update.message
-    sent = await msg.reply_text("✍️ در حال نوشتن...")
+    sent = await msg.reply_text("…")
     buf = []
     provider_label = ""
     try:
         last_edit = time.monotonic()
         last_len = 0
-        last_rendered = "✍️ در حال نوشتن..."
+        last_rendered = "…"
         async for piece, label in ask_ai_stream(user_id, text):
             if label:
                 provider_label = label
@@ -1563,7 +1563,7 @@ async def voice_ai_handler(*args, **kwargs): return await _legacy_voice_ai_handl
 async def lens_command(*args, **kwargs): return await _legacy_lens_command(*args, **kwargs)
 
 # V30.5 stream contract anchors retained in the facade:
-# last_rendered = "✍️ در حال نوشتن..."
+# last_rendered = "…"
 # if first != last_rendered:
 # await asyncio.sleep(0.15)
 # await sent.edit_text(first

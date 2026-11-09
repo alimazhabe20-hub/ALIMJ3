@@ -59,27 +59,6 @@ async def _safe_edit_or_reply(sent, text, *, parse_mode=None, reply_markup=None,
         return None
 
 
-# فریم‌های انیمیشن لودینگ (چرخشی)
-LOADING_FRAMES = [
-    "⏳ ░░░░░░░░░░  در حال فکر…",
-    "⏳ ▓░░░░░░░░░  در حال فکر…",
-    "⏳ ▓▓░░░░░░░░  در حال فکر…",
-    "⏳ ▓▓▓░░░░░░░  در حال فکر…",
-    "⏳ ▓▓▓▓░░░░░░  در حال فکر…",
-    "⏳ ▓▓▓▓▓░░░░░  در حال فکر…",
-    "⏳ ▓▓▓▓▓▓░░░░  در حال فکر…",
-    "⏳ ▓▓▓▓▓▓▓░░░  در حال فکر…",
-    "⏳ ▓▓▓▓▓▓▓▓░░  در حال فکر…",
-    "⏳ ▓▓▓▓▓▓▓▓▓░  در حال فکر…",
-    "✍️ ▓▓▓▓▓▓▓▓▓▓  در حال نوشتن…",
-]
-
-WRITING_FRAMES = [
-    "✍️ در حال نوشتن",
-    "✍️ در حال نوشتن ·",
-    "✍️ در حال نوشتن ··",
-    "✍️ در حال نوشتن ···",
-]
 
 
 def _cursor(frame_idx: int = 0) -> str:
@@ -108,25 +87,6 @@ async def keep_typing(bot, chat_id: int, stop_event: asyncio.Event, interval: fl
         except asyncio.TimeoutError:
             continue
 
-
-async def _animate_loading(sent: Message, header: str, stop_event: asyncio.Event, in_group: bool):
-    """انیمیشن لودینگ تا وقتی استریم شروع شود."""
-    i = 0
-    while not stop_event.is_set():
-        frame = LOADING_FRAMES[i % len(LOADING_FRAMES)]
-        try:
-            if in_group:
-                text = header + f"<i>{frame}</i>"
-                await sent.edit_text(text, parse_mode=ParseMode.HTML)
-            else:
-                await sent.edit_text(frame)
-        except Exception:
-            pass
-        i += 1
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=0.55)
-        except asyncio.TimeoutError:
-            continue
 
 
 def _build_group_prompt(prompt: str, *, short: bool, max_chars: int) -> str:
@@ -192,14 +152,15 @@ async def stream_ai_to_message(
         except Exception:
             final_prompt = _build_group_prompt(prompt, short=short, max_chars=max_chars)
 
+    # بدون انیمیشن لودینگ — فقط پیام شروع مینیمال برای استریم متن
     if in_group:
         header = group_ai_header(user, streaming=True)
-        initial = header + f"<i>{LOADING_FRAMES[0]}</i>"
+        initial = header + "…"
         parse_mode = ParseMode.HTML
     else:
-        initial = LOADING_FRAMES[0]
-        parse_mode = None
         header = ""
+        initial = "…"
+        parse_mode = None
 
     try:
         sent = await message.reply_text(initial, parse_mode=parse_mode)
@@ -208,9 +169,7 @@ async def stream_ai_to_message(
         return None
 
     stop_typing = asyncio.Event()
-    stop_loading = asyncio.Event()
     typing_task = asyncio.create_task(keep_typing(bot, chat.id, stop_typing))
-    loading_task = asyncio.create_task(_animate_loading(sent, header, stop_loading, in_group))
 
     buf: list[str] = []
     last_edit = 0.0
@@ -228,11 +187,6 @@ async def stream_ai_to_message(
                 continue
             if not first_token:
                 first_token = True
-                stop_loading.set()
-                try:
-                    await loading_task
-                except Exception:
-                    pass
             buf.append(piece)
             current = "".join(buf)
             # در گروه پاسخ را زودتر کوتاه نگه می‌داریم در پیش‌نمایش
@@ -251,8 +205,7 @@ async def stream_ai_to_message(
                     preview = h + _esc(preview_body) + _cursor(frame)
                     pm = ParseMode.HTML
                 else:
-                    writing = WRITING_FRAMES[frame % len(WRITING_FRAMES)]
-                    preview = f"{writing}\n\n🤖 " + preview_body + _cursor(frame)
+                    preview = "🤖 " + preview_body + _cursor(frame)
                     pm = None
 
                 if preview != last_rendered:
@@ -331,8 +284,7 @@ async def stream_ai_to_message(
         return sent
     finally:
         stop_typing.set()
-        stop_loading.set()
-        for t in (typing_task, loading_task):
+        for t in (typing_task,):
             try:
                 await t
             except Exception:
