@@ -40,26 +40,18 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     first_name = update.effective_user.first_name or "کاربر"
     city = get_user_city(user_id)
 
-    # --- Group mode gate (professional) ---
-    # در گروه فقط با منشن / ریپلای / دستور / پیشوند پاسخ می‌دهیم.
+    # --- گروه: مسیر مستقیم و مقاوم (اولویت اول) ---
     try:
-        from bot.handlers.group_mode import is_group_chat, should_respond_in_group, clean_group_prompt, get_bot_username
-        chat = update.effective_chat
-        if is_group_chat(chat):
-            ok, reason = should_respond_in_group(update, context)
-            from bot.logger import logger
-            logger.info("group msg chat=%s ok=%s reason=%s text=%r", getattr(chat, "id", None), ok, reason, (text or "")[:80])
-            if not ok:
-                return  # سکوت حرفه‌ای در گروه
-            # تمیز کردن منشن از متن برای AI
-            bot_uname = get_bot_username(context)
-            text = clean_group_prompt(text, bot_uname) or text
-            # در گروه منوی ریپلای‌کیبورد نشان نده؛ فقط AI و دستورات
-            context.chat_data["is_group"] = True
-            context.user_data["is_group"] = True
+        from bot.handlers.group_mode import is_group_chat
+        if is_group_chat(update.effective_chat):
+            from bot.handlers.group_reply import try_group_reply
+            if await try_group_reply(update, context, text):
+                return
+            # اگر group gate رد کرد، در گروه منوهای پیوی را اجرا نکن
+            return
     except Exception as _gexc:
         from bot.logger import logger
-        logger.debug("group gate: %s", _gexc)
+        logger.warning("group_reply entry failed: %s", _gexc)
 
     # Keep the historical ordering exactly: downloader URL hook first.
     try:

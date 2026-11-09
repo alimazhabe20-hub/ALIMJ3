@@ -486,6 +486,19 @@ async def _text_handler_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = update.message.text.strip()
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name or "کاربر"
+
+    # مسیر مستقیم گروه (قبل از منوها و AI پیوی)
+    try:
+        from bot.handlers.group_mode import is_group_chat
+        if is_group_chat(update.effective_chat):
+            from bot.handlers.group_reply import try_group_reply
+            handled = await try_group_reply(update, context, text)
+            if handled:
+                return
+            return  # در گروه منوی پیوی اجرا نشود
+    except Exception as _gexc:
+        logger.warning("group_reply entry failed: %s", _gexc)
+
     try:
         from bot.handlers.v71_handlers import handle_downloader_url_v71
         if await handle_downloader_url_v71(update, context, text):
