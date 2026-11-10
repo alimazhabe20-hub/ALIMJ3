@@ -259,41 +259,39 @@ async def run_fast_path(text: str) -> Optional[str]:
         if intent == "shop":
             import asyncio
             from urllib.parse import quote
+            # کوئری تمیز برای جستجو
             q_clean = re.sub(r"^(?:ربات|هوشمند)\s*", "", text or "", flags=re.I).strip()
             q_clean = re.sub(r"\b(?:برام|برای من|لینکش?\s*بفرست|پیدا\s*کن)\b", " ", q_clean)
             q_clean = " ".join(q_clean.split()) or (text or "").strip()
             try:
                 from bot.features.market import shopping as _sh
                 if hasattr(_sh, "_CIRCUIT"):
+                    # مدارهای مرده را باز کن تا دوباره شانس داشته باشند
                     _sh._CIRCUIT.clear()
             except Exception:
                 pass
             result = None
             try:
                 from bot.features.market.shopping import search_shopping
+                # source=all تا فقط به ترب وابسته نباشد + timeout بیشتر
                 result = await asyncio.wait_for(
-                    search_shopping(q_clean, source="torob", max_results=5),
-                    timeout=8.0,
+                    search_shopping(q_clean, source="all", max_results=6),
+                    timeout=12.0,
                 )
             except Exception as exc:
-                logger.warning("shop fast_path: %s", exc)
+                logger.warning("shop fast_path search failed: %s", exc)
                 result = None
-            if result and len(str(result)) > 40 and "کامل نبود" not in str(result) and "پیدا نشد" not in str(result) and "مشخص نیست" not in str(result):
-                try:
-                    from bot.handlers.group_parts.group_ui import shop_card
-                    return shop_card(str(result)[:3500])
-                except Exception:
-                    return "🛒 <b>نتایج خرید</b>\n━━━━━━━━━━━━━━\n" + str(result)[:3500]
-            q = quote(q_clean[:80])
-            torob = "https://torob.com/search/?query=" + q
-            digi = "https://www.digikala.com/search/?q=" + q
-            return (
-                "🛒 <b>جستجوی خرید</b>\n"
-                "━━━━━━━━━━━━━━\n"
-                "برای «" + q_clean[:60] + "»:\n"
-                "🔎 ترب: " + torob + "\n"
-                "🛍 دیجی‌کالا: " + digi
-            )
+            # فقط وقتی نتیجه واقعی و مفید بود جواب بده
+            if result and len(str(result)) > 40 and "کامل نبود" not in str(result):
+                bad = ("پیدا نشد" in str(result)) or ("مشخص نیست" in str(result)) or ("قابل‌اعتماد" in str(result) and "پیدا نشد" in str(result))
+                if not bad:
+                    try:
+                        from bot.handlers.group_parts.group_ui import shop_card
+                        return shop_card(str(result)[:3500])
+                    except Exception:
+                        return "🛒 <b>نتایج خرید</b>\n━━━━━━━━━━━━━━\n" + str(result)[:3500]
+            # شکست: None برگردان تا مسیر AI کامل (با web search و منابع بیشتر) فعال شود
+            return None
 
 
     except Exception as exc:
