@@ -1991,10 +1991,24 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
     # Shopping is an authoritative live-data path. Never let an LLM replace
     # a failed/real-time shopping lookup with remembered products or prices.
     live_shopping = await _live_shopping_prefetch(original_prompt)
-    if _looks_like_shopping_request(original_prompt) and live_shopping:
-        logger.info("shopping request served by live engine; AI providers skipped")
-        _save_turn(user_id, original_prompt, live_shopping)
-        return live_shopping, "Live Shopping"
+    is_shop = _looks_like_shopping_request(original_prompt)
+    if is_shop:
+        if live_shopping:
+            logger.info("shopping request served by live engine; AI providers skipped")
+            _save_turn(user_id, original_prompt, live_shopping)
+            return live_shopping, "Live Shopping"
+        # جستجو fail شد یا خالی بود — باز هم AI را برای قیمت/فروشگاه راه نده
+        from urllib.parse import quote as _q
+        qsafe = _q((original_prompt or "").strip()[:80])
+        fallback = (
+            "⚠️ استعلام زنده قیمت از منابع فروشگاهی فعلاً نتیجه قابل‌اعتماد برنگرداند؛ "
+            "قیمت حدسی ارائه نمی‌کنم.\n\n"
+            f"🔎 ترب: https://torob.com/search/?query={qsafe}\n"
+            f"🛍 دیجی‌کالا: https://www.digikala.com/search/?q={qsafe}"
+        )
+        logger.warning("shopping request but live engine empty; returning link fallback")
+        _save_turn(user_id, original_prompt, fallback)
+        return fallback, "Live Shopping"
 
     options = available_model_options()
     if not options:
@@ -2079,13 +2093,17 @@ def _looks_like_shopping_request(text: str) -> bool:
         r"گوشی|موبایل|اسمارت\s*فون|iphone|آیفون|سامسونگ|شیائومی|پوکو|"
         r"pixel|پیکسل|oneplus|honor|لپ.?تاپ|لپتاپ|کامپیوتر|تبلت|تلویزیون|"
         r"مانیتور|هدفون|هندزفری|کفش|لباس|کتانی|ساعت|لوازم\s*(?:خانه|آشپزخانه|دیجیتال)?|"
-        r"محصول|کالا|وسیله"
+        r"محصول|کالا|وسیله|"
+        r"هودی|hoodie|سویشرت|کاپشن|کت|پالتو|شلوار|جین|تیشرت|تی\s*شرت|پیراهن|مانتو|"
+        r"کیف|کوله|چمدان|کلاه|دستکش|جوراب|لباس\s*ورزشی|"
+        r"مبل|میز|صندلی|فرش|پتو|قابلمه|زودپز"
     )
     shopping_action = (
-        r"خرید|بخر|پیدا کن|پیدا برام|فروشگاه|فروشنده|لینک خرید|"
+        r"خرید|بخر|پیدا\s*کن|پیدا\s*برام|برام\s*پیدا|فروشگاه|فروشنده|لینک\s*خرید|"
         r"ترب|دیجی.?کالا|تکنولایف|ایمالز|اسنپ.?شاپ|باسلام|"
         r"amazon|آمازون|ebay|ایبی|aliexpress|علی.?اکسپرس|walmart|"
-        r"best\s*buy|etsy|newegg|noon|temu|shein"
+        r"best\s*buy|etsy|newegg|noon|temu|shein|"
+        r"زیر\s*\d|تا\s*\d|حدود\s*\d|بودجه"
     )
     return bool(
         __import__("re").search(product, t, __import__("re").I)
@@ -2100,8 +2118,8 @@ async def _live_shopping_prefetch(prompt: str) -> str:
     try:
         from bot.features.market.shopping import search_shopping
         return await asyncio.wait_for(
-            search_shopping(query=prompt, max_results=10),
-            timeout=float(os.getenv('SHOPPING_PREFETCH_TIMEOUT', '25')),
+            search_shopping(query=prompt, source="all", max_results=10),
+            timeout=float(os.getenv('SHOPPING_PREFETCH_TIMEOUT', '28')),
         )
     except Exception as exc:
         logger.warning('live shopping prefetch failed: %s', exc)
@@ -2271,7 +2289,18 @@ async def ask_ai_stream(user_id: int, prompt: str, *, tool_query: Optional[str] 
         pass
 
     live_shopping = await _live_shopping_prefetch(query)
-    if _looks_like_shopping_request(query) and live_shopping:
+    is_shop = _looks_like_shopping_request(query)
+    if is_shop:
+        if not live_shopping:
+            from urllib.parse import quote as _q
+            qsafe = _q((query or "").strip()[:80])
+            live_shopping = (
+                "⚠️ استعلام زنده قیمت از منابع فروشگاهی فعلاً نتیجه قابل‌اعتماد برنگرداند؛ "
+                "قیمت حدسی ارائه نمی‌کنم.\n\n"
+                f"🔎 ترب: https://torob.com/search/?query={qsafe}\n"
+                f"🛍 دیجی‌کالا: https://www.digikala.com/search/?q={qsafe}"
+            )
+            logger.warning("shopping stream: live empty; link fallback")
         logger.info("shopping stream served by live engine; AI providers skipped")
         _save_turn(user_id, query, live_shopping)
         chunk_size = max(80, int(os.getenv("AI_STREAM_CHUNK", "180")))
