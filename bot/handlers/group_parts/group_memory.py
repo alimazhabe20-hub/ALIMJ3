@@ -46,6 +46,25 @@ def _ensure_tables() -> None:
         conn.close()
 
 
+_POLLUTION_MARKERS = (
+    "[زمینه کوتاه گروه]",
+    "[قوانین پاسخ گروه]",
+    "سؤال فعلی از ",
+    "[SHOPPING_LIVE_RESULT]",
+)
+
+
+def _is_polluted(text: str) -> bool:
+    """متن‌هایی که خودشان شامل زمینه/پرامپت داخلی‌اند (حلقه بازگشتی)."""
+    t = str(text or "")
+    if any(m in t for m in _POLLUTION_MARKERS):
+        return True
+    # پاسخ «نتیجه خرید پیدا نشد» که کل پرامپت را داخل گیومه تکرار کرده
+    if t.lstrip().startswith("⚠️ برای «") and ("نتیجه قابل" in t or "دستیار:" in t or "کاربر:" in t):
+        return True
+    return False
+
+
 def _clean(text: str, limit: int = _MAX_TURN_CHARS) -> str:
     text = re.sub(r"\s+", " ", str(text or "")).strip()
     # حذف هدر/فوتر UI از حافظه
@@ -70,6 +89,8 @@ def add_turn(
     reply_to_message_id: Optional[int] = None,
 ) -> None:
     limit = _MAX_BOT_CHARS if role in {"bot", "assistant"} else _MAX_TURN_CHARS
+    if _is_polluted(text):
+        return
     content = _clean(text, limit)
     if not content:
         return
@@ -161,6 +182,11 @@ def get_context(
 
         rows = list(reversed(rows))
         parts: list[str] = []
+
+        # ردیف‌های آلوده قدیمی را نادیده بگیر تا حلقه تکرار قطع شود
+        rows = [r for r in rows if not _is_polluted(r[6])]
+        if _is_polluted(summary):
+            summary = ""
 
         if for_prompt and summary:
             parts.append("خلاصه کوتاه گروه: " + summary[:500])
@@ -259,6 +285,8 @@ def get_summary(chat_id: int) -> str:
 
 
 def set_summary(chat_id: int, summary: str) -> None:
+    if _is_polluted(summary):
+        return
     summary = _clean(summary, 2000)
     if not summary:
         return
