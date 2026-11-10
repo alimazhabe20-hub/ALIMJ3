@@ -2244,9 +2244,13 @@ async def _stream_gemini(user_id: int, prompt: str, model: str):
     raise RuntimeError(last_err or "gemini stream failed")
 
 
-async def ask_ai_stream(user_id: int, prompt: str):
+async def ask_ai_stream(user_id: int, prompt: str, *, tool_query: Optional[str] = None):
     """
     Stable streaming facade.
+
+    tool_query: متن خامِ درخواست کاربر (بدون زمینه گروه). تشخیص خرید، حافظه
+    شخصی و ذخیره نوبت فقط روی همین متن انجام می‌شود تا زمینه/تاریخچه گروه
+    به‌عنوان «عبارت جستجو» استفاده نشود.
 
     Tool-calling providers are intentionally called through the same canonical
     non-stream path as ask_ai(), then the final answer is emitted in chunks.
@@ -2260,15 +2264,16 @@ async def ask_ai_stream(user_id: int, prompt: str):
         prompt = prompt[:MAX_INPUT]
 
     original = prompt
+    query = (tool_query or "").strip() or original
     try:
-        _extract_and_store_memory(user_id, original)
+        _extract_and_store_memory(user_id, query)
     except Exception:
         pass
 
-    live_shopping = await _live_shopping_prefetch(original)
-    if _looks_like_shopping_request(original) and live_shopping:
+    live_shopping = await _live_shopping_prefetch(query)
+    if _looks_like_shopping_request(query) and live_shopping:
         logger.info("shopping stream served by live engine; AI providers skipped")
-        _save_turn(user_id, original, live_shopping)
+        _save_turn(user_id, query, live_shopping)
         chunk_size = max(80, int(os.getenv("AI_STREAM_CHUNK", "180")))
         for i in range(0, len(live_shopping), chunk_size):
             yield live_shopping[i:i + chunk_size], None
@@ -2311,7 +2316,7 @@ async def ask_ai_stream(user_id: int, prompt: str):
                 answer = await _call_provider(provider, user_id, provider_prompt, model)
                 if not answer:
                     raise RuntimeError("empty answer")
-                _save_turn(user_id, original, answer)
+                _save_turn(user_id, query, answer)
                 if not selected:
                     set_selected_model(user_id, provider, "*")
 
