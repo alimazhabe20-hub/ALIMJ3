@@ -205,7 +205,11 @@ async def stream_ai_to_message(
     first_token = False
 
     try:
-        gen = stream_fn(user_id, final_prompt) if stream_fn else ask_ai_stream(user_id, final_prompt)
+        if stream_fn:
+            gen = stream_fn(user_id, final_prompt)
+        else:
+            # تشخیص ابزار (خرید/…) فقط روی سؤال خام کاربر؛ نه روی زمینه گروه
+            gen = ask_ai_stream(user_id, final_prompt, tool_query=prompt)
         async for piece, label in gen:
             if label:
                 continue
@@ -260,7 +264,9 @@ async def stream_ai_to_message(
             final_answer = cut.rstrip() + "…"
 
         aid = store_answer(user_id, final_answer, prompt=prompt)
-        if in_group:
+        if in_group and not first_token:
+            pass  # پاسخ خالی/پیش‌فرض را در حافظه گروه ذخیره نکن
+        elif in_group:
             try:
                 from bot.handlers.group_parts.group_memory import add_turn
                 add_turn(chat.id, "bot", final_answer, speaker="روز زیبا")
