@@ -179,7 +179,9 @@ async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
                 return
             cur = int(settings.get(kind, 0) or 0)
             new_val = 0 if cur else 1
-            set_group_setting(chat_id, kind, new_val, updated_by=user.id if user else None)
+            if not set_group_setting(chat_id, kind, new_val, updated_by=user.id if user else None):
+                await q.answer("ذخیره تنظیمات انجام نشد؛ دیتابیس را بررسی کن.", show_alert=True)
+                return
             labels = {
                 "ai_enabled": "AI",
                 "short_replies": "پاسخ کوتاه",
@@ -222,6 +224,9 @@ async def group_quick_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     data = q.data
     if not data.startswith("gquick:"):
+        return
+    if not is_group_chat(update.effective_chat):
+        await q.answer("این دکمه فقط داخل گروه معتبر است.", show_alert=True)
         return
     await q.answer()
     kind = data.split(":", 1)[-1]

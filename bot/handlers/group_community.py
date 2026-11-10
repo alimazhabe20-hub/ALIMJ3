@@ -118,14 +118,14 @@ def _admin_only_notice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bo
 
 
 async def _is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    chat, user = update.effective_chat, update.effective_user
-    if not _is_group(chat) or not user:
+    """Use the same Telegram/global-admin policy as the rest of group controls."""
+    if not _is_group(update.effective_chat) or not update.effective_user:
         return False
     try:
-        member = await context.bot.get_chat_member(chat.id, user.id)
-        return member.status in ("administrator", "creator")
+        from bot.handlers.group_mode import user_is_group_admin
+        return await user_is_group_admin(update, context)
     except Exception as exc:
-        logger.warning("group community admin check failed: %s", exc)
+        logger.warning("group community admin check failed: %s", exc, exc_info=True)
         return False
 
 

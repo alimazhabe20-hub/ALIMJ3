@@ -17,6 +17,8 @@ _DEFAULTS = {
 
 
 def ensure_group_settings_table() -> None:
+    """Create/upgrade the settings table without leaking a DB connection."""
+    conn = None
     try:
         conn = get_db_connection()
         c = conn.cursor()
@@ -35,48 +37,62 @@ def ensure_group_settings_table() -> None:
             )
             """
         )
-        for col, default in (
-            ("mention_only", "INTEGER DEFAULT 0"),
-            ("admin_only", "INTEGER DEFAULT 0"),
-            ("fast_path", "INTEGER DEFAULT 1"),
-            ("max_answer_chars", "INTEGER DEFAULT 900"),
-            ("short_replies", "INTEGER DEFAULT 1"),
-            ("ai_enabled", "INTEGER DEFAULT 1"),
-        ):
+        existing = {
+            row[1] for row in c.execute("PRAGMA table_info(group_settings)").fetchall()
+        }
+        migrations = {
+            "mention_only": "INTEGER DEFAULT 0",
+            "admin_only": "INTEGER DEFAULT 0",
+            "fast_path": "INTEGER DEFAULT 1",
+            "max_answer_chars": "INTEGER DEFAULT 900",
+            "short_replies": "INTEGER DEFAULT 1",
+            "ai_enabled": "INTEGER DEFAULT 1",
+            "updated_at": "TEXT DEFAULT (datetime('now'))",
+            "updated_by": "INTEGER",
+        }
+        for col, definition in migrations.items():
+            if col not in existing:
+                c.execute(f"ALTER TABLE group_settings ADD COLUMN {col} {definition}")
+        conn.commit()
+    except Exception as exc:
+        logger.warning("ensure_group_settings_table: %s", exc, exc_info=True)
+    finally:
+        if conn is not None:
             try:
-                c.execute(f"ALTER TABLE group_settings ADD COLUMN {col} {default}")
+                conn.close()
             except Exception:
                 pass
-        conn.commit()
-        conn.close()
-    except Exception as exc:
-        logger.warning("ensure_group_settings_table: %s", exc)
 
 
 def get_group_settings(chat_id: int) -> Dict[str, Any]:
     ensure_group_settings_table()
+    conn = None
     try:
         conn = get_db_connection()
-        c = conn.cursor()
-        row = c.execute(
+        row = conn.execute(
             "SELECT ai_enabled, short_replies, max_answer_chars, mention_only, admin_only, fast_path "
             "FROM group_settings WHERE chat_id=?",
             (int(chat_id),),
         ).fetchone()
-        conn.close()
         if not row:
             return dict(_DEFAULTS)
         return {
             "ai_enabled": int(row[0] if row[0] is not None else 1),
             "short_replies": int(row[1] if row[1] is not None else 1),
-            "max_answer_chars": int(row[2] if row[2] is not None else 900),
+            "max_answer_chars": max(100, min(4000, int(row[2] if row[2] is not None else 900))),
             "mention_only": int(row[3] if row[3] is not None else 0),
             "admin_only": int(row[4] if row[4] is not None else 0),
             "fast_path": int(row[5] if row[5] is not None else 1),
         }
     except Exception as exc:
-        logger.debug("get_group_settings: %s", exc)
+        logger.warning("get_group_settings: %s", exc, exc_info=True)
         return dict(_DEFAULTS)
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def set_group_setting(chat_id: int, key: str, value: int, updated_by: Optional[int] = None) -> bool:
@@ -84,24 +100,38 @@ def set_group_setting(chat_id: int, key: str, value: int, updated_by: Optional[i
     if key not in _DEFAULTS:
         return False
     try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return False
+    if key == "max_answer_chars":
+        value = max(100, min(4000, value))
+    else:
+        value = 1 if value else 0
+
+    conn = None
+    try:
         conn = get_db_connection()
-        c = conn.cursor()
-        # upsert
-        c.execute(
+        conn.execute(
             "INSERT INTO group_settings (chat_id, updated_at, updated_by) VALUES (?, datetime('now'), ?) "
             "ON CONFLICT(chat_id) DO UPDATE SET updated_at=datetime('now'), updated_by=excluded.updated_by",
             (int(chat_id), updated_by),
         )
-        c.execute(
+        # key is selected from the fixed allow-list above, never from user input.
+        conn.execute(
             f"UPDATE group_settings SET {key}=?, updated_at=datetime('now'), updated_by=? WHERE chat_id=?",
-            (int(value), updated_by, int(chat_id)),
+            (value, updated_by, int(chat_id)),
         )
         conn.commit()
-        conn.close()
         return True
     except Exception as exc:
-        logger.warning("set_group_setting: %s", exc)
+        logger.warning("set_group_setting: %s", exc, exc_info=True)
         return False
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def is_group_ai_enabled(chat_id: int) -> bool:
