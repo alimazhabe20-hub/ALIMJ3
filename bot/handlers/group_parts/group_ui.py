@@ -97,6 +97,22 @@ def shop_links(query: str) -> str:
     return card("🛒 خرید", body)
 
 
+def shop_fallback(query: str = "", *, reason: str = "") -> str:
+    """وقتی جستجوی زنده نتیجه‌ی قابل‌اعتماد داخل بودجه پیدا نکند."""
+    q = (query or "").strip()
+    label = esc(q[:50] or "محصول")
+    reason_bit = f"\n{esc(reason)}" if reason else ""
+    body = (
+        f"برای «{label}» نتیجهٔ قابل‌اعتماد و داخل بودجه "
+        f"از منابع زنده پیدا نشد.{reason_bit}\n\n"
+        "قیمت حدسی ارائه نمی‌کنم.\n\n"
+        f"🔎 <a href=\"https://torob.com/search/?query={quote(q[:80])}\">ترب</a>"
+        f"  ·  "
+        f"🛍 <a href=\"https://www.digikala.com/search/?q={quote(q[:80])}\">دیجی‌کالا</a>"
+    )
+    return card("🛒 خرید", body)
+
+
 def analyze_card(title: str, body: str) -> str:
     return card(f"📊 {esc(title)}", body)
 
@@ -118,6 +134,10 @@ def help_card() -> str:
     return card("👋 روز زیبا اینجاست", body)
 
 
+def group_help_text() -> str:
+    """متن راهنمای گروه (سازگار با ایمپورت‌های قدیمی)."""
+    return help_card()
+
 
 def error_card(text: str = "الان نتونستم کامل جواب بدم. دوباره بپرس.") -> str:
     return card("⚠️", text)
@@ -136,6 +156,11 @@ def kb_ai(user_id: int = 0) -> InlineKeyboardMarkup:
             [InlineKeyboardButton("بستن", callback_data="group_dismiss")],
         ]
     )
+
+
+def continue_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
+    """کیبورد ادامه (سازگار با ایمپورت‌های قدیمی)."""
+    return kb_ai(user_id)
 
 
 def kb_price() -> InlineKeyboardMarkup:
