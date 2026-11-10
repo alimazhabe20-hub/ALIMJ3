@@ -175,7 +175,7 @@ async def resolve_coin_id(symbol: str) -> Optional[str]:
         async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
             r = await client.get("https://api.coinpaprika.com/v1/search/", params={"q": symbol, "c": "currencies", "limit": 10})
             if r.status_code == 200:
-                currencies = (r.json() or {}).get("currencies") or []
+                currencies = (safe_json(r) or {}).get("currencies") or []
                 for c in currencies:
                     if (c.get("symbol") or "").lower() == symbol:
                         # paprika id مثل btc-bitcoin — برای gecko نیاز به map نداریم
@@ -270,7 +270,7 @@ async def _crypto_simple(ids: list[str]) -> dict[str, Any]:
                 r = await client.get(f"https://api.coinpaprika.com/v1/tickers/{pid}")
                 if r.status_code != 200:
                     return None
-                q = (r.json() or {}).get("quotes", {}).get("USD") or {}
+                q = (safe_json(r) or {}).get("quotes", {}).get("USD") or {}
                 price = q.get("price")
                 if price is None:
                     return None
@@ -308,7 +308,7 @@ async def _crypto_simple(ids: list[str]) -> dict[str, Any]:
             async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
                 r = await client.get("https://api.coinlore.net/api/tickers/?start=0&limit=100")
                 if r.status_code == 200:
-                    data = r.json() or {}
+                    data = safe_json(r) or {}
                     rows = data.get("data") if isinstance(data, dict) else data
                     if isinstance(rows, list):
                         by_name = {}
@@ -354,7 +354,7 @@ async def _crypto_simple(ids: list[str]) -> dict[str, Any]:
                     params={"fsym": sym.upper(), "tsyms": "USD"},
                 )
                 if r.status_code == 200:
-                    v = (r.json() or {}).get("USD")
+                    v = (safe_json(r) or {}).get("USD")
                     return float(v) if v is not None else None
         except Exception as e:
             logger.debug(f"cc {sym}: {e}")
@@ -370,7 +370,7 @@ async def _crypto_simple(ids: list[str]) -> dict[str, Any]:
                 )
                 if r.status_code != 200:
                     return None
-                currencies = (r.json() or {}).get("currencies") or []
+                currencies = (safe_json(r) or {}).get("currencies") or []
                 pid = None
                 for c in currencies:
                     if (c.get("symbol") or "").lower() == sym.lower():
