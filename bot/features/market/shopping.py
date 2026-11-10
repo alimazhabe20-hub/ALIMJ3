@@ -81,8 +81,8 @@ UA = (
 CACHE_TTL = 180
 INSPECT_CONCURRENCY = 6
 MAX_RETRIES = 3
-CIRCUIT_FAIL_THRESHOLD = 4
-CIRCUIT_COOLDOWN = 90  # seconds
+CIRCUIT_FAIL_THRESHOLD = 6
+CIRCUIT_COOLDOWN = 45  # seconds
 
 _CACHE: dict[str, tuple[float, list[dict]]] = {}
 _STATS = {
@@ -2470,9 +2470,14 @@ async def search_shopping(
 
     if not rows:
         _STATS["empty"] += 1
+        from urllib.parse import quote as _quote
+        qlink = _quote(str(clean or raw or "")[:80])
         return (
             f"⚠️ برای «{clean}» با این مشخصات نتیجه قابل‌اعتماد و داخل بودجه "
-            "از منابع زنده پیدا نشد؛ قیمت حدسی ارائه نمی‌کنم."
+            "از منابع زنده پیدا نشد؛ قیمت حدسی ارائه نمی‌کنم.\n\n"
+            f"🔎 <a href=\"https://torob.com/search/?query={qlink}\">ترب</a>"
+            f"  ·  "
+            f"🛍 <a href=\"https://www.digikala.com/search/?q={qlink}\">دیجی‌کالا</a>"
         )
 
     priced = [x for x in rows if x.get("price")]
