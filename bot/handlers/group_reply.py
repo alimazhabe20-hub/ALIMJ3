@@ -17,6 +17,12 @@ from bot.handlers.group_mode import (
 )
 
 
+def reply_bot_target(message, context) -> bool:
+    r = getattr(message, "reply_to_message", None)
+    bot_id = getattr(getattr(context, "bot", None), "id", None)
+    return bool(r and r.from_user and bot_id and r.from_user.id == bot_id)
+
+
 async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
     """
     Returns True if this update was handled as a group reply attempt.
@@ -26,6 +32,27 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     user = update.effective_user
     if not chat or not message or not user or not is_group_chat(chat):
         return False
+
+    # روشن/خاموش با متن — قبل از gate تا وقتی AI خاموش است هم «ربات روشن» کار کند
+    try:
+        from bot.handlers.group_parts.intent import TOGGLE_AI_RE, is_addressed_to_bot
+        from bot.handlers.group_mode import is_reply_to_bot as _is_reply_to_bot
+        _uname = get_bot_username(context)
+        _cleaned = clean_group_prompt(text, _uname) or (text or "").strip()
+        _m = TOGGLE_AI_RE.match(_cleaned)
+        _addressed = is_addressed_to_bot(text or "", _uname) or _is_reply_to_bot(message, context.bot.id)
+        if _m and _addressed:
+            from bot.handlers.group_mode import user_is_group_admin
+            if not await user_is_group_admin(update, context):
+                await message.reply_text("⛔ فقط ادمین‌های گروه می‌توانند ربات را روشن/خاموش کنند.")
+                return True
+            from bot.handlers.group_settings import set_group_setting
+            turn_on = _m.group(1) in {"روشن", "فعال"}
+            set_group_setting(chat.id, "ai_enabled", 1 if turn_on else 0, updated_by=user.id)
+            await message.reply_text("✅ هوش مصنوعی گروه روشن شد." if turn_on else "⏸ هوش مصنوعی گروه خاموش شد. برای روشن کردن: «ربات روشن»")
+            return True
+    except Exception as exc:
+        logger.warning("group text toggle failed: %s", exc)
 
     ok, reason = should_respond_in_group(update, context)
     logger.info("group_reply gate chat=%s ok=%s reason=%s text=%r", chat.id, ok, reason, (text or "")[:100])
@@ -89,7 +116,8 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         return True
 
     # حافظه گروه: وضعیت / پاک کردن
-    if re.search(r"(?:پاک\s*کردن\s*حافظه|حافظه\s*را\s*پاک|clear\s*memory)", prompt, re.I):
+    from bot.handlers.group_parts.intent import CLEAR_MEMORY_RE, VAGUE_RE
+    if intent == "clear_memory" or CLEAR_MEMORY_RE.search(prompt):
         try:
             from bot.handlers.group_parts.group_memory import clear_chat
             from bot.handlers.group_parts.group_ui import card
@@ -320,6 +348,18 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     except Exception as exc:
         logger.warning("group_reply download branch error: %s", exc)
 
+    # درخواست مبهم («تحلیل کن») بدون ریپلای → موضوع را بپرس به‌جای حدس روی تاریخچه
+    if VAGUE_RE.match(prompt or "") and not message.reply_to_message:
+        await message.reply_text(
+            "🤔 چی رو تحلیل کنم؟ روی پیام یا عکس موردنظر ریپلای کن و بنویس «ربات تحلیل کن»، "
+            "یا موضوع رو کامل بنویس. مثال: «ربات تحلیل طلا»"
+        )
+        return True
+    if VAGUE_RE.match(prompt or "") and message.reply_to_message and not reply_bot_target(message, context):
+        replied_text = (message.reply_to_message.text or message.reply_to_message.caption or "").strip()
+        if replied_text:
+            prompt = f"این پیام را کوتاه و دقیق تحلیل کن:\n«{replied_text[:1500]}»"
+
     # 1) Fast-path
     try:
         from bot.handlers.group_settings import group_fast_path_enabled, is_group_ai_enabled
@@ -372,6 +412,11 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             answer = answer[0]
         if answer:
             await message.reply_text(f"🤖 {str(answer)[:4000]}")
+            try:
+                from bot.handlers.group_parts.group_memory import add_turn
+                add_turn(chat.id, "bot", str(answer), speaker="روز زیبا")
+            except Exception:
+                pass
             return True
     except Exception as exc:
         logger.warning("group_reply ask_ai error: %s", exc)
