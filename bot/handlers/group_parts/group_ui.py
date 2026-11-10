@@ -112,9 +112,11 @@ def help_card() -> str:
         "عکس + کپشن: ربات اینو تحلیل کن\n"
         "لینک تیک‌تاک/اینستا → دانلود\n"
         "/ask سؤال آزاد\n\n"
+        "🧠 حافظه گروه · خلاصه گروه\n\n"
         "<i>ادمین: /groupsettings</i>"
     )
     return card("👋 روز زیبا اینجاست", body)
+
 
 
 def error_card(text: str = "الان نتونستم کامل جواب بدم. دوباره بپرس.") -> str:
@@ -177,3 +179,29 @@ def kb_help() -> InlineKeyboardMarkup:
 
 def kb_dismiss() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("بستن", callback_data="group_dismiss")]])
+
+
+def memory_card(stats: dict | None = None, preview: str = "") -> str:
+    stats = stats or {}
+    turns = stats.get("turns", 0)
+    body = f"نوبت‌های ذخیره‌شده: <b>{turns}</b>"
+    if preview:
+        body += "\n\n<b>آخرین زمینه</b>\n" + preview[:700]
+    body += "\n\n<code>خلاصه گروه</code> · <code>پاک کردن حافظه</code>"
+    return card("🧠 حافظه گروه", body)
+
+
+def summary_card(summary: str) -> str:
+    return card("📚 خلاصه گروه", (summary or "خالی")[:3500])
+
+
+def kb_memory() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("📚 خلاصه", callback_data="gmem:summary"),
+                InlineKeyboardButton("🗑 پاک کردن", callback_data="gmem:clear"),
+            ],
+            [InlineKeyboardButton("بستن", callback_data="group_dismiss")],
+        ]
+    )
