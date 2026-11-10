@@ -2347,6 +2347,10 @@ TTS_VOICE = os.getenv("TTS_VOICE", "fa-IR-DilaraNeural")
 # Explicit public contract required by callbacks, messages and other handlers.
 # These aliases come from the canonical runtime module.
 from bot.services.ai_runtime import (
+    _provider_available,
+    _record_provider,
+    AI_PROVIDER_FAILURE_THRESHOLD,
+    _PROVIDER_HEALTH,
     clear_history,
     available_providers,
     set_selected_provider,
