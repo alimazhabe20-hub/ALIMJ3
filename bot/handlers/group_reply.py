@@ -103,13 +103,18 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     # 0b) تحلیل عکس/ویدیو — ریپلای به مدیا یا کپشن
     try:
         reply = message.reply_to_message
-        wants_vision = bool(
-            re.search(
-                r"تحلیل|اینو|اینا|این عکس|ببین|چیه|چی میبینی|توضیح|describe|analyze|عکس",
-                prompt or text or "",
-                re.I,
+        # تحلیل بازار (طلا/کریپتو) vision نیست
+        _p = prompt or text or ""
+        if re.search(r"تحلیل\s*(?:طلا|بیتکوین|بیت‌کوین|اتریوم|کریپتو|btc|eth|بازار)", _p, re.I):
+            wants_vision = False
+        else:
+            wants_vision = bool(
+                re.search(
+                    r"این\s*عکس|این\s*تصویر|عکس\s*رو|تحلیل\s*عکس|اینو\s*تحلیل|اینا\s*تحلیل|describe|analyze\s*(?:this\s*)?(?:image|photo)",
+                    _p,
+                    re.I,
+                )
             )
-        )
 
         async def _extract_image_bytes(msg):
             if not msg:
