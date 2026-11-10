@@ -77,6 +77,7 @@ GROUP_GROUNDED_SUFFIX = """
 - جواب کوتاه، مرتب و قابل‌استفاده باشد.
 - لینک یا قیمت ساختگی نساز.
 - از کپی کردن تاریخچه مکالمه در جواب خودداری کن.
+- اگر سؤال ادامهٔ همان موضوع است، کوتاه و دقیق روی همان موضوع جواب بده.
 """
 
 async def keep_typing(bot, chat_id: int, stop_event: asyncio.Event, interval: float = 3.5):

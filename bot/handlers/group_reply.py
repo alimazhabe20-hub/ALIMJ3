@@ -49,8 +49,33 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     # Intent هوشمند
     try:
         from bot.handlers.group_parts.intent import detect_intent
-        intent, intent_q = detect_intent(prompt or text)
-        logger.info("group_reply intent=%s q=%r", intent, (intent_q or "")[:80])
+        reply_msg = message.reply_to_message
+        has_media = bool(
+            reply_msg
+            and any(
+                getattr(reply_msg, n, None)
+                for n in ("photo", "video", "video_note", "document", "sticker")
+            )
+        )
+        bot_id = getattr(getattr(context, "bot", None), "id", None)
+        reply_bot = bool(
+            reply_msg
+            and reply_msg.from_user
+            and bot_id
+            and reply_msg.from_user.id == bot_id
+        )
+        intent, intent_q = detect_intent(
+            prompt or text,
+            has_reply_media=has_media,
+            is_reply_to_bot=reply_bot,
+        )
+        logger.info(
+            "group_reply intent=%s media=%s reply_bot=%s q=%r",
+            intent,
+            has_media,
+            reply_bot,
+            (intent_q or "")[:80],
+        )
     except Exception:
         intent, intent_q = "ai", prompt
 

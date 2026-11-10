@@ -82,9 +82,10 @@ _BOT_TOPICS = re.compile(
     r"|آب[‌ ]?و[‌ ]?هوا|هوای|دمای|باران|برف"
     r"|اذان|نماز|اوقات شرعی|قبله|استخاره|آیه|حدیث|اذکار"
     r"|تقویم|تاریخ|تبدیل تاریخ|سنم|زودیاک|برج"
-    r"|دانلود|یوتیوب|اینستا|استوری"
+    r"|دانلود|یوتیوب|اینستا|استوری|تیک\s*تاک|tiktok"
     r"|تحلیل|rsi|حمایت|مقاومت|fear.?greed"
-    r"|ساعت|منطقه زمانی|خلاصه مکالمه|خلاصه گفتگو|جمع بندی مکالمه|جمع بندی گفتگو"
+    r"|ساعت|منطقه زمانی|خلاصه مکالمه|خلاصه گفتگو|جمع بندی مکالمه|جمع بندی گفتگو|حافظه گروه"
+    r"|پیدا\s*کن|برام\s*بخر|لینک\s*بفرست"
     r"|ربات|هوشمند|دستیار|کمک کن|بگو|بگو ببینم|کاربرد|چیکار|چه‌کار|چه کار"
     r")",
     re.IGNORECASE,
@@ -117,34 +118,33 @@ _DIRECT_ADDRESS = re.compile(
 
 
 def looks_like_bot_request(text: str) -> Tuple[bool, str]:
-    """تشخیص هوشمند: آیا این پیام درخواست از ربات است یا چت معمولی گروه؟"""
+    """تشخیص هوشمند: درخواست از ربات یا چت معمولی؟"""
     if not text:
         return False, "empty"
     t = normalize_persian_text(text)
-    if len(t) < 2:
-        return False, "too_short"
-    if len(t) > 800:
-        # پیام خیلی بلند معمولاً چت/کپی است نه سؤال سریع گروه
-        if not _QUESTION_MARKERS.search(t[:200]) and not _BOT_TOPICS.search(t[:200]):
+    if len(t) > 600:
+        # پیام خیلی بلند فقط اگر خطاب/موضوع واضح باشد
+        if not (_DIRECT_ADDRESS.search(t) or _BOT_TOPICS.search(t[:300])):
             return False, "too_long"
-
     if _IGNORE_CHAT.match(t):
         return False, "casual_chat"
-
     if _DIRECT_ADDRESS.search(t):
         return True, "direct_address"
-
+    # اقدام + کالا (هوشمندتر از نام کالا به‌تنهایی)
+    if re.search(r"(?:پیدا\s*کن|بخر|میخوام|لینک)", t, re.I) and re.search(
+        r"(?:باتری|باطری|شارژر|گوشی|ساعت|لپ\s*تاپ|ایفون|آیفون)", t, re.I
+    ):
+        return True, "shop_request"
     if _QUESTION_MARKERS.search(t) and _BOT_TOPICS.search(t):
-        return True, "question_topic"
+        return True, "topic_question"
+    if _BOT_TOPICS.search(t) and len(t) <= 100:
+        return True, "topic_phrase"
+    # follow-up کوتاه با ؟
+    if len(t) <= 60 and (_QUESTION_MARKERS.search(t) or t.endswith("؟") or t.endswith("?")):
+        if not _IGNORE_CHAT.match(t):
+            return True, "short_question"
+    return False, "no_signal"
 
-    # جملات موضوع‌محور بدون علامت سؤال، مثل «قیمت دلار» یا «هوای تهران»
-    if _BOT_TOPICS.search(t) and len(t) <= 80:
-        # حداقل یک کلمه معنادار غیر از salutation
-        words = re.findall(r"[\w؀-ۿ]+", t)
-        if len(words) >= 1:
-            return True, "topic_phrase"
-
-    return False, "no_intent"
 
 
 def should_respond_in_group(
