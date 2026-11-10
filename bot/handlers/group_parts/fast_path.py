@@ -65,6 +65,11 @@ def detect_fast_intent(text: str) -> Optional[str]:
         return "dollar"
     if re.search(r"قیمت\s*یورو|یورو\s*چند|نرخ\s*یورو", t, re.I):
         return "euro"
+    # تحلیل بازار
+    if re.search(r"تحلیل\s*طلا|طلا\s*را?\s*تحلیل", t, re.I):
+        return "analyze_gold"
+    if re.search(r"تحلیل\s*(?:بیتکوین|بیت‌کوین|اتریوم|btc|eth)|(?:بیتکوین|btc)\s*را?\s*تحلیل", t, re.I):
+        return "analyze_crypto"
     # طلا
     if re.search(r"قیمت\s*طلا|طلای\s*۱۸|گرم\s*۱۸|طلا\s*چند", t, re.I):
         return "gold"
@@ -219,17 +224,47 @@ async def run_fast_path(text: str) -> Optional[str]:
 
 
 
+
+        if intent == "analyze_gold":
+            try:
+                from bot.features.market.finance import analyze_gold
+                import asyncio
+                if asyncio.iscoroutinefunction(analyze_gold):
+                    report = await asyncio.wait_for(analyze_gold("1h"), timeout=10.0)
+                else:
+                    report = await asyncio.wait_for(asyncio.to_thread(analyze_gold, "1h"), timeout=10.0)
+                if report:
+                    return f"🥇 <b>تحلیل طلا</b>\n━━━━━━━━━━━━━━\n{str(report)[:3500]}"
+            except Exception as exc:
+                logger.warning("analyze_gold fast_path: %s", exc)
+            return None
+
+        if intent == "analyze_crypto":
+            try:
+                import asyncio, re as _re
+                sym = "btc"
+                if _re.search(r"اتریوم|eth", text, _re.I):
+                    sym = "eth"
+                from bot.features.market.finance import analyze_crypto
+                if asyncio.iscoroutinefunction(analyze_crypto):
+                    report = await asyncio.wait_for(analyze_crypto(sym), timeout=12.0)
+                else:
+                    report = await asyncio.wait_for(asyncio.to_thread(analyze_crypto, sym), timeout=12.0)
+                if report:
+                    return f"🪙 <b>تحلیل {sym.upper()}</b>\n━━━━━━━━━━━━━━\n{str(report)[:3500]}"
+            except Exception as exc:
+                logger.warning("analyze_crypto fast_path: %s", exc)
+            return None
+
         if intent == "shop":
             import asyncio
             from urllib.parse import quote
-            # کوئری تمیز برای جستجو
             q_clean = re.sub(r"^(?:ربات|هوشمند)\s*", "", text or "", flags=re.I).strip()
             q_clean = re.sub(r"\b(?:برام|برای من|لینکش?\s*بفرست|پیدا\s*کن)\b", " ", q_clean)
-            q_clean = " ".join(q_clean.split())
+            q_clean = " ".join(q_clean.split()) or (text or "").strip()
             try:
                 from bot.features.market import shopping as _sh
                 if hasattr(_sh, "_CIRCUIT"):
-                    # فقط مدارهای مرده را کمی باز کن
                     _sh._CIRCUIT.clear()
             except Exception:
                 pass
@@ -237,40 +272,29 @@ async def run_fast_path(text: str) -> Optional[str]:
             try:
                 from bot.features.market.shopping import search_shopping
                 result = await asyncio.wait_for(
-                    search_shopping(q_clean or text, source="torob", max_results=5),
-                    timeout=12.0,
+                    search_shopping(q_clean, source="torob", max_results=5),
+                    timeout=8.0,
                 )
             except Exception as exc:
-                logger.warning("shop fast_path search failed: %s", exc)
+                logger.warning("shop fast_path: %s", exc)
                 result = None
-            # اگر نتیجه واقعی و مفید بود
-            if result and len(str(result)) > 40 and "کامل نبود" not in str(result):
-                bad = ("پیدا نشد" in str(result)) or ("مشخص نیست" in str(result))
-                if not bad:
+            if result and len(str(result)) > 40 and "کامل نبود" not in str(result) and "پیدا نشد" not in str(result) and "مشخص نیست" not in str(result):
+                try:
                     from bot.handlers.group_parts.group_ui import shop_card
-                return shop_card(str(result))
-            # شکست: None برگردان تا AI مسیر قبلی (بهتر) فعال شود
-            return None
-        if intent == "weather":
-            city = _extract_city(text)
-            cache_key = f"weather:{city}"
-            cached_w = _cache_get(cache_key)
-            if cached_w:
-                return cached_w
-            from bot.features.weather import get_weather
-            # get_weather ممکن است sync باشد
-            import asyncio
-            if asyncio.iscoroutinefunction(get_weather):
-                w = await get_weather(city)
-            else:
-                w = await asyncio.to_thread(get_weather, city)
-            if not w:
-                return None
-            msg = _format_weather(city, w)
-            if not msg:
-                return None
-            _cache_set(cache_key, msg)
-            return msg
+                    return shop_card(str(result)[:3500])
+                except Exception:
+                    return "🛒 <b>نتایج خرید</b>\n━━━━━━━━━━━━━━\n" + str(result)[:3500]
+            q = quote(q_clean[:80])
+            torob = "https://torob.com/search/?query=" + q
+            digi = "https://www.digikala.com/search/?q=" + q
+            return (
+                "🛒 <b>جستجوی خرید</b>\n"
+                "━━━━━━━━━━━━━━\n"
+                "برای «" + q_clean[:60] + "»:\n"
+                "🔎 ترب: " + torob + "\n"
+                "🛍 دیجی‌کالا: " + digi
+            )
+
 
     except Exception as exc:
         logger.warning("fast_path %s failed: %s", intent, exc)

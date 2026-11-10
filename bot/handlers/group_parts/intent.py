@@ -8,7 +8,10 @@ from typing import Optional, Tuple
 def detect_intent(text: str) -> Tuple[Optional[str], str]:
     """
     Returns (intent, cleaned_query)
-    intents: price_dollar, price_euro, price_gold, crypto, weather, shop, download, vision, help, ai
+
+    intents:
+      help, download, price_dollar, price_euro, price_gold, crypto,
+      analyze_gold, analyze_crypto, weather, shop, vision, ai
     """
     t = (text or "").strip()
     if not t:
@@ -26,11 +29,21 @@ def detect_intent(text: str) -> Tuple[Optional[str], str]:
     ):
         return "download", cleaned
 
+    # تحلیل بازار — قبل از vision
+    if re.search(r"تحلیل\s*طلا|طلا\s*را?\s*تحلیل|analyze\s*gold", t, re.I):
+        return "analyze_gold", cleaned
+    if re.search(
+        r"تحلیل\s*(?:بیتکوین|بیت‌کوین|اتریوم|کریپتو|btc|eth)|(?:بیتکوین|btc)\s*را?\s*تحلیل",
+        t,
+        re.I,
+    ):
+        return "analyze_crypto", cleaned
+
     if re.search(r"قیمت\s*دلار|دلار\s*چند|نرخ\s*دلار", t, re.I):
         return "price_dollar", cleaned
     if re.search(r"قیمت\s*یورو|یورو\s*چند", t, re.I):
         return "price_euro", cleaned
-    if re.search(r"قیمت\s*طلا|طلای\s*۱۸|گرم\s*۱۸", t, re.I):
+    if re.search(r"قیمت\s*طلا|طلای\s*۱۸|گرم\s*۱۸|طلا\s*چند", t, re.I):
         return "price_gold", cleaned
     if re.search(r"(بیتکوین|بیت‌کوین|اتریوم|تتر|btc|eth|usdt)", low) and re.search(
         r"قیمت|چند|چقدر|نرخ", t, re.I
@@ -39,7 +52,7 @@ def detect_intent(text: str) -> Tuple[Optional[str], str]:
     if re.search(r"هوا|آب\s*و\s*هوا|دما", t, re.I):
         return "weather", cleaned
 
-    # خرید فقط با درخواست واضح
+    # خرید
     if re.search(r"(?:پیدا\s*کن|برام\s*بخر|میخوام\s*بخرم|لینک(?:ش)?\s*بفرست)", t, re.I):
         return "shop", cleaned
     if re.search(r"(?:باتری|باطری|شارژر|گوشی|ساعت)", t, re.I) and re.search(
@@ -47,7 +60,10 @@ def detect_intent(text: str) -> Tuple[Optional[str], str]:
     ):
         return "shop", cleaned
 
-    if re.search(r"تحلیل|اینو|اینا|این عکس|ببین", t, re.I):
+    # vision فقط وقتی به عکس اشاره شده — نه هر «تحلیل»
+    if re.search(r"(?:این\s*عکس|این\s*تصویر|عکس\s*رو|تصویر\s*رو|اینو\s*تحلیل|اینا\s*تحلیل|تحلیل\s*عکس|analyze\s*(?:this\s*)?(?:image|photo))", t, re.I):
+        return "vision", cleaned
+    if re.search(r"(?:اینو|اینا)\s*(?:ببین|چیه|چی میبینی)", t, re.I):
         return "vision", cleaned
 
     return "ai", cleaned
