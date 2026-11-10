@@ -9,6 +9,29 @@ Design rules: bounded work, fail closed, no secret exposure, no destructive auto
 actions, deterministic fallbacks, and compatibility with the existing V70-V73 stack.
 """
 
+# Module bootstrap imports/constants must precede merged declarations below.
+import asyncio
+import hashlib
+import ipaddress
+import json
+import os
+import re
+import socket
+import sqlite3
+import time
+import urllib.parse
+from collections import Counter, defaultdict, deque
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Iterable
+
+from bot.logger import logger
+
+TOOL_RETRIES = max(0, min(3, int(os.getenv("V74_TOOL_RETRIES", "1"))))
+CACHE_TTL = max(2, int(os.getenv("V74_CACHE_TTL", "20")))
+CACHE_MAX = max(64, int(os.getenv("V74_CACHE_MAX", "2048")))
+
+
 # BEGIN MERGED LEGACY PART: v74_platform_parts/part_001_redact_secrets.py
 from typing import Any
 

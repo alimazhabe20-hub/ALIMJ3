@@ -111,7 +111,7 @@ def route_live_capability(prompt: str) -> str | None:
         return None
     # Keep this tiny and deterministic. Detailed scoring remains in the generic
     # selector; these cases must never be answered from stale model knowledge.
-    if re.search(r"(?:تاریخ\s*(?:دقیق|فعلی|الان|امروز|فردا|دیروز|پس\s*فردا)|(?:امروز|فردا|دیروز|پس\s*فردا)\s*(?:چندمه|چه\s*تاریخیه|چه\s*روزیه)?|الان\s*(?:چه\s*)?تاریخ|current\s*(?:date|datetime)|today(?:\s*date)?|tomorrow|yesterday)", q, re.I):
+    if re.search(r"(?:تاریخ\s*(?:دقیق|فعلی|الان|امروز|فردا|دیروز|پس\s*فردا)|(?:امروز|فردا|دیروز|پس\s*فردا)\s*(?:چندمه|چه\s*تاریخیه|چه\s*روزیه)|الان\s*(?:چه\s*)?تاریخ|current\s*(?:date|datetime)|today\s*date|tomorrow|yesterday)", q, re.I):
         return "get_current_datetime" if "get_current_datetime" in _registry() else None
     if re.search(r"(?:الان\s*(?:ساعت|چه\s*ساعتی)|ساعت\s*الان|what\s*time|current\s*time)", q, re.I):
         return "get_current_datetime" if "get_current_datetime" in _registry() else "world_clock"

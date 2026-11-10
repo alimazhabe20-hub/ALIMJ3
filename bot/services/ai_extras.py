@@ -414,23 +414,27 @@ async def web_search(query: str, max_results: int = 5) -> str:
         return "LIVE_DATA_UNAVAILABLE: جستجوی وب فعلاً در دسترس نیست؛ اطلاعات قدیمی را جایگزین نکن."
 
     last_error = None
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-        for name, fn in providers:
-            try:
-                results = await fn(client, query, max_results, newsy)
-            except Exception as e:
-                last_error = e
-                logger.warning("web_search provider %s failed: %s", name, e)
-                continue
-            if results:
-                return (
-                    f"LIVE_WEB_RESULTS (provider={name}, searched {date_tag} UTC) برای «{query}»:\n\n"
-                    + "\n\n".join(results)
-                    + "\n\nقانون پاسخ: فقط از همین نتایج استفاده کن، تاریخ/منبع را ذکر کن، "
-                      "و اگر نتایج کافی یا مرتبط نیستند صریحاً بگو."
-                )
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            for name, fn in providers:
+                try:
+                    results = await fn(client, query, max_results, newsy)
+                except Exception as exc:
+                    last_error = exc
+                    # Do not log raw provider exceptions: they can contain credentials or URLs.
+                    logger.warning("web_search provider %s failed (%s)", name, type(exc).__name__)
+                    continue
+                if results:
+                    return (
+                        f"LIVE_WEB_RESULTS (provider={name}, searched {date_tag} UTC) برای «{query}»:\n\n"
+                        + "\n\n".join(results)
+                        + "\n\nقانون پاسخ: فقط از همین نتایج استفاده کن، تاریخ/منبع را ذکر کن، "
+                          "و اگر نتایج کافی یا مرتبط نیستند صریحاً بگو."
+                    )
+    except Exception as exc:
+        last_error = exc
+        logger.warning("web_search client failed (%s)", type(exc).__name__)
     if last_error is not None:
-        logger.warning("web_search: all providers failed, last error: %s", last_error)
         return "LIVE_DATA_UNAVAILABLE: جستجوی وب فعلاً در دسترس نیست؛ اطلاعات قدیمی را جایگزین نکن."
     return f"LIVE_DATA_UNAVAILABLE: برای «{query}» نتیجه قابل اتکایی پیدا نشد."
 
