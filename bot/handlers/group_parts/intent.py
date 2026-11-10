@@ -5,6 +5,21 @@ import re
 from typing import Optional, Tuple, Dict, Any
 
 
+# پاک کردن حافظه: «پاک کردن حافظه»، «حذف حافظه ربات»، «حافظه رو پاک کن»، «ریست حافظه»، «همه چی رو فراموش کن»
+CLEAR_MEMORY_RE = re.compile(
+    r"(?:پاک\s*(?:کردن|کن)\s*(?:ی\s*)?حافظه|حذف\s*(?:کردن\s*)?حافظه|ریست\s*حافظه|"
+    r"حافظه\s*(?:ات|ت|ی\s*ربات|ربات|گروه)?\s*(?:را|رو|و)?\s*(?:پاک|حذف|ریست)|"
+    r"(?:همه\s*چی|همه\s*چیز|همه\s*رو)\s*(?:رو|را)?\s*فراموش\s*کن|clear\s*memory|reset\s*memory)",
+    re.I,
+)
+
+# روشن/خاموش کردن هوش مصنوعی گروه با متن (فقط ادمین)
+TOGGLE_AI_RE = re.compile(r"^\s*(?:ربات\s*)?(خاموش|روشن|غیرفعال|فعال)\s*(?:شو|کن|باش)?\s*[.!؟?]*\s*$", re.I)
+
+# درخواست‌های مبهم که بدون موضوع معنا ندارند
+VAGUE_RE = re.compile(r"^\s*(?:تحلیل\s*کن|تحلیلش\s*کن|توضیح\s*بده|بررسی\s*کن|نظرت\s*چیه)\s*[.!؟?]*\s*$", re.I)
+
+
 def _clean(text: str) -> str:
     t = (text or "").strip()
     t = re.sub(r"^(?:ربات|هوشمند|!)\s*", "", t, flags=re.I).strip()
@@ -29,7 +44,7 @@ def detect_intent(text: str, *, has_reply_media: bool = False, is_reply_to_bot: 
     cleaned = _clean(t)
 
     # حافظه / خلاصه
-    if re.search(r"(?:پاک\s*کردن\s*حافظه|حافظه\s*را\s*پاک|clear\s*memory)", t, re.I):
+    if CLEAR_MEMORY_RE.search(t):
         return "clear_memory", cleaned
     if re.search(r"(?:حافظه\s*گروه|وضعیت\s*حافظه)", t, re.I):
         return "memory", cleaned
