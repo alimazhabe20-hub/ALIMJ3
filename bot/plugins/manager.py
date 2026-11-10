@@ -1,7 +1,12 @@
 """Safe local plugin registry with dependency-aware lifecycle management."""
 
+import importlib
+import os
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict
+
 # BEGIN MERGED LEGACY PART: manager_parts/part_001_PluginSpec.py
-from dataclasses import dataclass
 
 # Auto-split part 1: PluginSpec
 @dataclass(frozen=True)
@@ -280,12 +285,6 @@ def reset_registry_for_tests() -> None:
     _HOOKS.clear()
 
 # END MERGED LEGACY PART: 
-import importlib
-import os
-import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict
-
 
 _REGISTRY: Dict[str, PluginSpec] = {}
 _STATE: Dict[str, PluginState] = {}
