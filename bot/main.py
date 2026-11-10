@@ -510,6 +510,8 @@ def main():
         app.add_handler(CallbackQueryHandler(group_callback_handler, pattern=r"^(group_|gset:)"))
         from bot.handlers.group_commands import group_quick_callback
         app.add_handler(CallbackQueryHandler(group_quick_callback, pattern=r"^gquick:"))
+        from bot.handlers.group_commands import group_memory_callback
+        app.add_handler(CallbackQueryHandler(group_memory_callback, pattern=r"^gmem:"))
         app.add_handler(CallbackQueryHandler(group_callback_handler, pattern=r"^group_dismiss$"))
     except Exception as _gcb:
         logger.warning("group callback skipped: %s", _gcb)
