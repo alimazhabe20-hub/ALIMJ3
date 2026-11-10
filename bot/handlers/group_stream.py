@@ -163,11 +163,11 @@ async def stream_ai_to_message(
     # بدون انیمیشن لودینگ — فقط پیام شروع مینیمال برای استریم متن
     if in_group:
         header = group_ai_header(user, streaming=True)
-        initial = header + "…"
+        initial = header + "در حال نوشتن…"
         parse_mode = ParseMode.HTML
     else:
         header = ""
-        initial = "…"
+        initial = "در حال نوشتن…"
         parse_mode = None
 
     try:

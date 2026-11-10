@@ -56,8 +56,8 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
 
     if intent == "help" or not (prompt or "").strip() or (prompt or "").strip() in {"ربات", "هوشمند", "!", "bot"}:
         try:
-            from bot.handlers.group_parts.group_ui import group_help_text
-            await message.reply_text(group_help_text(), parse_mode="HTML", disable_web_page_preview=True)
+            from bot.handlers.group_parts.group_ui import help_card, kb_help
+            await message.reply_text(help_card(), parse_mode="HTML", disable_web_page_preview=True, reply_markup=kb_help())
         except Exception as exc:
             logger.warning("group help failed: %s", exc)
             await message.reply_text("👋 من اینجام. مثال: قیمت دلار · هوای قم · /ask سؤال")
@@ -281,10 +281,25 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             fp = await run_fast_path(prompt)
             logger.info("group_reply fast_path result=%s", "HIT" if fp else "MISS")
             if fp:
+                markup = None
                 try:
-                    await message.reply_text(fp, parse_mode="HTML", disable_web_page_preview=True)
+                    from bot.handlers.group_parts.group_ui import kb_price, kb_shop
+                    low = str(fp)
+                    if "خرید" in low or "ترب" in low or "دیجی" in low:
+                        markup = kb_shop(prompt)
+                    elif any(x in low for x in ("دلار", "طلا", "BTC", "یورو", "قیمت")):
+                        markup = kb_price()
                 except Exception:
-                    await message.reply_text(str(fp)[:4000])
+                    markup = None
+                try:
+                    await message.reply_text(
+                        fp,
+                        parse_mode="HTML",
+                        disable_web_page_preview=False if markup else True,
+                        reply_markup=markup,
+                    )
+                except Exception:
+                    await message.reply_text(str(fp)[:4000], reply_markup=markup)
                 return True
     except Exception as exc:
         logger.warning("group_reply fast_path error: %s", exc)

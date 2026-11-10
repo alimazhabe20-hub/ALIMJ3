@@ -212,3 +212,36 @@ async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
             await q.answer()
         except Exception:
             pass
+
+
+
+async def group_quick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دکمه‌های سریع UX گروه: دلار/طلا/BTC/هوا."""
+    q = update.callback_query
+    if not q or not q.data:
+        return
+    data = q.data
+    if not data.startswith("gquick:"):
+        return
+    await q.answer()
+    kind = data.split(":", 1)[-1]
+    mapping = {
+        "dollar": "قیمت دلار",
+        "gold": "قیمت طلا",
+        "btc": "قیمت بیتکوین",
+        "weather": "هوای تهران",
+    }
+    prompt = mapping.get(kind)
+    if not prompt:
+        return
+    try:
+        from bot.handlers.group_parts.fast_path import run_fast_path
+        from bot.handlers.group_parts.group_ui import kb_price
+        fp = await run_fast_path(prompt)
+        if fp:
+            await q.message.reply_text(fp, parse_mode="HTML", reply_markup=kb_price())
+        else:
+            await q.message.reply_text("الان موجود نبود. دوباره بپرس: " + prompt)
+    except Exception as exc:
+        from bot.logger import logger
+        logger.warning("gquick failed: %s", exc)

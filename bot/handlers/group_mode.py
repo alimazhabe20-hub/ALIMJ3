@@ -260,24 +260,33 @@ def _esc(s: str) -> str:
 
 
 def group_ai_header(user, *, streaming: bool = False) -> str:
-    name = group_attribution(user)
-    if streaming:
-        return f"🤖 <b>روز زیبا</b> · پاسخ به <b>{_esc(name)}</b>\n━━━━━━━━━━━━━━\n"
-    return f"🤖 <b>روز زیبا</b> · برای <b>{_esc(name)}</b>\n━━━━━━━━━━━━━━\n"
+    try:
+        from bot.handlers.group_parts.group_ui import ai_header
+        return ai_header(user, streaming=streaming)
+    except Exception:
+        name = group_attribution(user)
+        if streaming:
+            return "🤖 <b>روز زیبا</b>\n────────────\n"
+        return "🤖 <b>روز زیبا</b> · " + _esc(name) + "\n────────────\n"
 
 
 def group_ai_footer() -> str:
-    return "\n━━━━━━━━━━━━━━\n💡 ریپلای کن یا منشن کن تا ادامه بدیم"
+    try:
+        from bot.handlers.group_parts.group_ui import ai_footer
+        return ai_footer()
+    except Exception:
+        return "\n────────────\n💬 ریپلای یا منشن = ادامه"
 
 
 def group_inline_actions(user_id: int, answer_id: Optional[str] = None) -> InlineKeyboardMarkup:
-    rows = [
-        [
-            InlineKeyboardButton("🔄 ادامه", callback_data=f"ai_continue:{answer_id or 0}"),
-            InlineKeyboardButton("🗑️", callback_data="group_dismiss"),
-        ],
-    ]
-    return InlineKeyboardMarkup(rows)
+    try:
+        from bot.handlers.group_parts.group_ui import kb_ai
+        return kb_ai(user_id)
+    except Exception:
+        return InlineKeyboardMarkup(
+            [[InlineKeyboardButton("➕ ادامه", callback_data=f"ai_continue:{answer_id or 0}"),
+              InlineKeyboardButton("بستن", callback_data="group_dismiss")]]
+        )
 
 
 def settings_keyboard(chat_id: int, settings: dict) -> InlineKeyboardMarkup:
