@@ -63,6 +63,30 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             await message.reply_text("👋 من اینجام. مثال: قیمت دلار · هوای قم · /ask سؤال")
         return True
 
+    # حافظه گروه: وضعیت / پاک کردن
+    if re.search(r"(?:پاک\s*کردن\s*حافظه|حافظه\s*را\s*پاک|clear\s*memory)", prompt, re.I):
+        try:
+            from bot.handlers.group_parts.group_memory import clear_chat
+            from bot.handlers.group_parts.group_ui import card
+            clear_chat(chat.id)
+            await message.reply_text(card("🧠 حافظه گروه", "حافظه این گروه پاک شد."), parse_mode="HTML")
+        except Exception as exc:
+            logger.warning("clear memory failed: %s", exc)
+            await message.reply_text("⚠️ پاک کردن حافظه ممکن نشد.")
+        return True
+
+    if re.search(r"(?:حافظه\s*گروه|وضعیت\s*حافظه)", prompt, re.I):
+        try:
+            from bot.handlers.group_parts.group_memory import memory_stats, get_context
+            from bot.handlers.group_parts.group_ui import memory_card, kb_memory
+            st = memory_stats(chat.id)
+            prev = get_context(chat.id, max_turns=4, for_prompt=False)
+            await message.reply_text(memory_card(st, prev), parse_mode="HTML", reply_markup=kb_memory())
+        except Exception as exp:
+            logger.warning("memory status failed: %s", exp)
+            await message.reply_text("⚠️ وضعیت حافظه در دسترس نیست.")
+        return True
+
     # Explicit group conversation summary command.
     if re.search(r"(?:خلاصه|جمع.?بندی).{0,18}(?:مکالمه|گفتگو|گروه)|(?:مکالمه|گفتگو).{0,18}(?:خلاصه|جمع.?بندی)", prompt, re.I):
         try:
@@ -70,7 +94,8 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             notice = await message.reply_text("🧠 در حال خلاصه‌سازی مکالمات گروه...")
             try:
                 summary = await summarize_group(chat.id, user.id)
-                await message.reply_text("📚 خلاصهٔ مکالمه گروه:\n" + str(summary)[:3800])
+                from bot.handlers.group_parts.group_ui import summary_card, kb_memory
+                await message.reply_text(summary_card(str(summary)), parse_mode="HTML", reply_markup=kb_memory())
             finally:
                 try:
                     await notice.delete()

@@ -146,17 +146,34 @@ async def stream_ai_to_message(
     if in_group:
         try:
             from bot.handlers.group_parts.group_memory import get_context, add_turn
-            ctx = get_context(chat.id)
+            reply_to = getattr(message, "reply_to_message", None)
+            reply_id = getattr(reply_to, "message_id", None) if reply_to else None
+            speaker = (user.full_name or user.first_name or "کاربر") if user else "کاربر"
+            ctx = get_context(
+                chat.id,
+                user_id=getattr(user, "id", None),
+                reply_to_message_id=reply_id,
+                max_turns=8,
+                for_prompt=True,
+            )
             base = (prompt or "").strip()
-            if ctx and len(ctx) < 180:
-                base = (ctx + "\n\nسؤال فعلی: " + base) if (ctx and len(ctx) < 180) else base
+            if ctx and len(ctx) > 20:
+                base = "[زمینه کوتاه گروه]\n" + ctx + "\n\nسؤال فعلی از " + speaker + ": " + base
             final_prompt = _build_group_prompt(base, short=short, max_chars=max_chars)
             try:
                 from bot.handlers.group_community import get_group_assistant_prompt
                 final_prompt += get_group_assistant_prompt(chat.id)
             except Exception as profile_exc:
                 logger.debug("group assistant profile unavailable: %s", profile_exc)
-            add_turn(chat.id, "user", prompt)
+            add_turn(
+                chat.id,
+                "user",
+                prompt,
+                user_id=getattr(user, "id", None),
+                speaker=speaker,
+                message_id=getattr(message, "message_id", None),
+                reply_to_message_id=reply_id,
+            )
         except Exception:
             final_prompt = _build_group_prompt(prompt, short=short, max_chars=max_chars)
 
@@ -245,7 +262,7 @@ async def stream_ai_to_message(
         if in_group:
             try:
                 from bot.handlers.group_parts.group_memory import add_turn
-                add_turn(chat.id, "bot", final_answer)
+                add_turn(chat.id, "bot", final_answer, speaker="روز زیبا")
                 from bot.handlers.group_parts.metrics import mark
                 mark("group_ai_reply")
             except Exception:

@@ -245,3 +245,37 @@ async def group_quick_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as exc:
         from bot.logger import logger
         logger.warning("gquick failed: %s", exc)
+
+
+async def group_memory_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    if not q or not q.data or not q.data.startswith("gmem:"):
+        return
+    await q.answer()
+    chat = q.message.chat if q.message else None
+    if not chat:
+        return
+    action = q.data.split(":", 1)[-1]
+    try:
+        from bot.handlers.group_parts.group_memory import clear_chat, summarize_group, memory_stats, get_context
+        from bot.handlers.group_parts.group_ui import memory_card, summary_card, kb_memory, card
+        if action == "clear":
+            clear_chat(chat.id)
+            await q.message.reply_text(card("🧠 حافظه گروه", "پاک شد."), parse_mode="HTML")
+        elif action == "summary":
+            notice = await q.message.reply_text("🧠 در حال خلاصه...")
+            try:
+                s = await summarize_group(chat.id, q.from_user.id if q.from_user else 0)
+                await q.message.reply_text(summary_card(s), parse_mode="HTML", reply_markup=kb_memory())
+            finally:
+                try:
+                    await notice.delete()
+                except Exception:
+                    pass
+        else:
+            st = memory_stats(chat.id)
+            prev = get_context(chat.id, max_turns=4, for_prompt=False)
+            await q.message.reply_text(memory_card(st, prev), parse_mode="HTML", reply_markup=kb_memory())
+    except Exception as exc:
+        from bot.logger import logger
+        logger.warning("gmem callback: %s", exc)
