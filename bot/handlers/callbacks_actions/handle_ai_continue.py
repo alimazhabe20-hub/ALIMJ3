@@ -16,6 +16,9 @@ async def handle(update, context):
     if data.startswith("ai_continue:"):
         await _safe_answer(query, "در حال ادامه…")
         answer_id = data.split(":", 1)[1].strip()
+        # "0" / "last" یعنی شناسه واقعی نداریم → از آخرین پاسخ کاربر استفاده کن
+        if answer_id in {"", "0", "last", "none"}:
+            answer_id = ""
         from bot.services.ai_extras import build_continue_prompt, store_answer, get_ai_result_keyboard
         from bot.services.ai_service import ask_ai
         cont_prompt = build_continue_prompt(user_id, answer_id)
