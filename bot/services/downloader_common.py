@@ -41,13 +41,13 @@ from bot.logger import logger
 
 MAX_BYTES = max(1, int(os.getenv("DOWNLOADER_MAX_BYTES", str(1024 * 1024 * 1024))))
 
-TIMEOUT = max(5.0, float(os.getenv("DOWNLOADER_TIMEOUT", "60")))
+TIMEOUT = max(5.0, float(os.getenv("DOWNLOADER_TIMEOUT", "45")))
 
 MAX_REDIRECTS = max(1, int(os.getenv("DOWNLOADER_MAX_REDIRECTS", "5")))
 
-GLOBAL_CONCURRENCY = max(1, int(os.getenv("DOWNLOADER_CONCURRENCY", "2")))
+GLOBAL_CONCURRENCY = max(1, int(os.getenv("DOWNLOADER_CONCURRENCY", "4")))
 
-PER_USER_CONCURRENCY = max(1, int(os.getenv("DOWNLOADER_PER_USER_CONCURRENCY", "1")))
+PER_USER_CONCURRENCY = max(1, int(os.getenv("DOWNLOADER_PER_USER_CONCURRENCY", "2")))
 
 CACHE_TTL = max(0, int(os.getenv("DOWNLOADER_CACHE_TTL", "3600")))
 

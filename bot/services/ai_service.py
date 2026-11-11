@@ -2000,11 +2000,15 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
         # جستجو fail شد یا خالی بود — باز هم AI را برای قیمت/فروشگاه راه نده
         from urllib.parse import quote as _q
         qsafe = _q((original_prompt or "").strip()[:80])
+        label = (original_prompt or "").strip()[:50] or "محصول"
         fallback = (
-            "⚠️ استعلام زنده قیمت از منابع فروشگاهی فعلاً نتیجه قابل‌اعتماد برنگرداند؛ "
+            "🛒 <b>جستجوی خرید</b>\n"
+            "━━━━━━━━━━━━━━\n"
+            f"برای «{label}» نتیجهٔ زنده و قابل‌اعتماد پیدا نشد؛ "
             "قیمت حدسی ارائه نمی‌کنم.\n\n"
-            f"🔎 ترب: https://torob.com/search/?query={qsafe}\n"
-            f"🛍 دیجی‌کالا: https://www.digikala.com/search/?q={qsafe}"
+            f"🔎 <a href=\"https://torob.com/search/?query={qsafe}\">ترب</a>"
+            f"  ·  "
+            f"🛍 <a href=\"https://www.digikala.com/search/?q={qsafe}\">دیجی‌کالا</a>"
         )
         logger.warning("shopping request but live engine empty; returning link fallback")
         _save_turn(user_id, original_prompt, fallback)
@@ -2294,11 +2298,15 @@ async def ask_ai_stream(user_id: int, prompt: str, *, tool_query: Optional[str] 
         if not live_shopping:
             from urllib.parse import quote as _q
             qsafe = _q((query or "").strip()[:80])
+            label = (query or "").strip()[:50] or "محصول"
             live_shopping = (
-                "⚠️ استعلام زنده قیمت از منابع فروشگاهی فعلاً نتیجه قابل‌اعتماد برنگرداند؛ "
+                "🛒 <b>جستجوی خرید</b>\n"
+                "━━━━━━━━━━━━━━\n"
+                f"برای «{label}» نتیجهٔ زنده و قابل‌اعتماد پیدا نشد؛ "
                 "قیمت حدسی ارائه نمی‌کنم.\n\n"
-                f"🔎 ترب: https://torob.com/search/?query={qsafe}\n"
-                f"🛍 دیجی‌کالا: https://www.digikala.com/search/?q={qsafe}"
+                f"🔎 <a href=\"https://torob.com/search/?query={qsafe}\">ترب</a>"
+                f"  ·  "
+                f"🛍 <a href=\"https://www.digikala.com/search/?q={qsafe}\">دیجی‌کالا</a>"
             )
             logger.warning("shopping stream: live empty; link fallback")
         logger.info("shopping stream served by live engine; AI providers skipped")
