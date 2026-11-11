@@ -202,8 +202,8 @@ TRUST = {
 }
 
 SOURCES = {
-    "torob": {"label": "ترب", "domains": ["torob.com"]},
     "digikala": {"label": "دیجی‌کالا", "domains": ["digikala.com"]},
+    "torob": {"label": "ترب", "domains": ["torob.com"]},
     "snappshop": {"label": "اسنپ‌شاپ", "domains": ["snappshop.ir"]},
     "emalls": {"label": "ایمالز", "domains": ["emalls.ir"]},
     "basalam": {"label": "باسلام", "domains": ["basalam.com"]},
@@ -1366,7 +1366,9 @@ def _value_score(row: dict, max_price: int, intent: dict) -> float:
     if row.get("_cross_validated"):
         s += 5
     if str(row.get("source") or "") == "دیجی‌کالا":
-        s += 4
+        s += 12
+    elif str(row.get("source") or "") == "ترب":
+        s += 3
     # تازگی تقریبی از عدد مدل
     if re.search(r"\b(15|14|13|a7|a5|c81|c85|note\s*1[345])\b", title, re.I):
         s += 3
@@ -1781,22 +1783,38 @@ def _rank(rows: list[dict], query: str, max_price: int) -> list[dict]:
     return out
 
 
+
+def _ordered_source_names(source_counts: dict[str, int]) -> list[str]:
+    """ترتیب نمایش منابع: دیجی‌کالا → ترب → بقیه."""
+    rank = {"دیجی‌کالا": 0, "ترب": 1}
+    return sorted(source_counts.keys(), key=lambda s: (rank.get(s, 50), s))
+
 def _diversify_shopping_rows(
     rows: list[dict], max_results: int = 10, max_per_source: int = 2
 ) -> list[dict]:
     """نتایج را با اولویت دیجی‌کالا، سپس ترب، سپس بقیه پخش می‌کند."""
     if not rows:
         return []
+    # اولویت صریح: دیجی‌کالا اول، ترب دوم
     priority = {"دیجی‌کالا": 0, "ترب": 1}
 
     def _src_rank(row: dict) -> tuple:
         src = str(row.get("source") or "وب")
-        return (priority.get(src, 50), -float(row.get("_score", 0)))
+        return (priority.get(src, 50), -float(row.get("_score", 0)), row.get("price") or 10**30)
 
     ordered = sorted(rows, key=_src_rank)
     result: list[dict] = []
     counts: dict[str, int] = {}
     used_urls: set[str] = set()
+
+    def _cap_for(src: str) -> int:
+        # به دیجی‌کالا سهم بیشتر بده، بعد ترب
+        if src == "دیجی‌کالا":
+            return max(max_per_source, 4)
+        if src == "ترب":
+            return max(max_per_source, 3)
+        return max_per_source
+
     # دور اول: حداقل یکی از هر منبع (با اولویت دیجی‌کالا)
     for row in ordered:
         url = str(row.get("url") or "").strip()
@@ -1812,7 +1830,7 @@ def _diversify_shopping_rows(
     for row in ordered:
         url = str(row.get("url") or "").strip()
         src = str(row.get("source") or "وب")
-        if not url or url in used_urls or counts.get(src, 0) >= max_per_source:
+        if not url or url in used_urls or counts.get(src, 0) >= _cap_for(src):
             continue
         used_urls.add(url)
         counts[src] = counts.get(src, 0) + 1
@@ -2302,11 +2320,19 @@ async def search_shopping(
                     direct_tasks.append(_direct_torob(v, max_price, max(8, max_results)))
             if direct_tasks:
                 direct_batches = await asyncio.gather(*direct_tasks, return_exceptions=True)
+                # اول نتایج دیجی‌کالا، بعد ترب و بقیه
+                dk_rows: list[dict] = []
+                other_rows: list[dict] = []
                 for b in direct_batches:
                     if isinstance(b, list):
                         for x in b:
                             x["_verified_direct"] = True
-                            rows.append(x)
+                            if str(x.get("source") or "") == "دیجی‌کالا":
+                                dk_rows.append(x)
+                            else:
+                                other_rows.append(x)
+                rows.extend(dk_rows)
+                rows.extend(other_rows)
 
         # Fast-path: اگر از API مستقیم نتیجهٔ قیمت‌دار و هم‌خوان کافی آمد،
         # مسیرهای کند (HTML سایت + موتور جستجو + inspect) را رد کن.
@@ -2513,9 +2539,9 @@ async def search_shopping(
         return (
             f"⚠️ برای «{clean}» با این مشخصات نتیجه قابل‌اعتماد و داخل بودجه "
             "از منابع زنده پیدا نشد؛ قیمت حدسی ارائه نمی‌کنم.\n\n"
-            f"🔎 <a href=\"https://torob.com/search/?query={qlink}\">ترب</a>"
-            f"  ·  "
             f"🛍 <a href=\"https://www.digikala.com/search/?q={qlink}\">دیجی‌کالا</a>"
+            f"  ·  "
+            f"🔎 <a href=\"https://torob.com/search/?query={qlink}\">ترب</a>"
         )
 
     priced = [x for x in rows if x.get("price")]
@@ -2531,7 +2557,7 @@ async def search_shopping(
     lines = [
         f"🛒 **نتایج خرید چندفروشگاهی — {raw}**",
         f"🌍 {market} | 🕒 {now}",
-        f"🔎 منابع دارای نتیجه معتبر: {', '.join(source_counts.keys())}",
+        f"🔎 منابع دارای نتیجه معتبر: {', '.join(_ordered_source_names(source_counts))}",
     ]
     if profile:
         lines.append(profile)
