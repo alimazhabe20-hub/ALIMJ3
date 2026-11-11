@@ -2351,6 +2351,24 @@ async def search_shopping(
             and _shopping_product_match(x, raw, intent)
             and (not max_price or int(x.get("price") or 0) <= int(max_price))
         ]
+        # اگر فقط دیجی‌کالا خواسته شده ولی خالی بود، ترب را هم به‌عنوان پشتیبان امتحان کن
+        if domain == "digikala.com" and len(_direct_priced) == 0 and not foreign:
+            try:
+                for v in variants[:2]:
+                    tb = await _direct_torob(v, max_price, max(8, max_results))
+                    if isinstance(tb, list):
+                        for x in tb:
+                            x["_verified_direct"] = True
+                            x["_fallback_source"] = True
+                            rows.append(x)
+                _direct_priced = [
+                    x for x in rows
+                    if x.get("price") and x.get("_verified_direct")
+                    and _shopping_product_match(x, raw, intent)
+                    and (not max_price or int(x.get("price") or 0) <= int(max_price))
+                ]
+            except Exception as _fb_exc:
+                logger.debug("digikala-empty torob fallback: %s", _fb_exc)
         _fast_enough = len(_direct_priced) >= max(3, min(max_results, 5))
         if not _fast_enough and not foreign:
             # Direct site pages فقط وقتی API کافی نبود
@@ -2548,9 +2566,8 @@ async def search_shopping(
         return (
             f"⚠️ برای «{clean}» با این مشخصات نتیجه قابل‌اعتماد و داخل بودجه "
             "از منابع زنده پیدا نشد؛ قیمت حدسی ارائه نمی‌کنم.\n\n"
-            f"🛍 <a href=\"https://www.digikala.com/search/?q={qlink}\">دیجی‌کالا</a>"
-            f"  ·  "
-            f"🔎 <a href=\"https://torob.com/search/?query={qlink}\">ترب</a>"
+            f"🛍 دیجی‌کالا:\nhttps://www.digikala.com/search/?q={qlink}\n\n"
+            f"🔎 ترب:\nhttps://torob.com/search/?query={qlink}"
         )
 
     priced = [x for x in rows if x.get("price")]
