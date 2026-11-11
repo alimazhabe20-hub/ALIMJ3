@@ -111,10 +111,6 @@ async def _download_via_cobalt(url: str, outdir: Path, mode: str = "best") -> di
         "Content-Type": "application/json",
         "User-Agent": UA,
     }
-    if COBALT_API_KEY:
-        headers["Authorization"] = f"Api-Key {COBALT_API_KEY}"
-        # Some instances use Bearer
-        headers["X-Api-Key"] = COBALT_API_KEY
 
     def work():
         r = requests.post(

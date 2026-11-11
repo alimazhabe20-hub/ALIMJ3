@@ -89,7 +89,6 @@ YTDLP_BUFFER_SIZE = max(64 * 1024, int(os.getenv("DOWNLOADER_BUFFER_SIZE", str(1
 # Optional providers for supported non-blocked URLs.
 COBALT_URL = (os.getenv("DOWNLOADER_COBALT_URL") or os.getenv("COBALT_API_URL") or "https://api.cobalt.tools").strip().rstrip("/")
 # اگر COBALT را خاموش می‌خواهی: DOWNLOADER_COBALT_URL=off
-COBALT_API_KEY = (os.getenv("DOWNLOADER_COBALT_API_KEY") or os.getenv("COBALT_API_KEY") or "").strip()
 YTDLP_API_URL = (os.getenv("DOWNLOADER_YTDLP_API_URL") or os.getenv("YTDLP_API_URL") or "").strip().rstrip("/")
 YTDLP_API_KEY = (os.getenv("DOWNLOADER_YTDLP_API_KEY") or os.getenv("YTDLP_API_KEY") or "").strip()
 EXTERNAL_TIMEOUT = max(15.0, float(os.getenv("DOWNLOADER_EXTERNAL_TIMEOUT", "90")))
@@ -239,9 +238,6 @@ async def _download_via_cobalt(url: str, outdir: Path, mode: str = "best") -> di
         "Content-Type": "application/json",
         "User-Agent": UA,
     }
-    if COBALT_API_KEY:
-        headers["Authorization"] = f"Bearer {COBALT_API_KEY}"
-        headers["X-Api-Key"] = COBALT_API_KEY
 
     def work():
         r = requests.post(
@@ -1127,39 +1123,13 @@ async def download(url: str, *, mode: str = "best", user_id: int | None = None, 
     async with _global_sem:
         async with user_sem:
             # Instagram / social: exact cascade from insta-downloader-bot
-            # (gallery-dl → yt-dlp), before the generic ALIMJ3 engines.
+            # Priority: gallery-dl → yt-dlp, before the generic ALIMJ3 engines.
             try:
                 from bot.services.insta_downloader import is_social_url, download as insta_download, is_video_path
             except Exception:
                 is_social_url = lambda _u: False  # type: ignore
                 insta_download = None
                 is_video_path = lambda _p: False  # type: ignore
-
-            # Cobalt اول برای شبکه‌های اجتماعی (تیک‌تاک/اینستا/توییتر/...)
-            try:
-                cobalt_on = bool(COBALT_URL) and COBALT_URL.lower() not in {"off", "0", "false", "no"}
-                if cobalt_on and EXTERNAL_ENABLED:
-                    social = False
-                    try:
-                        from bot.services.insta_downloader import is_social_url as _is_soc
-                        social = _is_soc(url)
-                    except Exception:
-                        host = (urlparse(url).hostname or "").lower()
-                        social = any(x in host for x in (
-                            "tiktok", "instagram", "twitter", "x.com", "facebook", "reddit", "pinterest"
-                        ))
-                    if social:
-                        outdir_c = Path(tempfile.mkdtemp(prefix="alimj3_dl_cobalt_"))
-                        try:
-                            result = await _download_via_cobalt(url, outdir_c, mode=mode)
-                            if result and result.get("path") and Path(result["path"]).is_file():
-                                _cache_put(result, url, mode)
-                                return result
-                        except Exception as _c_exc:
-                            logger.warning("cobalt-first failed, fallback: %s", _c_exc)
-                            shutil.rmtree(outdir_c, ignore_errors=True)
-            except Exception as _c_outer:
-                logger.debug("cobalt-first outer: %s", _c_outer)
 
             if insta_download and is_social_url(url):
                 try:

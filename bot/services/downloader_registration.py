@@ -12,8 +12,6 @@ YTDLP_BUFFER_SIZE = max(64 * 1024, int(os.getenv("DOWNLOADER_BUFFER_SIZE", str(1
 
 COBALT_URL = (os.getenv("DOWNLOADER_COBALT_URL") or os.getenv("COBALT_API_URL") or "").strip().rstrip("/")
 
-COBALT_API_KEY = (os.getenv("DOWNLOADER_COBALT_API_KEY") or os.getenv("COBALT_API_KEY") or "").strip()
-
 YTDLP_API_URL = (os.getenv("DOWNLOADER_YTDLP_API_URL") or os.getenv("YTDLP_API_URL") or "").strip().rstrip("/")
 
 YTDLP_API_KEY = (os.getenv("DOWNLOADER_YTDLP_API_KEY") or os.getenv("YTDLP_API_KEY") or "").strip()
