@@ -404,7 +404,18 @@ async def run_live_product_search(update, user_id: int, text: str) -> bool:
                 user_id=user_id,
             )
         remember_shop_query(user_id, query)
-        await update.message.reply_text(result)
+        # نتایج خرید HTML/Markdown دارند؛ HTML را ترجیح بده تا لینک‌ها تمیز باشند
+        parse_mode = "HTML" if ("<a " in result or "<b>" in result) else (
+            "Markdown" if "**" in result else None
+        )
+        try:
+            await update.message.reply_text(
+                result,
+                parse_mode=parse_mode,
+                disable_web_page_preview=True,
+            )
+        except Exception:
+            await update.message.reply_text(result, disable_web_page_preview=True)
     except Exception:
         from bot.logger import logger
 
@@ -414,6 +425,7 @@ async def run_live_product_search(update, user_id: int, text: str) -> bool:
         await update.message.reply_text(
             "⚠️ استعلام زنده قیمت فعلاً در دسترس نیست؛ قیمت حدسی ارائه نمی‌کنم."
         )
+
     finally:
         try:
             await notice.delete()

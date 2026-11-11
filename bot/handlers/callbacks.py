@@ -117,6 +117,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = update.effective_user.id
 
+    # Group callbacks are owned by group_callback_handler / group_quick_callback.
+    # Never answer or consume them here (defense in depth if registration order changes).
+    if data and (
+        data.startswith("gset:")
+        or data.startswith("group_")
+        or data.startswith("gquick:")
+        or data.startswith("ga:")
+        or data.startswith("gh:")
+        or data.startswith("gfb:")
+    ):
+        return
+
     # ───────────────── فونت UX ─────────────────
     if data and data.startswith("font:"):
         from bot.features.fonts.font_ux import font_callback

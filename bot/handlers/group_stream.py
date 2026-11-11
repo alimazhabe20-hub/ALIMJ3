@@ -235,7 +235,11 @@ async def stream_ai_to_message(
 
                 if in_group:
                     h = group_ai_header(user, streaming=True)
-                    preview = h + _esc(preview_body) + _cursor(frame)
+                    # اگر بدنه خودش HTML خرید است، escape نکن
+                    if "<a " in preview_body or "<b>" in preview_body:
+                        preview = h + preview_body + _cursor(frame)
+                    else:
+                        preview = h + _esc(preview_body) + _cursor(frame)
                     pm = ParseMode.HTML
                 else:
                     preview = "🤖 " + preview_body + _cursor(frame)
@@ -280,7 +284,14 @@ async def stream_ai_to_message(
 
         if in_group:
             h = group_ai_header(user, streaming=False)
-            body = _esc(final_answer)
+            # پاسخ‌های خرید از قبل HTML دارند؛ escape نکن تا لینک‌ها تمیز بمانند
+            is_html_answer = (
+                "<a " in final_answer
+                or "<b>" in final_answer
+                or "جستجوی خرید" in final_answer
+                or "نتایج خرید" in final_answer
+            )
+            body = final_answer if is_html_answer else _esc(final_answer)
             footer = group_ai_footer()
             final_text = f"{h}{body}{footer}"
             if len(final_text) > 4090:
