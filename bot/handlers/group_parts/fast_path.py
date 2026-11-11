@@ -256,7 +256,29 @@ async def run_fast_path(text: str) -> Optional[str]:
                 logger.warning("analyze_crypto fast_path: %s", exc)
             return None
 
+        if intent == "weather":
+            import asyncio
+            city = _extract_city(text)
+            try:
+                from bot.api.api_weather import get_weather
+                if asyncio.iscoroutinefunction(get_weather):
+                    w = await asyncio.wait_for(get_weather(city), timeout=12.0)
+                else:
+                    w = await asyncio.wait_for(asyncio.to_thread(get_weather, city), timeout=12.0)
+                msg = _format_weather(city, w)
+                if msg and "در دسترس نیست" not in msg:
+                    _cache_set(f"weather:{city}", msg)
+                    return msg
+                # اگر dict خالی/None بود
+                if not msg:
+                    return f"⚠️ آب‌وهوای «{city}» الان در دسترس نیست. کمی بعد دوباره امتحان کن."
+                return msg
+            except Exception as exc:
+                logger.warning("weather fast_path failed city=%s: %s", city, exc)
+                return f"⚠️ دریافت آب‌وهوای «{city}» ممکن نشد. کمی بعد دوباره امتحان کن."
+
         if intent == "shop":
+
             import asyncio
             from urllib.parse import quote
             # کوئری تمیز برای جستجو — شبیه پیام اصلی ربات
