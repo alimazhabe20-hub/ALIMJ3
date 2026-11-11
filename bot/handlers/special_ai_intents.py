@@ -350,6 +350,7 @@ def _shopping_query(text: str, user_id: int | None = None) -> str:
         r"لطفاً|لطفا",
         r"میشه(?:\s*بگی)?",
         r"ببین|برام|برای\s*من",
+        r"ربات|بات|هوشمند|دستیار",
         r"می\s*خوام|میخوام|می‌خوام|نیاز\s*دارم|لازم\s*دارم",
         r"دنبال",
         r"می\s*گردم|می‌گردم|میگردم|بگرد(?:ون)?",
@@ -397,15 +398,16 @@ async def run_live_product_search(update, user_id: int, text: str) -> bool:
         if is_compare and _split_compare_query(text):
             result = await compare_products(text, user_id=user_id)
         else:
+            # متن اصلی را بده تا «تو دیجی‌کالا» / بودجه از بین نرود
             result = await search_shopping(
-                query,
+                text,
                 source="all",
                 max_results=8,
                 user_id=user_id,
             )
         remember_shop_query(user_id, query)
         # نتایج خرید HTML/Markdown دارند؛ HTML را ترجیح بده تا لینک‌ها تمیز باشند
-        parse_mode = "HTML" if ("<a " in result or "<b>" in result) else (
+        parse_mode = "HTML" if ("<a " in result or "<b>" in result or "<i>" in result) else (
             "Markdown" if "**" in result else None
         )
         try:
@@ -415,7 +417,15 @@ async def run_live_product_search(update, user_id: int, text: str) -> bool:
                 disable_web_page_preview=True,
             )
         except Exception:
-            await update.message.reply_text(result, disable_web_page_preview=True)
+            # اگر HTML خراب بود، تگ‌ها را ساده کن
+            plain = result
+            try:
+                import re as _re
+                plain = _re.sub(r"<a\s+href="([^"]+)">([^<]*)</a>", r"\2: \1", result)
+                plain = _re.sub(r"<[^>]+>", "", plain)
+            except Exception:
+                pass
+            await update.message.reply_text(plain, disable_web_page_preview=True)
     except Exception:
         from bot.logger import logger
 
