@@ -1179,7 +1179,7 @@ async def _direct_torob(query: str, max_price: int, limit: int) -> list[dict]:
     async def _do() -> list[dict]:
         async with _SEARCH_SEM:
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(11.0, connect=5.0),
+                timeout=httpx.Timeout(6.5, connect=3.0),
                 follow_redirects=True,
                 headers={
                     "User-Agent": UA,
@@ -1195,7 +1195,7 @@ async def _direct_torob(query: str, max_price: int, limit: int) -> list[dict]:
                         "size": min(max(12, limit * 2), 40),
                         # برای بودجه بالا sort=price فقط مدل‌های خیلی ارزان می‌آورد
                         **({"sort": "price"} if (max_price and max_price < 8_000_000) else {}),
-                        "source": "torob_search",
+                        "source": "next",
                     },
                 )
         if r.status_code >= 400:
@@ -1493,7 +1493,7 @@ async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]
     async def _do() -> list[dict]:
         async with _SEARCH_SEM:
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(11.0, connect=5.0),
+                timeout=httpx.Timeout(6.5, connect=3.0),
                 follow_redirects=True,
                 headers={
                     "User-Agent": UA,
@@ -1570,7 +1570,8 @@ async def _direct_digikala(query: str, max_price: int, limit: int) -> list[dict]
             _STATS["direct_ok"] += 1
         return out
 
-    result = await _with_retry(_do, source="digikala", max_attempts=4, base_delay=0.8)
+    # retry کمتر و سریع‌تر — الگوی userscript (timeout کوتاه + یک بار تلاش اضافه)
+    result = await _with_retry(_do, source="digikala", max_attempts=2, base_delay=0.25)
     rows = result if isinstance(result, list) else []
     if not rows:
         rows = await _digikala_html_fallback(query, max_price, limit)
@@ -2284,7 +2285,9 @@ async def search_shopping(
 
         rows: list[dict] = []
 
-        # Direct API (highest confidence) — حتی وقتی فقط یک فروشگاه خواسته شده
+        # Direct API (highest confidence) — الگوی سرعت مشابه userscript:
+        # فقط API concurrent دیجی‌کالا + ترب با timeout کوتاه؛ اگر نتیجه کافی بود
+        # همان‌جا برمی‌گردیم و HTML/web scraping سنگین را رد می‌کنیم.
         if not foreign:
             direct_tasks = []
             want_dk = (not domain) or domain in ("digikala.com",)
@@ -2305,44 +2308,77 @@ async def search_shopping(
                             x["_verified_direct"] = True
                             rows.append(x)
 
-        # Direct site pages
-        direct_site_tasks = []
-        for v in variants[:2]:
-            for d in domains:
-                if not foreign and d in _SOURCE_SEARCH_URLS:
-                    direct_site_tasks.append(
-                        _direct_site_search(v, d, max(6, max_results // 2 + 3))
-                    )
-        direct_site_batches = (
-            await asyncio.gather(*direct_site_tasks, return_exceptions=True)
-            if direct_site_tasks
-            else []
-        )
-        for b in direct_site_batches:
-            if isinstance(b, list):
-                for x in b:
-                    x["_verified_direct"] = bool(x.get("price"))
-                    if _shopping_product_match(x, raw, intent):
-                        rows.append(x)
+        # Fast-path: اگر از API مستقیم نتیجهٔ قیمت‌دار و هم‌خوان کافی آمد،
+        # مسیرهای کند (HTML سایت + موتور جستجو + inspect) را رد کن.
+        _direct_priced = [
+            x for x in rows
+            if x.get("price") and x.get("_verified_direct")
+            and _shopping_product_match(x, raw, intent)
+            and (not max_price or int(x.get("price") or 0) <= int(max_price))
+        ]
+        _fast_enough = len(_direct_priced) >= max(3, min(max_results, 5))
+        if not _fast_enough and not foreign:
+            # Direct site pages فقط وقتی API کافی نبود
+            direct_site_tasks = []
+            for v in variants[:1]:
+                for d in domains[:4]:
+                    if d in _SOURCE_SEARCH_URLS:
+                        direct_site_tasks.append(
+                            _direct_site_search(v, d, max(4, max_results // 2 + 2))
+                        )
+            direct_site_batches = (
+                await asyncio.gather(*direct_site_tasks, return_exceptions=True)
+                if direct_site_tasks
+                else []
+            )
+            for b in direct_site_batches:
+                if isinstance(b, list):
+                    for x in b:
+                        x["_verified_direct"] = bool(x.get("price"))
+                        if _shopping_product_match(x, raw, intent):
+                            rows.append(x)
 
-        # Search-engine fallback
-        search_tasks = []
-        for v in variants[:2]:
-            for d in domains:
-                search_tasks.append(
-                    _fetch_source(v, d, max(6, max_results // 2 + 3), foreign)
+            # Search-engine fallback — محدود و فقط در صورت نیاز
+            _still_thin = len([
+                x for x in rows if x.get("price") and _shopping_product_match(x, raw, intent)
+            ]) < max(2, max_results // 2)
+            if _still_thin:
+                search_tasks = []
+                for v in variants[:1]:
+                    for d in domains[:3]:
+                        search_tasks.append(
+                            _fetch_source(v, d, max(4, max_results // 2 + 2), foreign)
+                        )
+                search_batches = (
+                    await asyncio.gather(*search_tasks, return_exceptions=True)
+                    if search_tasks
+                    else []
                 )
-        search_batches = (
-            await asyncio.gather(*search_tasks, return_exceptions=True)
-            if search_tasks
-            else []
-        )
-        for b in search_batches:
-            if isinstance(b, list):
-                for x in b:
-                    if _shopping_product_match(x, raw, intent):
-                        x.setdefault("_verified_direct", False)
-                        rows.append(x)
+                for b in search_batches:
+                    if isinstance(b, list):
+                        for x in b:
+                            if _shopping_product_match(x, raw, intent):
+                                x.setdefault("_verified_direct", False)
+                                rows.append(x)
+        elif foreign:
+            # بازار خارجی: مسیر جستجوی وب
+            search_tasks = []
+            for v in variants[:2]:
+                for d in domains:
+                    search_tasks.append(
+                        _fetch_source(v, d, max(6, max_results // 2 + 3), foreign)
+                    )
+            search_batches = (
+                await asyncio.gather(*search_tasks, return_exceptions=True)
+                if search_tasks
+                else []
+            )
+            for b in search_batches:
+                if isinstance(b, list):
+                    for x in b:
+                        if _shopping_product_match(x, raw, intent):
+                            x.setdefault("_verified_direct", False)
+                            rows.append(x)
 
         # Pre-filter
         filtered: list[dict] = []
@@ -2398,14 +2434,16 @@ async def search_shopping(
                     x["_mobo_match"] = True
                     x["_score"] = float(x.get("_score", 0)) + 18
 
-        # Inspect top non-verified pages (controlled concurrency)
+        # Inspect top non-verified pages — فقط وقتی نتیجهٔ مستقیم API کافی نیست
+        verified_count = sum(1 for x in rows if x.get("_verified_direct") and x.get("price"))
         inspect_candidates = []
-        for x in rows:
-            if x.get("_verified_direct"):
-                continue
-            inspect_candidates.append(x)
-            if len(inspect_candidates) >= 14:
-                break
+        if verified_count < max(3, min(max_results, 5)):
+            for x in rows:
+                if x.get("_verified_direct"):
+                    continue
+                inspect_candidates.append(x)
+                if len(inspect_candidates) >= 8:
+                    break
         if inspect_candidates:
             checked = await asyncio.gather(
                 *[
