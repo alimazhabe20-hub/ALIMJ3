@@ -145,11 +145,13 @@ def error_card(text: str = "الان نتونستم کامل جواب بدم. د
 
 # ─── کیبوردها ─────────────────────────────────────────
 
-def kb_ai(user_id: int = 0) -> InlineKeyboardMarkup:
+def kb_ai(user_id: int = 0, answer_id: str | None = None) -> InlineKeyboardMarkup:
+    # answer_id واقعی را در callback بگذار تا دکمه ادامه کار کند
+    aid = (str(answer_id).strip() if answer_id else "") or "last"
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("➕ ادامه", callback_data="ai_continue:0"),
+                InlineKeyboardButton("➕ ادامه", callback_data=f"ai_continue:{aid}"),
                 InlineKeyboardButton("👍", callback_data=f"gfb:up:{user_id}"),
                 InlineKeyboardButton("👎", callback_data=f"gfb:dn:{user_id}"),
             ],
@@ -158,9 +160,9 @@ def kb_ai(user_id: int = 0) -> InlineKeyboardMarkup:
     )
 
 
-def continue_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
+def continue_keyboard(user_id: int = 0, answer_id: str | None = None) -> InlineKeyboardMarkup:
     """کیبورد ادامه (سازگار با ایمپورت‌های قدیمی)."""
-    return kb_ai(user_id)
+    return kb_ai(user_id, answer_id=answer_id)
 
 
 def kb_price() -> InlineKeyboardMarkup:
