@@ -279,12 +279,13 @@ def group_ai_footer() -> str:
 
 
 def group_inline_actions(user_id: int, answer_id: Optional[str] = None) -> InlineKeyboardMarkup:
+    aid = (str(answer_id).strip() if answer_id else "") or "last"
     try:
         from bot.handlers.group_parts.group_ui import kb_ai
-        return kb_ai(user_id)
+        return kb_ai(user_id, answer_id=aid)
     except Exception:
         return InlineKeyboardMarkup(
-            [[InlineKeyboardButton("➕ ادامه", callback_data=f"ai_continue:{answer_id or 0}"),
+            [[InlineKeyboardButton("➕ ادامه", callback_data=f"ai_continue:{aid}"),
               InlineKeyboardButton("بستن", callback_data="group_dismiss")]]
         )
 
