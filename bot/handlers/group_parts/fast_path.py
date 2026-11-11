@@ -259,9 +259,13 @@ async def run_fast_path(text: str) -> Optional[str]:
         if intent == "shop":
             import asyncio
             from urllib.parse import quote
-            # کوئری تمیز برای جستجو
-            q_clean = re.sub(r"^(?:ربات|هوشمند)\s*", "", text or "", flags=re.I).strip()
-            q_clean = re.sub(r"\b(?:برام|برای من|لینکش?\s*بفرست|پیدا\s*کن)\b", " ", q_clean)
+            # کوئری تمیز برای جستجو — شبیه پیام اصلی ربات
+            q_clean = re.sub(r"^(?:ربات|هوشمند|!)\s*", "", text or "", flags=re.I).strip()
+            q_clean = re.sub(
+                r"\b(?:برام|برای\s*من|لینکش?\s*بفرست|پیدا\s*کن|جستجو\s*کن)\b",
+                " ",
+                q_clean,
+            )
             q_clean = " ".join(q_clean.split()) or (text or "").strip()
             try:
                 from bot.features.market import shopping as _sh
@@ -273,25 +277,47 @@ async def run_fast_path(text: str) -> Optional[str]:
             result = None
             try:
                 from bot.features.market.shopping import search_shopping
-                # source=all تا فقط به ترب وابسته نباشد + timeout بیشتر
+                # API-first سریع؛ timeout کمی بالاتر از قبل برای نتیجه واقعی
                 result = await asyncio.wait_for(
                     search_shopping(q_clean, source="all", max_results=6),
-                    timeout=12.0,
+                    timeout=14.0,
                 )
             except Exception as exc:
                 logger.warning("shop fast_path search failed: %s", exc)
                 result = None
             # فقط وقتی نتیجه واقعی و مفید بود جواب بده
             if result and len(str(result)) > 40 and "کامل نبود" not in str(result):
-                bad = ("پیدا نشد" in str(result)) or ("مشخص نیست" in str(result)) or ("قابل‌اعتماد" in str(result) and "پیدا نشد" in str(result))
+                bad = (
+                    ("پیدا نشد" in str(result))
+                    or ("مشخص نیست" in str(result))
+                    or ("قابل‌اعتماد" in str(result) and "پیدا نشد" in str(result))
+                    or ("نتیجهٔ زنده و قابل‌اعتماد پیدا نشد" in str(result))
+                )
                 if not bad:
+                    body = str(result)[:3500]
+                    # خروجی موتور خرید Markdown است؛ برای گروه به HTML نزدیک کن
+                    body = (
+                        body.replace("**", "")
+                        .replace("🛒 نتایج خرید چندفروشگاهی", "🛒 نتایج خرید")
+                    )
                     try:
                         from bot.handlers.group_parts.group_ui import shop_card
-                        return shop_card(str(result)[:3500])
+                        return shop_card(body)
                     except Exception:
-                        return "🛒 <b>نتایج خرید</b>\n━━━━━━━━━━━━━━\n" + str(result)[:3500]
-            # شکست: None برگردان تا مسیر AI کامل (با web search و منابع بیشتر) فعال شود
-            return None
+                        return "🛒 <b>نتایج خرید</b>\n━━━━━━━━━━━━━━\n" + body
+            # شکست کنترل‌شده: لینک تمیز HTML (مثل ربات اصلی) نه URL خام encoded
+            try:
+                from bot.handlers.group_parts.group_ui import shop_fallback
+                return shop_fallback(q_clean)
+            except Exception:
+                q = quote((q_clean or "")[:80])
+                return (
+                    "🛒 <b>جستجوی خرید</b>\n━━━━━━━━━━━━━━\n"
+                    f"برای «{q_clean[:50]}» نتیجه زنده پیدا نشد؛ قیمت حدسی ارائه نمی‌کنم.\n\n"
+                    f"🔎 <a href=\"https://torob.com/search/?query={q}\">ترب</a>"
+                    f"  ·  "
+                    f"🛍 <a href=\"https://www.digikala.com/search/?q={q}\">دیجی‌کالا</a>"
+                )
 
 
     except Exception as exc:
