@@ -624,9 +624,21 @@ def build_continue_prompt(user_id: int, answer_id: str = "") -> Optional[str]:
     """ساخت پرامپت ادامه برای AI بدون تکرار بخش قبلی."""
     prev = None
     prompt = None
-    if answer_id:
-        prev = get_stored_answer(answer_id, user_id)
-        prompt = get_stored_prompt(answer_id, user_id)
+    aid = (answer_id or "").strip()
+    if aid in {"0", "last", "none"}:
+        aid = ""
+    if aid:
+        prev = get_stored_answer(aid, user_id)
+        prompt = get_stored_prompt(aid, user_id)
+        # اگر uid کلیک‌کننده با ذخیره‌کننده فرق داشت، فقط با answer_id بخوان
+        if not prev:
+            item = _ANSWER_CACHE.get(aid)
+            if item:
+                _uid, text, exp, *_rest = item if len(item) >= 3 else (None, None, 0)
+                if exp >= time.time() and text:
+                    prev = text
+                    if len(item) >= 4 and item[3]:
+                        prompt = item[3]
     if not prev:
         prev = get_last_answer(user_id)
     if not prompt:
