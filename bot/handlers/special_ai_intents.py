@@ -421,8 +421,8 @@ async def run_live_product_search(update, user_id: int, text: str) -> bool:
             plain = result
             try:
                 import re as _re
-                plain = _re.sub(r"<a\s+href="([^"]+)">([^<]*)</a>", r"\2: \1", result)
-                plain = _re.sub(r"<[^>]+>", "", plain)
+                plain = _re.sub(r'<a\s+href="([^"]+)">([^<]*)</a>', r'\2: \1', result)
+                plain = _re.sub(r'<[^>]+>', '', plain)
             except Exception:
                 pass
             await update.message.reply_text(plain, disable_web_page_preview=True)
