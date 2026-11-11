@@ -1,20 +1,14 @@
-"""Shopping catalog providers (Digikala, Torob, web search)."""
-from bot.features.shopping.engine import (
+"""Shopping providers."""
+from bot.features.shopping.providers.digikala import (
     _direct_digikala,
-    _direct_torob,
     _digikala_html_fallback,
-    _fetch_source,
-    _bing_search,
-    _ddg_search,
-    _direct_site_search,
+    _digikala_product_url,
 )
+from bot.features.shopping.providers.torob import _direct_torob
 
 __all__ = [
     "_direct_digikala",
-    "_direct_torob",
     "_digikala_html_fallback",
-    "_fetch_source",
-    "_bing_search",
-    "_ddg_search",
-    "_direct_site_search",
+    "_digikala_product_url",
+    "_direct_torob",
 ]
