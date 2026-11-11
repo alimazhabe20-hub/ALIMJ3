@@ -488,6 +488,24 @@ def main():
     # ماشین‌حساب گرافیکی — باید قبل از button_handler عمومی باشد
     app.add_handler(CallbackQueryHandler(graphical_calc_callback, pattern=r"^gcalc:"))
     app.add_handler(CallbackQueryHandler(font_callback, pattern=r"^font:"))
+
+    # --- Group mode: detect when bot is added to a group ---
+    try:
+        from bot.handlers.group_mode import handle_my_chat_member
+        app.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
+    except Exception as _gm:
+        logger.warning("group chat_member handler skipped: %s", _gm)
+
+    # Group callbacks MUST be registered BEFORE the catch-all button_handler.
+    # Otherwise button_handler answers gset:/group_/gquick: and group toggles never run.
+    try:
+        from bot.handlers.group_commands import group_callback_handler, group_quick_callback
+        app.add_handler(CallbackQueryHandler(group_callback_handler, pattern=r"^(group_|gset:)"))
+        app.add_handler(CallbackQueryHandler(group_quick_callback, pattern=r"^gquick:"))
+        app.add_handler(CallbackQueryHandler(group_callback_handler, pattern=r"^group_dismiss$"))
+    except Exception as _gcb:
+        logger.warning("group callback skipped: %s", _gcb)
+
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(
         MessageHandler(filters.PHOTO | filters.VIDEO | filters.VIDEO_NOTE | filters.Document.ALL, media_ai_handler),
@@ -496,23 +514,6 @@ def main():
     app.add_handler(
         MessageHandler(filters.VOICE | filters.AUDIO, voice_ai_handler)
     )
-    
-    # --- Group mode: detect when bot is added to a group ---
-    try:
-        from bot.handlers.group_mode import handle_my_chat_member
-        app.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
-    except Exception as _gm:
-        logger.warning("group chat_member handler skipped: %s", _gm)
-
-    # Group callbacks (dismiss / help / settings)
-    try:
-        from bot.handlers.group_commands import group_callback_handler
-        app.add_handler(CallbackQueryHandler(group_callback_handler, pattern=r"^(group_|gset:)"))
-        from bot.handlers.group_commands import group_quick_callback
-        app.add_handler(CallbackQueryHandler(group_quick_callback, pattern=r"^gquick:"))
-        app.add_handler(CallbackQueryHandler(group_callback_handler, pattern=r"^group_dismiss$"))
-    except Exception as _gcb:
-        logger.warning("group callback skipped: %s", _gcb)
 
 
 
