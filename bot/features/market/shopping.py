@@ -82,7 +82,7 @@ CACHE_TTL = 180
 INSPECT_CONCURRENCY = 6
 MAX_RETRIES = 3
 CIRCUIT_FAIL_THRESHOLD = 6
-CIRCUIT_COOLDOWN = 45  # seconds
+CIRCUIT_COOLDOWN = 30  # seconds
 
 _CACHE: dict[str, tuple[float, list[dict]]] = {}
 _STATS = {
@@ -2322,6 +2322,9 @@ async def search_shopping(
             # اگر فروشگاه انحصاری غیر از این دو باشد، API عمومی نزن
             if domain and domain not in ("digikala.com", "torob.com"):
                 want_dk = want_tb = False
+            # اگر دیجی‌کالا circuit باز است، از اول ترب را هم بگیر تا خالی نماند
+            if domain == "digikala.com" and _circuit_is_open("digikala"):
+                want_tb = True
             for v in variants[:2]:
                 if want_dk:
                     direct_tasks.append(_direct_digikala(v, max_price, max(8, max_results)))
@@ -2339,6 +2342,9 @@ async def search_shopping(
                             if str(x.get("source") or "") == "دیجی‌کالا":
                                 dk_rows.append(x)
                             else:
+                                # وقتی کاربر دیجی‌کالا خواسته ولی از ترب آمده
+                                if domain == "digikala.com":
+                                    x["_fallback_source"] = True
                                 other_rows.append(x)
                 rows.extend(dk_rows)
                 rows.extend(other_rows)
@@ -2458,6 +2464,9 @@ async def search_shopping(
         # فیلتر سخت فروشگاه + بودجه (قبل از رتبه‌بندی)
         if domain:
             def _row_domain_ok(r: dict) -> bool:
+                # نتایج fallback (مثلاً ترب وقتی دیجی‌کالا قطع است) حذف نشوند
+                if r.get("_fallback_source"):
+                    return True
                 u = str(r.get("url") or "").lower()
                 s = str(r.get("source") or "").lower()
                 if domain == "digikala.com":
@@ -2585,6 +2594,8 @@ async def search_shopping(
         f"🌍 {market} | 🕒 {now}",
         f"🔎 منابع دارای نتیجه معتبر: {', '.join(_ordered_source_names(source_counts))}",
     ]
+    if any(x.get("_fallback_source") for x in rows) and domain == "digikala.com":
+        lines.append("ℹ️ دیجی‌کالا در دسترس نبود؛ نتایج پشتیبان از ترب نمایش داده شد.")
     if profile:
         lines.append(profile)
     if max_price:
