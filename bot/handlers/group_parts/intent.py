@@ -34,7 +34,9 @@ def detect_intent(text: str, *, has_reply_media: bool = False, is_reply_to_bot: 
     intents:
       help, download, price_dollar, price_euro, price_gold, crypto,
       analyze_gold, analyze_crypto, weather, shop, vision, memory,
-      summary, clear_memory, followup, ai
+      summary, clear_memory, followup,
+      online_notify, send_to_user, when_speaks, fun_roleplay, personal_info,
+      ai
     """
     t = (text or "").strip()
     if not t:
@@ -42,6 +44,15 @@ def detect_intent(text: str, *, has_reply_media: bool = False, is_reply_to_bot: 
 
     low = t.lower()
     cleaned = _clean(t)
+
+    # قابلیت‌های محدود تلگرام / پیام معلق / فان — قبل از بقیه
+    try:
+        from bot.handlers.group_parts.capability_replies import detect_capability_intent
+        cap, _meta = detect_capability_intent(t)
+        if cap:
+            return cap, cleaned
+    except Exception:
+        pass
 
     # حافظه / خلاصه
     if CLEAR_MEMORY_RE.search(t):
