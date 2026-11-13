@@ -54,10 +54,26 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     except Exception as exc:
         logger.warning("group text toggle failed: %s", exc)
 
+    # تحویل پیام معلق — حتی اگر ربات مخاطب نباشد (هر پیام کاربر هدف)
+    delivered_pending = False
+    try:
+        from bot.handlers.group_parts.capability_replies import (
+            pop_pending_for_user,
+            format_pending_delivery,
+        )
+        pending = pop_pending_for_user(chat.id, user)
+        if pending:
+            body = format_pending_delivery(pending)
+            if body:
+                await message.reply_text(body, parse_mode="HTML")
+                delivered_pending = True
+    except Exception as exc:
+        logger.debug("pending delivery early skip: %s", exc)
+
     ok, reason = should_respond_in_group(update, context)
     logger.info("group_reply gate chat=%s ok=%s reason=%s text=%r", chat.id, ok, reason, (text or "")[:100])
     if not ok:
-        return False
+        return True if delivered_pending else False
 
     # Enforce admin-only mode against Telegram's actual group membership.
     try:
@@ -105,6 +121,75 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         )
     except Exception:
         intent, intent_q = "ai", prompt
+
+    # پاسخ هوشمند به محدودیت‌های تلگرام / پیام معلق / فان
+    if intent in {"online_notify", "send_to_user", "when_speaks", "personal_info", "fun_roleplay"}:
+        try:
+            from bot.handlers.group_parts.capability_replies import (
+                detect_capability_intent,
+                reply_online_notify,
+                reply_send_to_user,
+                reply_personal_info,
+                add_pending_message,
+                build_capability_ai_hint,
+            )
+            _cap, meta = detect_capability_intent(prompt or text or "")
+            if intent == "online_notify":
+                await message.reply_text(
+                    reply_online_notify(meta.get("target") or ""),
+                    parse_mode="HTML",
+                )
+                return True
+            if intent == "when_speaks":
+                target = (meta.get("target") or "").strip()
+                payload = (meta.get("payload") or "").strip()
+                if target and payload:
+                    msg = add_pending_message(
+                        chat.id,
+                        target=target,
+                        payload=payload,
+                        from_user_id=user.id,
+                        from_name=(user.full_name or user.first_name or "")[:40],
+                    )
+                    await message.reply_text(msg, parse_mode="HTML")
+                    return True
+                # اگر payload ناقص بود، راهنمایی + اجازه به AI
+                await message.reply_text(
+                    reply_online_notify(target),
+                    parse_mode="HTML",
+                )
+                return True
+            if intent == "send_to_user":
+                # اگر کاربر صریحاً خواست «الان در گروه بگو»، همان را می‌فرستیم
+                raw = meta.get("raw") or prompt or ""
+                if re.search(r"(?:همین\s*الان|الان\s*(?:تو|توی)\s*گروه|توی\s*گروه\s*بگو)", raw, re.I):
+                    payload = (meta.get("payload") or "").strip()
+                    target = (meta.get("target") or "").strip()
+                    if payload:
+                        text_out = f"📢 {payload}"
+                        if target:
+                            text_out = f"📢 برای {target}:\n{payload}"
+                        await message.reply_text(text_out)
+                        return True
+                await message.reply_text(
+                    reply_send_to_user(
+                        meta.get("target") or "",
+                        meta.get("payload") or "",
+                        in_group=True,
+                    ),
+                    parse_mode="HTML",
+                )
+                return True
+            if intent == "personal_info":
+                await message.reply_text(reply_personal_info())
+                return True
+            if intent == "fun_roleplay":
+                # فان را به AI بسپار با راهنمای لحن
+                hint = build_capability_ai_hint("fun_roleplay", meta)
+                prompt = (prompt or text or "") + hint
+                intent = "ai"
+        except Exception as exc:
+            logger.warning("capability reply failed: %s", exc)
 
     if intent == "help" or not (prompt or "").strip() or (prompt or "").strip() in {"ربات", "هوشمند", "!", "bot"}:
         try:
