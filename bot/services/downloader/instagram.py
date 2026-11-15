@@ -1,8 +1,9 @@
-"""Instagram / social media downloader cascade.
+"""Instagram / social media downloader — aligned with insta-downloader-bot.
 
-Order (optimized):
-  1) yt-dlp          ← سریع و پایدار روی ریل‌های اینستاگرام
-  2) gallery-dl      ← fallback با timeout کوتاه
+Order (same as reference):
+  1) API          (stub — not available yet)
+  2) gallery-dl
+  3) yt-dlp
 
 Returns a local file path. Caller is responsible for cleanup/send.
 """
@@ -48,12 +49,12 @@ def is_social_url(url: str) -> bool:
 
 
 def _normalize_instagram_url(url: str) -> str:
-    """Strip tracking query params for Instagram links."""
+    """Strip tracking query params for Instagram links (xtok, psln, ...)."""
     p = urlparse((url or "").strip())
     host = (p.hostname or "").lower().rstrip(".")
     if host == "instagram.com" or host.endswith(".instagram.com"):
         return p._replace(query="").geturl()
-    return url.strip()
+    return (url or "").strip()
 
 
 def is_video_path(path: str) -> bool:
@@ -73,21 +74,35 @@ def cleanup_path(path: str | None) -> None:
         pass
 
 
+def _cookie_file() -> str | None:
+    path = os.getenv("DOWNLOADER_COOKIES_FILE", "").strip()
+    if path and Path(path).is_file():
+        return path
+    return None
+
+
+async def download_from_api(url: str) -> str:
+    """Stub — same as reference insta-downloader-bot/downloaders/api.py."""
+    raise RuntimeError("API downloader is not available yet.")
+
+
 async def download_from_gallery(url: str) -> str:
-    """gallery-dl with short timeout (fallback only)."""
+    """gallery-dl — same logic as reference downloaders/gallery.py."""
     temp_dir = tempfile.mkdtemp(prefix="alimj3_gdl_")
 
     def work() -> str:
         cmd = ["gallery-dl", "-D", temp_dir, url]
-        cookie = os.getenv("DOWNLOADER_COOKIES_FILE", "").strip()
-        if cookie and Path(cookie).is_file():
+        cookie = _cookie_file()
+        if cookie:
             cmd.extend(["--cookies", cookie])
 
+        # مثل مرجع: بدون timeout خیلی کوتاه
+        # فقط یک سقف ایمنی تا ربات برای همیشه گیر نکند
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=120,  # قبلاً 120 / 30 بود → الان 20 ثانیه
+            timeout=90,
         )
 
         if result.returncode != 0:
@@ -97,14 +112,15 @@ async def download_from_gallery(url: str) -> str:
         files: list[str] = []
         for root, _dirs, filenames in os.walk(temp_dir):
             for name in filenames:
-                if name.endswith((".json", ".txt", ".sqlite")):
+                # متادیتای gallery-dl را رد کن
+                if name.endswith((".json", ".txt", ".sqlite", ".part")):
                     continue
                 files.append(os.path.join(root, name))
 
         if not files:
             raise RuntimeError("No file downloaded.")
 
-        # Prefer largest file (video over thumbnails)
+        # ویدیو/بزرگ‌ترین فایل را ترجیح بده
         files.sort(key=lambda p: os.path.getsize(p), reverse=True)
         return files[0]
 
@@ -122,7 +138,7 @@ async def download_from_gallery(url: str) -> str:
 
 
 async def download_from_ytdlp(url: str) -> str:
-    """yt-dlp — primary downloader for Instagram/TikTok/etc."""
+    """yt-dlp — same core logic as reference downloaders/ytdlp.py."""
     temp_dir = tempfile.mkdtemp(prefix="alimj3_ydl_")
 
     def work() -> str:
@@ -137,21 +153,10 @@ async def download_from_ytdlp(url: str) -> str:
             "no_warnings": True,
             "noplaylist": True,
             "merge_output_format": "mp4",
-            "retries": 5,
-            "fragment_retries": 5,
-            "continuedl": True,
-            "http_headers": {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                "Referer": "https://www.instagram.com/",
-            },
         }
 
-        cookie = os.getenv("DOWNLOADER_COOKIES_FILE", "").strip()
-        if cookie and Path(cookie).is_file():
+        cookie = _cookie_file()
+        if cookie:
             ydl_opts["cookiefile"] = cookie
 
         proxy = os.getenv("DOWNLOADER_PROXY", "").strip()
@@ -172,10 +177,12 @@ async def download_from_ytdlp(url: str) -> str:
             if os.path.exists(filename):
                 return filename
 
-            # Fallback: pick largest file in temp_dir
+            # fallback: بزرگ‌ترین فایل داخل temp
             candidates: list[str] = []
             for root, _dirs, names in os.walk(temp_dir):
                 for name in names:
+                    if name.endswith((".part", ".ytdl", ".json")):
+                        continue
                     candidates.append(os.path.join(root, name))
             if not candidates:
                 raise RuntimeError("yt-dlp produced no file")
@@ -191,25 +198,26 @@ async def download_from_ytdlp(url: str) -> str:
 
 
 async def download(url: str) -> str:
-    """Download social media media.
+    """Download social media media — same cascade order as reference manager.py.
 
-    Optimized order:
-      1) yt-dlp     (سریع)
-      2) gallery-dl (fallback کوتاه)
+    Order:
+      1) API
+      2) gallery-dl
+      3) yt-dlp
     """
     url = _normalize_instagram_url(url)
     errors: list[str] = []
 
-    # 1) yt-dlp اول
+    # 1) API (stub — مثل مرجع)
     try:
-        path = await download_from_ytdlp(url)
-        logger.info("insta_downloader: yt-dlp ok -> %s", path)
+        path = await download_from_api(url)
+        logger.info("insta_downloader: api ok -> %s", path)
         return path
     except Exception as e:
-        errors.append(f"yt-dlp: {e}")
-        logger.warning("insta_downloader yt-dlp failed: %s", e)
+        errors.append(f"API: {e}")
+        logger.debug("insta_downloader api skipped: %s", e)
 
-    # 2) gallery-dl با timeout کوتاه
+    # 2) gallery-dl
     try:
         path = await download_from_gallery(url)
         logger.info("insta_downloader: gallery-dl ok -> %s", path)
@@ -217,5 +225,14 @@ async def download(url: str) -> str:
     except Exception as e:
         errors.append(f"Gallery: {e}")
         logger.warning("insta_downloader gallery-dl failed: %s", e)
+
+    # 3) yt-dlp
+    try:
+        path = await download_from_ytdlp(url)
+        logger.info("insta_downloader: yt-dlp ok -> %s", path)
+        return path
+    except Exception as e:
+        errors.append(f"yt-dlp: {e}")
+        logger.warning("insta_downloader yt-dlp failed: %s", e)
 
     raise RuntimeError("\n".join(errors) if errors else "download failed")
