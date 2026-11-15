@@ -2,6 +2,7 @@
 from bot.services.downloader.instagram import *  # noqa: F401,F403
 from bot.services.downloader.instagram import (  # noqa: F401
     download,
+    download_from_api,
     download_from_gallery,
     download_from_ytdlp,
     is_social_url,
