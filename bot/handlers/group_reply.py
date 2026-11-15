@@ -444,6 +444,61 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     except Exception as exc:
         logger.warning("group_reply download branch error: %s", exc)
 
+    # «جوابش بده / پاسخ بده» → موضوع را از ریپلای یا پیام قبلی گروه بگیر
+    ANSWER_RE = re.compile(
+        r"(?:جواب(?:ش)?|پاسخ(?:ش)?)\s*بده|جواب\s*اینو?\s*بده|بهش\s*جواب\s*بده|"
+        r"جواب\s*(?:این|اون)\s*(?:پیام|متن)?\s*رو?\s*بده",
+        re.I,
+    )
+    if ANSWER_RE.search(prompt or ""):
+        target_text = ""
+        if message.reply_to_message:
+            target_text = (
+                message.reply_to_message.text
+                or message.reply_to_message.caption
+                or ""
+            ).strip()
+        if not target_text:
+            try:
+                from bot.handlers.group_parts.group_memory import get_context
+                rows = get_context(chat.id, max_turns=8, for_prompt=False) or []
+                skip_bits = ("جواب", "پاسخ بده", "ربات", "خجالت")
+                for row in reversed(list(rows)):
+                    t = (
+                        (row.get("text") if isinstance(row, dict) else None)
+                        or (row.get("content") if isinstance(row, dict) else None)
+                        or (row[1] if isinstance(row, (list, tuple)) and len(row) > 1 else None)
+                        or str(row)
+                    )
+                    t = (t or "").strip()
+                    if not t or len(t) < 12:
+                        continue
+                    if any(s in t for s in skip_bits) and len(t) < 40:
+                        continue
+                    # پیام‌های خود ربات را رد کن
+                    role = ""
+                    if isinstance(row, dict):
+                        role = str(row.get("role") or row.get("speaker") or "")
+                    if role in {"bot", "assistant", "روز زیبا"}:
+                        continue
+                    target_text = t
+                    break
+            except Exception as exc:
+                logger.debug("answer-context memory lookup failed: %s", exc)
+        if target_text:
+            prompt = (
+                "به این پیام کاربر در گروه کوتاه، مفید و دوستانه جواب بده. "
+                "اگر پیشنهاد قرار/مکان است نظر بده و اگر سؤال است مستقیم پاسخ بده:\n"
+                f"«{target_text[:1500]}»"
+            )
+            logger.info("group_reply answer-context attached len=%s", len(target_text))
+        else:
+            await message.reply_text(
+                "روی پیامی که باید جوابش را بدهم ریپلای کن و بگو «ربات جوابش بده»، "
+                "یا همان متن را دوباره بفرست."
+            )
+            return True
+
     # درخواست مبهم («تحلیل کن») بدون ریپلای → موضوع را بپرس به‌جای حدس روی تاریخچه
     if VAGUE_RE.match(prompt or "") and not message.reply_to_message:
         await message.reply_text(
