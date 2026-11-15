@@ -87,7 +87,7 @@ async def download_from_gallery(url: str) -> str:
             cmd,
             capture_output=True,
             text=True,
-            timeout=20,  # قبلاً 120 / 30 بود → الان 20 ثانیه
+            timeout=120,  # قبلاً 120 / 30 بود → الان 20 ثانیه
         )
 
         if result.returncode != 0:
