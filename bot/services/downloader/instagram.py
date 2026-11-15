@@ -1,10 +1,8 @@
 """Instagram / social media downloader cascade.
 
-Based on insta-downloader-bot (reference implementation).
-
-Order:
-  1) gallery-dl
-  2) yt-dlp
+Order (optimized):
+  1) yt-dlp          ← سریع و پایدار روی ریل‌های اینستاگرام
+  2) gallery-dl      ← fallback با timeout کوتاه
 
 Returns a local file path. Caller is responsible for cleanup/send.
 """
@@ -76,7 +74,7 @@ def cleanup_path(path: str | None) -> None:
 
 
 async def download_from_gallery(url: str) -> str:
-    """gallery-dl — same logic as reference insta-downloader-bot/downloaders/gallery.py."""
+    """gallery-dl with short timeout (fallback only)."""
     temp_dir = tempfile.mkdtemp(prefix="alimj3_gdl_")
 
     def work() -> str:
@@ -89,7 +87,7 @@ async def download_from_gallery(url: str) -> str:
             cmd,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=20,  # قبلاً 120 / 30 بود → الان 20 ثانیه
         )
 
         if result.returncode != 0:
@@ -124,7 +122,7 @@ async def download_from_gallery(url: str) -> str:
 
 
 async def download_from_ytdlp(url: str) -> str:
-    """yt-dlp — same logic as reference insta-downloader-bot/downloaders/ytdlp.py."""
+    """yt-dlp — primary downloader for Instagram/TikTok/etc."""
     temp_dir = tempfile.mkdtemp(prefix="alimj3_ydl_")
 
     def work() -> str:
@@ -195,23 +193,14 @@ async def download_from_ytdlp(url: str) -> str:
 async def download(url: str) -> str:
     """Download social media media.
 
-    Order (from reference insta-downloader-bot):
-      1) gallery-dl
-      2) yt-dlp
+    Optimized order:
+      1) yt-dlp     (سریع)
+      2) gallery-dl (fallback کوتاه)
     """
     url = _normalize_instagram_url(url)
     errors: list[str] = []
 
-    # 1) gallery-dl
-    try:
-        path = await download_from_gallery(url)
-        logger.info("insta_downloader: gallery-dl ok -> %s", path)
-        return path
-    except Exception as e:
-        errors.append(f"Gallery: {e}")
-        logger.warning("insta_downloader gallery-dl failed: %s", e)
-
-    # 2) yt-dlp
+    # 1) yt-dlp اول
     try:
         path = await download_from_ytdlp(url)
         logger.info("insta_downloader: yt-dlp ok -> %s", path)
@@ -219,5 +208,14 @@ async def download(url: str) -> str:
     except Exception as e:
         errors.append(f"yt-dlp: {e}")
         logger.warning("insta_downloader yt-dlp failed: %s", e)
+
+    # 2) gallery-dl با timeout کوتاه
+    try:
+        path = await download_from_gallery(url)
+        logger.info("insta_downloader: gallery-dl ok -> %s", path)
+        return path
+    except Exception as e:
+        errors.append(f"Gallery: {e}")
+        logger.warning("insta_downloader gallery-dl failed: %s", e)
 
     raise RuntimeError("\n".join(errors) if errors else "download failed")
