@@ -89,7 +89,7 @@ async def download_from_gallery(url: str) -> str:
             cmd,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=30,
         )
 
         if result.returncode != 0:
