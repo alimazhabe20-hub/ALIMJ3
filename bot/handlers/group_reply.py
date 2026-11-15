@@ -396,6 +396,7 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
 
 
     # 0) دانلودر واقعی برای لینک‌های سوشال/ویدیو
+    # اولویت: insta-cascade (مثل insta-downloader-bot) → بعد مسیر عمومی v70
     try:
         has_url = bool(re.search(r"https?://|www\.", prompt, re.I))
         social = bool(re.search(
@@ -405,24 +406,34 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         ))
         if has_url and social:
             logger.info("group_reply downloader url=%r", prompt[:140])
-            handled = False
-            try:
-                from bot.handlers.v70_handlers import handle_downloader_url
-                handled = await handle_downloader_url(update, context, prompt)
-            except Exception as exc:
-                logger.warning("group v70 downloader failed: %s", exc)
-            if handled:
-                return True
             try:
                 from bot.services.downloader import extract_url
                 from bot.services.insta_downloader import is_social_url
                 from bot.handlers.v71_handlers import _download_social_direct
+
                 url = extract_url(prompt) or prompt.strip()
+                # اگر متن چندخطی است (لینک + «دانلود کن»)، فقط URL را بردار
+                if url and not str(url).startswith("http"):
+                    m = re.search(r"https?://\S+", prompt)
+                    url = m.group(0).strip() if m else url
+                if url:
+                    url = str(url).split()[0].rstrip(").,，。،]")
+
                 if url and is_social_url(url):
                     await _download_social_direct(update, context, url)
                     return True
             except Exception as exc:
-                logger.warning("group v71 social download failed: %s", exc)
+                logger.warning("group social download failed: %s", exc)
+
+            # fallback: مسیر عمومی v70
+            try:
+                from bot.handlers.v70_handlers import handle_downloader_url
+                handled = await handle_downloader_url(update, context, prompt)
+                if handled:
+                    return True
+            except Exception as exc:
+                logger.warning("group v70 downloader failed: %s", exc)
+
             try:
                 await message.reply_text(
                     "⚠️ دانلود این لینک الان ممکن نشد. دوباره بفرست یا در پیوی امتحان کن."
