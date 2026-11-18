@@ -81,14 +81,24 @@ def detect_fast_intent(text: str) -> Optional[str]:
     # هوا
     if re.search(r"هوا|آب\s*و\s*هوا|دما|باران", t, re.I):
         return "weather"
-    # خرید فقط با درخواست واضح و کوئری کوتاه — نه پیام مبهم/آلوده
-    if len(t) > 160:
+    # خرید فقط با درخواست واضح کالا — نه «آهنگ پیدا کنه» / چت عادی
+    if len(t) > 120:
         return None
-    if any(x in t for x in ("دستیار:", "زمینه گروه", "متن پیاده‌شده", "متن پیاده شده", "digikala.com", "torob.com")):
+    if any(x in t for x in (
+        "دستیار:", "زمینه گروه", "متن پیاده‌شده", "متن پیاده شده",
+        "digikala.com", "torob.com", "آهنگ", "ترانه", "موسیقی", "lyrics",
+        "اپدیت", "آپدیت", "ربات",
+    )):
         return None
-    if re.search(r"(?:پیدا\s*کن|برام\s*بخر|میخوام\s*بخرم|لینک\s*بده)", t, re.I):
+    # خرید صریح
+    if re.search(r"(?:برام\s*بخر|میخوام\s*بخرم|لینک(?:ش)?\s*(?:بده|بفرست))", t, re.I):
         return "shop"
-    if re.search(r"(?:باتری|باطری|شارژر|گوشی)", t, re.I) and re.search(r"(?:پیدا|بخر|قیمت|چند|میخوام)", t, re.I):
+    # «پیدا کن» فقط وقتی کالای فیزیکی محتمل است
+    if re.search(r"پیدا\s*کن", t, re.I) and re.search(
+        r"(?:باتری|باطری|شارژر|گوشی|لپ\s*تاپ|هدفون|هندزفری|کفش|لباس|ساعت)", t, re.I
+    ):
+        return "shop"
+    if re.search(r"(?:باتری|باطری|شارژر|گوشی)", t, re.I) and re.search(r"(?:بخر|قیمت|چند|میخوام)", t, re.I):
         return "shop"
     return None
 
@@ -296,9 +306,12 @@ async def run_fast_path(text: str) -> Optional[str]:
             # جلوگیری از جستجوی خرید با پیام آلوده/مبهم
             if (
                 len(q_clean) < 3
-                or len(q_clean) > 100
+                or len(q_clean) > 80
                 or q_clean in {"الس؟", "الس", "؟", "?", "چیه", "چی"}
-                or any(x in q_clean for x in ("دستیار:", "زمینه گروه", "متن پیاده", "digikala", "torob"))
+                or any(x in q_clean for x in (
+                    "دستیار:", "زمینه گروه", "متن پیاده", "digikala", "torob",
+                    "آهنگ", "ترانه", "موسیقی", "اپدیت", "آپدیت", "ربات",
+                ))
                 or q_clean.count("موسیقی") >= 2
             ):
                 return None

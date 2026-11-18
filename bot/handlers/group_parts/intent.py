@@ -101,11 +101,17 @@ def detect_intent(text: str, *, has_reply_media: bool = False, is_reply_to_bot: 
     if re.search(r"هوا|آب\s*و\s*هوا|دما", t, re.I):
         return "weather", cleaned
 
-    # خرید
-    if re.search(r"(?:پیدا\s*کن|برام\s*بخر|میخوام\s*بخرم|لینک(?:ش)?\s*بفرست)", t, re.I):
+    # خرید — نه چت درباره آهنگ/ربات
+    if re.search(r"آهنگ|ترانه|موسیقی|lyrics|اپدیت|آپدیت", t, re.I):
+        pass  # intentionally not shop
+    elif re.search(r"(?:برام\s*بخر|میخوام\s*بخرم|لینک(?:ش)?\s*بفرست)", t, re.I):
         return "shop", cleaned
-    if re.search(r"(?:باتری|باطری|شارژر|گوشی|ساعت|لپ\s*تاپ)", t, re.I) and re.search(
-        r"(?:پیدا|بخر|قیمت|چند|میخوام|لینک)", t, re.I
+    elif re.search(r"پیدا\s*کن", t, re.I) and re.search(
+        r"(?:باتری|باطری|شارژر|گوشی|ساعت|لپ\s*تاپ|هدفون|کفش)", t, re.I
+    ):
+        return "shop", cleaned
+    elif re.search(r"(?:باتری|باطری|شارژر|گوشی|ساعت|لپ\s*تاپ)", t, re.I) and re.search(
+        r"(?:بخر|قیمت|چند|میخوام|لینک)", t, re.I
     ):
         return "shop", cleaned
 
