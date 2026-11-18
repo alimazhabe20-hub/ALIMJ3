@@ -100,15 +100,25 @@ def shop_links(query: str) -> str:
 def shop_fallback(query: str = "", *, reason: str = "") -> str:
     """وقتی جستجوی زنده نتیجه‌ی قابل‌اعتماد داخل بودجه پیدا نکند."""
     q = (query or "").strip()
-    label = esc(q[:50] or "محصول")
+    # هرگز پرامپت کامل / زمینه گروه را در URL نگذار
+    for bad in (
+        "دستیار:", "کاربر:", "زمینه گروه", "متن پیاده", "متن پیاده‌شده",
+        "digikala.com", "torob.com", "\n",
+    ):
+        if bad in q:
+            q = q.split(bad)[0].strip()
+    q = " ".join(q.split())[:60]
+    if len(q) < 2:
+        q = "محصول"
+    label = esc(q[:40] or "محصول")
     reason_bit = f"\n{esc(reason)}" if reason else ""
     body = (
         f"برای «{label}» نتیجهٔ قابل‌اعتماد و داخل بودجه "
         f"از منابع زنده پیدا نشد.{reason_bit}\n\n"
         "قیمت حدسی ارائه نمی‌کنم.\n\n"
-        f"🔎 <a href=\"https://torob.com/search/?query={quote(q[:80])}\">ترب</a>"
+        f"🔎 <a href=\"https://torob.com/search/?query={quote(q)}\">ترب</a>"
         f"  ·  "
-        f"🛍 <a href=\"https://www.digikala.com/search/?q={quote(q[:80])}\">دیجی‌کالا</a>"
+        f"🛍 <a href=\"https://www.digikala.com/search/?q={quote(q)}\">دیجی‌کالا</a>"
     )
     return card("🛒 خرید", body)
 

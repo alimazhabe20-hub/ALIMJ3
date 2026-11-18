@@ -81,7 +81,11 @@ def detect_fast_intent(text: str) -> Optional[str]:
     # هوا
     if re.search(r"هوا|آب\s*و\s*هوا|دما|باران", t, re.I):
         return "weather"
-    # خرید فقط با درخواست واضح — نه فقط نام کالا
+    # خرید فقط با درخواست واضح و کوئری کوتاه — نه پیام مبهم/آلوده
+    if len(t) > 160:
+        return None
+    if any(x in t for x in ("دستیار:", "زمینه گروه", "متن پیاده‌شده", "متن پیاده شده", "digikala.com", "torob.com")):
+        return None
     if re.search(r"(?:پیدا\s*کن|برام\s*بخر|میخوام\s*بخرم|لینک\s*بده)", t, re.I):
         return "shop"
     if re.search(r"(?:باتری|باطری|شارژر|گوشی)", t, re.I) and re.search(r"(?:پیدا|بخر|قیمت|چند|میخوام)", t, re.I):
@@ -289,6 +293,15 @@ async def run_fast_path(text: str) -> Optional[str]:
                 q_clean,
             )
             q_clean = " ".join(q_clean.split()) or (text or "").strip()
+            # جلوگیری از جستجوی خرید با پیام آلوده/مبهم
+            if (
+                len(q_clean) < 3
+                or len(q_clean) > 100
+                or q_clean in {"الس؟", "الس", "؟", "?", "چیه", "چی"}
+                or any(x in q_clean for x in ("دستیار:", "زمینه گروه", "متن پیاده", "digikala", "torob"))
+                or q_clean.count("موسیقی") >= 2
+            ):
+                return None
             try:
                 from bot.features.market import shopping as _sh
                 if hasattr(_sh, "_CIRCUIT"):

@@ -51,7 +51,37 @@ _POLLUTION_MARKERS = (
     "[قوانین پاسخ گروه]",
     "سؤال فعلی از ",
     "[SHOPPING_LIVE_RESULT]",
+    "متن پیاده‌شده از صدا",
+    "متن پیاده شده از صدا",
+    "زمینه گروه:",
+    "دستیار:",
+    "کاربر:",
+    "نتیجهٔ قابل‌اعتماد و داخل بودجه",
+    "نتیجه قابل‌اعتماد و داخل بودجه",
+    "digikala.com/search",
+    "torob.com/search",
 )
+
+
+def _is_garbage_stt(text: str) -> bool:
+    """تشخیص خروجی بی‌معنی تبدیل گفتار به متن."""
+    t = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not t:
+        return True
+    # تکرار یک کلمه/عبارت (مثل: موسیقی بیشتر موسیقی بیشتر ...)
+    words = t.split()
+    if len(words) >= 4:
+        uniq = set(words)
+        if len(uniq) <= max(2, len(words) // 4):
+            return True
+    # حروف لاتین بی‌معنی کوتاه مثل PYM JBZ غالب باشد
+    latin = re.findall(r"[A-Za-z]{2,}", t)
+    fa = re.findall(r"[\u0600-\u06FF]{2,}", t)
+    if latin and not fa and len(t) < 40:
+        return True
+    if t.count("موسیقی") >= 3:
+        return True
+    return False
 
 
 def _is_polluted(text: str) -> bool:
@@ -61,6 +91,11 @@ def _is_polluted(text: str) -> bool:
         return True
     # پاسخ «نتیجه خرید پیدا نشد» که کل پرامپت را داخل گیومه تکرار کرده
     if t.lstrip().startswith("⚠️ برای «") and ("نتیجه قابل" in t or "دستیار:" in t or "کاربر:" in t):
+        return True
+    if _is_garbage_stt(t):
+        return True
+    # پیام‌های خیلی بلند که پرامپت کامل را قورت داده‌اند
+    if len(t) > 1200 and ("دستیار:" in t or "زمینه گروه" in t or t.count("http") >= 2):
         return True
     return False
 
@@ -94,12 +129,18 @@ def add_turn(
     content = _clean(text, limit)
     if not content:
         return
-    # پیام‌های صرفاً سیستمی/خطا را ذخیره نکن
+    # پیام‌های صرفاً سیستمی/خطا / خرید شکست‌خورده را ذخیره نکن
     if role in {"bot", "assistant"} and any(
-        x in content for x in ("در حال نوشتن", "دسترسی ندارم", "الان نتونستم", "⚠️")
+        x in content for x in (
+            "در حال نوشتن", "دسترسی ندارم", "الان نتونستم", "⚠️",
+            "نتیجهٔ قابل‌اعتماد", "نتیجه قابل‌اعتماد", "جستجوی خرید",
+            "متن گفتار:", "PYM", "JBZ",
+        )
     ):
-        if len(content) < 40:
+        if len(content) < 80 or "digikala.com" in content or "torob.com" in content:
             return
+    if _is_garbage_stt(content):
+        return
     try:
         _ensure_tables()
         conn = get_db_connection()

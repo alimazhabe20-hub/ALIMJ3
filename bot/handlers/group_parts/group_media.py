@@ -9,6 +9,45 @@ from bot.logger import logger
 MAX_GROUP_MEDIA_BYTES = 18 * 1024 * 1024
 
 
+def _is_garbage_transcript(text: str) -> bool:
+    t = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not t or len(t) < 2:
+        return True
+    words = t.split()
+    if len(words) >= 4:
+        uniq = set(words)
+        if len(uniq) <= max(2, len(words) // 4):
+            return True
+    if t.count("موسیقی") >= 3:
+        return True
+    if re.fullmatch(r"[\sA-Za-z0-9.,!?_'\-]{1,60}", t) and not re.search(r"[\u0600-\u06FF]", t):
+        if len(words) <= 6:
+            return True
+    return False
+
+
+def _sanitize_history(history: str, limit: int = 1200) -> str:
+    raw = str(history or "")
+    bad = (
+        "دستیار:", "کاربر:", "زمینه گروه", "متن پیاده‌شده", "متن پیاده شده",
+        "نتیجهٔ قابل‌اعتماد", "نتیجه قابل‌اعتماد", "digikala.com", "torob.com",
+        "[SHOPPING", "[قوانین پاسخ", "[زمینه کوتاه",
+    )
+    lines = []
+    for ln in raw.splitlines():
+        s = ln.strip()
+        if not s:
+            continue
+        if any(b in s for b in bad):
+            continue
+        if _is_garbage_transcript(s):
+            continue
+        lines.append(s)
+    out = "\n".join(lines)
+    return out[-limit:] if len(out) > limit else out
+
+
+
 def _speaker(update) -> str:
     user = update.effective_user
     if not user:
@@ -118,13 +157,45 @@ async def handle_group_media(update, context, *, source_message=None, prompt: st
         elif source.voice or source.audio:
             notice = await message.reply_text("🎧 در حال تبدیل صدا به متن و تحلیل...")
             from bot.services.ai_service import speech_to_text, ask_ai
-            transcript = await speech_to_text(data, filename=filename, mime=mime)
-            history = get_context(chat.id, user_id=user_id, reply_to_message_id=getattr(reply, "message_id", None))
-            task = caption or "گفتار این فایل صوتی را پیاده کن و سپس منظور آن را در صورت نیاز توضیح بده."
-            result = await ask_ai(user_id, f"{task}\n\nمتن پیاده‌شده از صدای {speaker}:\n{transcript}\n\nزمینه گروه:\n{history[-5000:]}")
-            if isinstance(result, tuple):
-                result = result[0]
-            result = f"📝 متن گفتار:\n{transcript[:2500]}\n\n🤖 پاسخ:\n{result}"
+            transcript = (await speech_to_text(data, filename=filename, mime=mime) or "").strip()
+            if _is_garbage_transcript(transcript):
+                result = (
+                    "⚠️ صدای پیام واضح تشخیص داده نشد (متن پیاده‌شده نامعتبر بود).\n"
+                    "لطفاً دوباره با صدای واضح‌تر بفرست یا همان را تایپ کن."
+                )
+            else:
+                history = get_context(
+                    chat.id,
+                    user_id=user_id,
+                    reply_to_message_id=getattr(reply, "message_id", None),
+                )
+                history = _sanitize_history(history, limit=1200)
+                # caption کوتاه مثل «الس؟» نباید کل پرامپت آلوده بسازد
+                task = (caption or "").strip()
+                if not task or len(task) <= 3 or task in {"؟", "?", "الس؟", "الس"}:
+                    task = "گفتار این فایل صوتی را خلاصه کن و اگر سؤال/درخواستی دارد کوتاه جواب بده."
+                ai_prompt = (
+                    f"{task}\n\n"
+                    f"متن پیاده‌شده از صدای {speaker}:\n{transcript[:1500]}\n"
+                )
+                if history:
+                    ai_prompt += f"\nزمینه کوتاه گروه (فقط برای فهم، تکرار نکن):\n{history}\n"
+                ai_prompt += (
+                    "\nقوانین: اگر سؤال خرید کالا نیست جستجوی فروشگاه نکن. "
+                    "پاسخ کوتاه و مفید به فارسی بده."
+                )
+                result = await ask_ai(user_id, ai_prompt)
+                if isinstance(result, tuple):
+                    result = result[0]
+                # اگر مدل/ابزار اشتباهاً خروجی خرید داد، رد کن
+                rs = str(result or "")
+                if "digikala.com/search" in rs or "torob.com/search" in rs or "نتیجهٔ قابل‌اعتماد" in rs or "نتیجه قابل‌اعتماد" in rs:
+                    result = (
+                        f"شنیدم این را: «{transcript[:200]}»\n"
+                        "اگر منظورت چیز دیگری است همان را کوتاه بنویس."
+                    )
+                else:
+                    result = f"📝 متن گفتار:\n{transcript[:2500]}\n\n🤖 پاسخ:\n{result}"
         else:
             notice = await message.reply_text("🔎 در حال تحلیل رسانه...")
             if mime.startswith("image/") or media_label in ("تصویر", "استیکر"):
