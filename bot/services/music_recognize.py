@@ -80,11 +80,38 @@ def recognize_audd(audio_bytes: bytes, *, filename: str = "voice.ogg", mime: str
     title = (result.get("title") or "").strip()
     if not artist and not title:
         return None
+    release = (result.get("release_date") or result.get("release") or "").strip()
+    label = (result.get("label") or "").strip()
+    isrc = (result.get("isrc") or "").strip()
+    score = result.get("score") or result.get("timecode")
+    # لینک‌های جانبی
+    spotify = ""
+    apple = ""
+    try:
+        sp = result.get("spotify") or {}
+        if isinstance(sp, dict):
+            spotify = (sp.get("external_urls") or {}).get("spotify") or ""
+            if not spotify and sp.get("id"):
+                spotify = f"https://open.spotify.com/track/{sp['id']}"
+    except Exception:
+        pass
+    try:
+        am = result.get("apple_music") or {}
+        if isinstance(am, dict):
+            apple = am.get("url") or am.get("trackViewUrl") or ""
+    except Exception:
+        pass
     return {
         "artist": artist,
         "title": title,
         "album": (result.get("album") or "").strip(),
         "song_link": (result.get("song_link") or "").strip(),
+        "release_date": release,
+        "label": label,
+        "isrc": isrc,
+        "score": score,
+        "spotify": spotify,
+        "apple_music": apple,
         "raw": result,
     }
 
@@ -160,13 +187,33 @@ def identify_and_lyrics(audio_bytes: bytes, *, filename: str = "voice.ogg", mime
     lines = [
         "🎵 آهنگ شناسایی شد",
         "────────────",
-        f"🎤 {artist}",
-        f"🎧 {title}",
+        f"🎤 هنرمند: {artist}",
+        f"🎧 عنوان: {title}",
     ]
     if album:
-        lines.append(f"💿 {album}")
+        lines.append(f"💿 آلبوم: {album}")
+    release = info.get("release_date") or ""
+    if release:
+        lines.append(f"📅 انتشار: {release}")
+    label = info.get("label") or ""
+    if label:
+        lines.append(f"🏷 ناشر: {label}")
+    isrc = info.get("isrc") or ""
+    if isrc:
+        lines.append(f"🆔 ISRC: {isrc}")
+    score = info.get("score")
+    if score not in (None, ""):
+        lines.append(f"📊 تطبیق: {score}")
+    lines.append("────────────")
     if link:
         lines.append(f"🔗 {link}")
+    sp = info.get("spotify") or ""
+    if sp:
+        lines.append(f"🟢 Spotify: {sp}")
+    am = info.get("apple_music") or ""
+    if am:
+        lines.append(f"🍎 Apple Music: {am}")
+    lines.append("🛠 منبع شناسایی: AudD")
 
     if want_lyrics:
         lyrics = fetch_lyrics_lrclib(artist, title)
