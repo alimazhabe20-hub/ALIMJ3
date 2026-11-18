@@ -202,58 +202,57 @@ async def handle_group_media(update, context, *, source_message=None, prompt: st
                             mime=mime,
                             want_lyrics=True,
                         )
-                        # متن ترانه را خودکار به فارسی هم اضافه کن
+                        # فقط ترجمه فارسی متن آهنگ (بدون lyrics انگلیسی در خروجی)
                         if result and "📝 متن:" in str(result):
                             try:
                                 from bot.services.music_recognize import extract_lyrics_block
                                 lyrics_en = extract_lyrics_block(str(result))
+                                # هدر شناسایی بدون بلوک متن انگلیسی
+                                header = str(result).split("📝 متن:")[0].rstrip()
                                 if lyrics_en and len(lyrics_en) > 20:
-                                    # برای جا شدن در تلگرام: متن اصلی را کوتاه‌تر نگه دار
-                                    lyrics_for_tr = lyrics_en[:2200]
+                                    lyrics_for_tr = lyrics_en[:3000]
                                     tr_prompt = (
-                                        "تو مترجم ترانه هستی. این lyrics را به فارسی "
-                                        "محاوره‌ای، احساسی و طبیعی ترجمه کن؛ مثل زیرنویس آهنگ.\n"
-                                        "قوانین:\n"
-                                        "- کلمه به کلمه و تحت‌اللفظی ترجمه نکن\n"
-                                        "- عبارت‌های بی‌معنی نساز\n"
-                                        "- حس غم/عشق/دلتنگی را حفظ کن\n"
-                                        "- فقط متن ترجمه را بده، بدون عنوان و توضیح\n\n"
+                                        "تو یک مترجم حرفه‌ای ترانه و شعر هستی.\n"
+                                        "متن زیر lyrics یک آهنگ است. آن را به فارسی "
+                                        "محاوره‌ای، دلنشین و نزدیک به حس ترانه برگردان.\n\n"
+                                        "حتماً رعایت کن:\n"
+                                        "1) ترجمه کلمه به کلمه ممنوع — مفهوم و حس را منتقل کن\n"
+                                        "2) مثل زیرنویس رسمی آهنگ‌های خارجی در ایران بنویس\n"
+                                        "3) جمله‌های شکسته یا بی‌معنی نساز\n"
+                                        "4) اگر تکرار کورس هست، همان را هم با همان حس تکرار کن\n"
+                                        "5) لحن غم/دلتنگی/عشق را حفظ کن\n"
+                                        "6) فقط متن فارسی ترجمه را بده؛ بدون عنوان، بدون توضیح، بدون انگلیسی\n\n"
+                                        "متن آهنگ:\n"
                                         + lyrics_for_tr
                                     )
                                     fa = await ask_ai(user_id, tr_prompt)
                                     if isinstance(fa, tuple):
                                         fa = fa[0]
                                     fa = str(fa or "").strip()
-                                    # پاکسازی پیشوندهای اضافه مدل
                                     fa = re.sub(
-                                        r"^(?:ترجمه(?:\s*فارسی)?\s*:\s*)",
+                                        r"^(?:ترجمه(?:\s*فارسی)?|persian\s*translation)\s*:?\s*",
                                         "",
                                         fa,
                                         flags=re.I,
                                     ).strip()
+                                    # حذف خطوط انگلیسی باقی‌مانده
+                                    fa_lines = []
+                                    for ln in fa.splitlines():
+                                        if re.search(r"[A-Za-z]{4,}", ln) and not re.search(r"[\u0600-\u06FF]{2,}", ln):
+                                            continue
+                                        fa_lines.append(ln)
+                                    fa = "\n".join(fa_lines).strip()
                                     if fa and "digikala" not in fa and len(fa) > 15:
-                                        base = str(result).rstrip()
-                                        # اگر کل پیام خیلی بلند می‌شود، متن انگلیسی را کوتاه کن
-                                        header_and_meta = base
-                                        if "📝 متن:" in base:
-                                            pre, lyrics_full = base.split("📝 متن:", 1)
-                                            lyrics_short = lyrics_en[:1200]
-                                            if len(lyrics_en) > 1200:
-                                                lyrics_short += "\n…"
-                                            header_and_meta = (
-                                                pre.rstrip()
-                                                + "\n📝 متن:\n"
-                                                + lyrics_short
-                                            )
-                                        if len(fa) > 1800:
-                                            fa = fa[:1800] + "\n…"
-                                        result = (
-                                            header_and_meta.rstrip()
-                                            + "\n\n🇮🇷 ترجمه فارسی:\n"
-                                            + fa
-                                        )
+                                        if len(fa) > 3200:
+                                            fa = fa[:3200] + "\n…"
+                                        result = header + "\n\n🇮🇷 متن فارسی:\n" + fa
+                                    else:
+                                        result = header + "\n\n⚠️ ترجمه فارسی متن در دسترس نبود."
+                                else:
+                                    result = header
                             except Exception as tr_exc:
                                 logger.warning("lyrics FA translate failed: %s", tr_exc)
+
                     except RuntimeError as rexc:
                         if "AUDD" in str(rexc).upper() and music_req:
                             result = (
