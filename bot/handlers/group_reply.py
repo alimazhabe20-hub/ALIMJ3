@@ -461,25 +461,16 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         if not target_text:
             try:
                 from bot.handlers.group_parts.group_memory import get_context
-                rows = get_context(chat.id, max_turns=8, for_prompt=False) or []
-                skip_bits = ("جواب", "پاسخ بده", "ربات", "خجالت")
-                for row in reversed(list(rows)):
-                    t = (
-                        (row.get("text") if isinstance(row, dict) else None)
-                        or (row.get("content") if isinstance(row, dict) else None)
-                        or (row[1] if isinstance(row, (list, tuple)) and len(row) > 1 else None)
-                        or str(row)
-                    )
-                    t = (t or "").strip()
+                ctx = get_context(chat.id, max_turns=8, for_prompt=False) or ""
+                skip_bits = ("جواب", "پاسخ بده", "خجالت", "دستیار:", "زمینه گروه")
+                for line in reversed([ln.strip() for ln in str(ctx).splitlines() if ln.strip()]):
+                    # حذف پیشوند نقش اگر باشد
+                    t = re.sub(r"^(?:کاربر|ربات|bot|user|روز زیبا)\s*[:：]\s*", "", line, flags=re.I).strip()
                     if not t or len(t) < 12:
                         continue
-                    if any(s in t for s in skip_bits) and len(t) < 40:
+                    if any(s in t for s in skip_bits) and len(t) < 50:
                         continue
-                    # پیام‌های خود ربات را رد کن
-                    role = ""
-                    if isinstance(row, dict):
-                        role = str(row.get("role") or row.get("speaker") or "")
-                    if role in {"bot", "assistant", "روز زیبا"}:
+                    if "digikala.com" in t or "torob.com" in t:
                         continue
                     target_text = t
                     break
@@ -511,6 +502,20 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         if replied_text:
             prompt = f"این پیام را کوتاه و دقیق تحلیل کن:\n«{replied_text[:1500]}»"
 
+    # پیام خیلی کوتاه / مبهم غیرتحلیلی → مستقیم AI، نه فروشگاه
+    _pstrip = (prompt or "").strip()
+    if len(_pstrip) <= 4 or _pstrip in {"الس؟", "الس", "؟", "?", "چیه", "چی", "خب", "اه"}:
+        # اگر ریپلای دارد همان را موضوع کن
+        if message.reply_to_message:
+            rt = (message.reply_to_message.text or message.reply_to_message.caption or "").strip()
+            if rt:
+                prompt = (
+                    f"کاربر نوشته «{_pstrip}». با توجه به این پیام کوتاه و مفید جواب بده:\n"
+                    f"«{rt[:1200]}»"
+                )
+        # fast_path خرید را برای این پیام‌ها اجرا نکن
+        pass
+
     # 1) Fast-path
     try:
         from bot.handlers.group_settings import group_fast_path_enabled, is_group_ai_enabled
@@ -519,7 +524,13 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             return True
         if group_fast_path_enabled(chat.id):
             from bot.handlers.group_parts.fast_path import run_fast_path
-            fp = await run_fast_path(prompt)
+            # هرگز پرامپت آلوده را به fast_path نده
+            fp_prompt = prompt or ""
+            if any(x in fp_prompt for x in ("دستیار:", "زمینه گروه", "متن پیاده‌شده", "متن پیاده شده")):
+                fp_prompt = re.split(r"دستیار:|زمینه گروه|متن پیاده", fp_prompt, maxsplit=1)[0].strip()
+            if len(fp_prompt) > 160:
+                fp_prompt = fp_prompt[:160]
+            fp = await run_fast_path(fp_prompt)
             logger.info("group_reply fast_path result=%s", "HIT" if fp else "MISS")
             if fp:
                 markup = None
