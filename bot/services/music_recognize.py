@@ -189,10 +189,14 @@ def identify_and_lyrics(audio_bytes: bytes, *, filename: str = "voice.ogg", mime
 
 def wants_music_id(text: str) -> bool:
     t = (text or "").strip()
+    # حذف پیشوند ربات
+    t = re.sub(r"^(?:ربات|هوشمند|!)\s*", "", t, flags=re.I).strip()
+    if re.fullmatch(r"آهنگ|music|song|shazam", t, re.I):
+        return True
     return bool(
         re.search(
             r"(?:چه\s*آهنگ|اسم\s*آهنگ|این\s*آهنگ|آهنگ\s*چیه|شناسایی\s*آهنگ|"
-            r"ترانه|متن\s*آهنگ|lyrics|lyric|shazam|چه\s*تصنیف)",
+            r"آهنگ\b|ترانه|متن\s*آهنگ|lyrics|lyric|shazam|چه\s*تصنیف)",
             t,
             re.I,
         )
@@ -202,3 +206,14 @@ def wants_music_id(text: str) -> bool:
 def wants_lyrics(text: str) -> bool:
     t = (text or "").strip()
     return bool(re.search(r"(?:متن|ترانه|lyrics|lyric)", t, re.I))
+
+
+def extract_lyrics_block(message_text: str) -> str:
+    """استخراج بخش متن ترانه از خروجی identify_and_lyrics."""
+    s = str(message_text or "")
+    if "📝 متن:" in s:
+        part = s.split("📝 متن:", 1)[1]
+        # قطع کردن اگر بخش دیگری آمد
+        part = re.split(r"\n🇮🇷|\n────────────", part)[0]
+        return part.strip()
+    return ""
