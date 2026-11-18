@@ -187,16 +187,23 @@ def identify_and_lyrics(audio_bytes: bytes, *, filename: str = "voice.ogg", mime
     return "\n".join(lines)
 
 
-def wants_music_id(text: str) -> bool:
+def _norm_fa_music(text: str) -> str:
+    """یکسان‌سازی املای رایج: اهنگ → آهنگ، ي → ی، ك → ک."""
     t = (text or "").strip()
-    # حذف پیشوند ربات
+    t = t.replace("ي", "ی").replace("ك", "ک")
+    t = t.replace("اهنگ", "آهنگ")
+    return t
+
+
+def wants_music_id(text: str) -> bool:
+    t = _norm_fa_music(text or "")
     t = re.sub(r"^(?:ربات|هوشمند|!)\s*", "", t, flags=re.I).strip()
     if re.fullmatch(r"آهنگ|music|song|shazam", t, re.I):
         return True
     return bool(
         re.search(
             r"(?:چه\s*آهنگ|اسم\s*آهنگ|این\s*آهنگ|آهنگ\s*چیه|شناسایی\s*آهنگ|"
-            r"آهنگ\b|ترانه|متن\s*آهنگ|lyrics|lyric|shazam|چه\s*تصنیف)",
+            r"آهنگ|ترانه|متن\s*آهنگ|lyrics|lyric|shazam|چه\s*تصنیف)",
             t,
             re.I,
         )
@@ -204,8 +211,8 @@ def wants_music_id(text: str) -> bool:
 
 
 def wants_lyrics(text: str) -> bool:
-    t = (text or "").strip()
-    return bool(re.search(r"(?:متن|ترانه|lyrics|lyric)", t, re.I))
+    t = _norm_fa_music(text or "")
+    return bool(re.search(r"(?:متن\s*آهنگ|متن\s*ترانه|ترانه|lyrics|lyric)", t, re.I))
 
 
 def extract_lyrics_block(message_text: str) -> str:
