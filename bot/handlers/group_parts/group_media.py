@@ -194,6 +194,32 @@ async def handle_group_media(update, context, *, source_message=None, prompt: st
                             mime=mime,
                             want_lyrics=True,
                         )
+                        # متن ترانه را خودکار به فارسی هم اضافه کن
+                        if result and "📝 متن:" in str(result):
+                            try:
+                                from bot.services.music_recognize import extract_lyrics_block
+                                lyrics_en = extract_lyrics_block(str(result))
+                                if lyrics_en and len(lyrics_en) > 20:
+                                    tr_prompt = (
+                                        "این ترانه را به فارسی روان و طبیعی ترجمه کن. "
+                                        "حس و آهنگ کلام را تا حد ممکن حفظ کن. "
+                                        "فقط ترجمه فارسی را بده، بدون توضیح:\n\n"
+                                        + lyrics_en[:3500]
+                                    )
+                                    fa = await ask_ai(user_id, tr_prompt)
+                                    if isinstance(fa, tuple):
+                                        fa = fa[0]
+                                    fa = str(fa or "").strip()
+                                    if fa and "digikala" not in fa and len(fa) > 15:
+                                        if len(fa) > 2800:
+                                            fa = fa[:2800] + "\n…"
+                                        result = (
+                                            str(result).rstrip()
+                                            + "\n\n🇮🇷 ترجمه فارسی:\n"
+                                            + fa
+                                        )
+                            except Exception as tr_exc:
+                                logger.warning("lyrics FA translate failed: %s", tr_exc)
                     except RuntimeError as rexc:
                         if "AUDD" in str(rexc).upper() and music_req:
                             result = (
