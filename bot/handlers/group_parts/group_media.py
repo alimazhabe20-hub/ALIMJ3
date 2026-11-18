@@ -10,20 +10,29 @@ MAX_GROUP_MEDIA_BYTES = 18 * 1024 * 1024
 
 
 def _is_garbage_transcript(text: str) -> bool:
+    """فقط وقتی متن واقعاً بی‌معنی/تکراری است True بده — نه هر STT ناقص."""
     t = re.sub(r"\s+", " ", str(text or "")).strip()
     if not t or len(t) < 2:
         return True
     words = t.split()
-    if len(words) >= 4:
-        uniq = set(words)
-        if len(uniq) <= max(2, len(words) // 4):
+    # تکرار شدید یک/دو کلمه
+    if len(words) >= 6:
+        uniq = set(w.lower() for w in words)
+        if len(uniq) <= 2:
             return True
-    if t.count("موسیقی") >= 3:
+    if t.count("موسیقی") >= 4:
         return True
-    if re.fullmatch(r"[\sA-Za-z0-9.,!?_'\-]{1,60}", t) and not re.search(r"[\u0600-\u06FF]", t):
-        if len(words) <= 6:
-            return True
+    # فقط کدهای لاتین کوتاه بدون فارسی
+    fa = re.findall(r"[\u0600-\u06FF]{2,}", t)
+    latin_tokens = re.findall(r"[A-Za-z]{2,}", t)
+    if not fa and latin_tokens and len(words) <= 5 and len(t) <= 30:
+        return True
     return False
+
+
+def _wants_voice_analysis(caption: str) -> bool:
+    c = (caption or "").strip()
+    return bool(re.search(r"تحلیل|توضیح|احساس|لحن|چیه|بگو|summar|analy|emotion", c, re.I))
 
 
 def _sanitize_history(history: str, limit: int = 1200) -> str:
@@ -157,11 +166,72 @@ async def handle_group_media(update, context, *, source_message=None, prompt: st
         elif source.voice or source.audio:
             notice = await message.reply_text("🎧 در حال تبدیل صدا به متن و تحلیل...")
             from bot.services.ai_service import speech_to_text, ask_ai
-            transcript = (await speech_to_text(data, filename=filename, mime=mime) or "").strip()
-            if _is_garbage_transcript(transcript):
+            transcript = ""
+            try:
+                transcript = (await speech_to_text(data, filename=filename, mime=mime) or "").strip()
+            except Exception as stt_exc:
+                logger.warning("group STT failed: %s", stt_exc)
+                transcript = ""
+            garbage = _is_garbage_transcript(transcript)
+            wants_analysis = _wants_voice_analysis(caption) or _wants_voice_analysis(prompt)
+            cap_all = f"{caption or ''} {prompt or ''}"
+            result = None
+
+            # ── شناسایی آهنگ + lyrics ─────────────────────────────
+            try:
+                from bot.services.music_recognize import (
+                    wants_music_id,
+                    wants_lyrics,
+                    identify_and_lyrics,
+                )
+                music_req = wants_music_id(cap_all) or wants_lyrics(cap_all)
+                looks_like_music = garbage and ("موسیقی" in (transcript or "") or not transcript)
+                if music_req or (looks_like_music and wants_analysis):
+                    try:
+                        result = identify_and_lyrics(
+                            data,
+                            filename=filename,
+                            mime=mime,
+                            want_lyrics=True,
+                        )
+                    except RuntimeError as rexc:
+                        if "AUDD" in str(rexc).upper() and music_req:
+                            result = (
+                                "🎵 برای شناسایی آهنگ باید AUDD_API_TOKEN "
+                                "روی سرور ست شود.\n"
+                                "ثبت‌نام رایگان: https://dashboard.audd.io/"
+                            )
+                        else:
+                            logger.warning("music recognize: %s", rexc)
+                    except Exception as mexc:
+                        logger.warning("music recognize failed: %s", mexc)
+            except Exception as exc:
+                logger.debug("music module unavailable: %s", exc)
+
+            if result:
+                pass  # already have music/ID answer
+            elif garbage and wants_analysis:
+                try:
+                    from bot.services.ai_service import analyze_voice_emotion
+                    emotion = await analyze_voice_emotion(
+                        data, transcript="", filename=filename, mime=mime
+                    )
+                    result = (
+                        "🎧 تحلیل مستقیم صدا (متن گفتار واضح نبود):\n\n"
+                        + str(emotion or "تحلیل احساس انجام نشد.")[:3500]
+                    )
+                except Exception as em_exc:
+                    logger.warning("voice emotion fallback failed: %s", em_exc)
+                    result = (
+                        "⚠️ متن گفتار واضح نبود و تحلیل مستقیم صدا هم الان ممکن نشد.\n"
+                        "برای آهنگ بنویس: «ربات این آهنگ چیه» یا «ربات متن آهنگ»\n"
+                        "برای حرف معمولی با صدای واضح‌تر بفرست."
+                    )
+            elif garbage:
                 result = (
-                    "⚠️ صدای پیام واضح تشخیص داده نشد (متن پیاده‌شده نامعتبر بود).\n"
-                    "لطفاً دوباره با صدای واضح‌تر بفرست یا همان را تایپ کن."
+                    "⚠️ متن این ویس واضح تشخیص داده نشد.\n"
+                    "اگر آهنگ است بنویس: «ربات این آهنگ چیه» یا «ربات متن آهنگ»\n"
+                    "اگر حرف است: «ربات تحلیل» یا همان را تایپ کن."
                 )
             else:
                 history = get_context(
@@ -170,10 +240,11 @@ async def handle_group_media(update, context, *, source_message=None, prompt: st
                     reply_to_message_id=getattr(reply, "message_id", None),
                 )
                 history = _sanitize_history(history, limit=1200)
-                # caption کوتاه مثل «الس؟» نباید کل پرامپت آلوده بسازد
                 task = (caption or "").strip()
                 if not task or len(task) <= 3 or task in {"؟", "?", "الس؟", "الس"}:
                     task = "گفتار این فایل صوتی را خلاصه کن و اگر سؤال/درخواستی دارد کوتاه جواب بده."
+                elif re.search(r"^\s*(?:ربات\s*)?تحلیل\s*$", task, re.I):
+                    task = "این پیام صوتی را تحلیل کن: محتوا، منظور، و لحن گوینده را کوتاه بگو."
                 ai_prompt = (
                     f"{task}\n\n"
                     f"متن پیاده‌شده از صدای {speaker}:\n{transcript[:1500]}\n"
@@ -187,7 +258,6 @@ async def handle_group_media(update, context, *, source_message=None, prompt: st
                 result = await ask_ai(user_id, ai_prompt)
                 if isinstance(result, tuple):
                     result = result[0]
-                # اگر مدل/ابزار اشتباهاً خروجی خرید داد، رد کن
                 rs = str(result or "")
                 if "digikala.com/search" in rs or "torob.com/search" in rs or "نتیجهٔ قابل‌اعتماد" in rs or "نتیجه قابل‌اعتماد" in rs:
                     result = (
@@ -196,6 +266,7 @@ async def handle_group_media(update, context, *, source_message=None, prompt: st
                     )
                 else:
                     result = f"📝 متن گفتار:\n{transcript[:2500]}\n\n🤖 پاسخ:\n{result}"
+
         else:
             notice = await message.reply_text("🔎 در حال تحلیل رسانه...")
             if mime.startswith("image/") or media_label in ("تصویر", "استیکر"):
