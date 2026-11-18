@@ -200,21 +200,47 @@ async def handle_group_media(update, context, *, source_message=None, prompt: st
                                 from bot.services.music_recognize import extract_lyrics_block
                                 lyrics_en = extract_lyrics_block(str(result))
                                 if lyrics_en and len(lyrics_en) > 20:
+                                    # برای جا شدن در تلگرام: متن اصلی را کوتاه‌تر نگه دار
+                                    lyrics_for_tr = lyrics_en[:2200]
                                     tr_prompt = (
-                                        "این ترانه را به فارسی روان و طبیعی ترجمه کن. "
-                                        "حس و آهنگ کلام را تا حد ممکن حفظ کن. "
-                                        "فقط ترجمه فارسی را بده، بدون توضیح:\n\n"
-                                        + lyrics_en[:3500]
+                                        "تو مترجم ترانه هستی. این lyrics را به فارسی "
+                                        "محاوره‌ای، احساسی و طبیعی ترجمه کن؛ مثل زیرنویس آهنگ.\n"
+                                        "قوانین:\n"
+                                        "- کلمه به کلمه و تحت‌اللفظی ترجمه نکن\n"
+                                        "- عبارت‌های بی‌معنی نساز\n"
+                                        "- حس غم/عشق/دلتنگی را حفظ کن\n"
+                                        "- فقط متن ترجمه را بده، بدون عنوان و توضیح\n\n"
+                                        + lyrics_for_tr
                                     )
                                     fa = await ask_ai(user_id, tr_prompt)
                                     if isinstance(fa, tuple):
                                         fa = fa[0]
                                     fa = str(fa or "").strip()
+                                    # پاکسازی پیشوندهای اضافه مدل
+                                    fa = re.sub(
+                                        r"^(?:ترجمه(?:\s*فارسی)?\s*:\s*)",
+                                        "",
+                                        fa,
+                                        flags=re.I,
+                                    ).strip()
                                     if fa and "digikala" not in fa and len(fa) > 15:
-                                        if len(fa) > 2800:
-                                            fa = fa[:2800] + "\n…"
+                                        base = str(result).rstrip()
+                                        # اگر کل پیام خیلی بلند می‌شود، متن انگلیسی را کوتاه کن
+                                        header_and_meta = base
+                                        if "📝 متن:" in base:
+                                            pre, lyrics_full = base.split("📝 متن:", 1)
+                                            lyrics_short = lyrics_en[:1200]
+                                            if len(lyrics_en) > 1200:
+                                                lyrics_short += "\n…"
+                                            header_and_meta = (
+                                                pre.rstrip()
+                                                + "\n📝 متن:\n"
+                                                + lyrics_short
+                                            )
+                                        if len(fa) > 1800:
+                                            fa = fa[:1800] + "\n…"
                                         result = (
-                                            str(result).rstrip()
+                                            header_and_meta.rstrip()
                                             + "\n\n🇮🇷 ترجمه فارسی:\n"
                                             + fa
                                         )
