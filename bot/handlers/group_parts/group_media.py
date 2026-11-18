@@ -185,8 +185,16 @@ async def handle_group_media(update, context, *, source_message=None, prompt: st
                     identify_and_lyrics,
                 )
                 music_req = wants_music_id(cap_all) or wants_lyrics(cap_all)
-                looks_like_music = garbage and ("موسیقی" in (transcript or "") or not transcript)
-                if music_req or (looks_like_music and wants_analysis):
+                short_cmd = re.sub(r"^(?:ربات|هوشمند|!)\s*", "", (cap_all or "").strip(), flags=re.I)
+                short_cmd = short_cmd.replace("اهنگ", "آهنگ").strip()
+                # STT خراب + نشانه موسیقی/درخواست آهنگ
+                looks_like_music = garbage and (
+                    music_req
+                    or "موسیقی" in (transcript or "")
+                    or wants_music_id(short_cmd)
+                    or short_cmd in {"آهنگ", "music", "song"}
+                )
+                if music_req or looks_like_music:
                     try:
                         result = identify_and_lyrics(
                             data,
