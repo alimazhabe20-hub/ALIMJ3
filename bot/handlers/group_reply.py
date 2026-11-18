@@ -444,6 +444,49 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     except Exception as exc:
         logger.warning("group_reply download branch error: %s", exc)
 
+    # «ترجمه / به فارسی» روی ریپلای یا آخرین جواب ربات (مثلاً متن آهنگ)
+    TRANSLATE_RE = re.compile(
+        r"(?:ترجمه(?:\s*کن)?|به\s*فارسی|فارسی\s*کن|translate)",
+        re.I,
+    )
+    if TRANSLATE_RE.search(prompt or ""):
+        src = ""
+        if message.reply_to_message:
+            src = (
+                message.reply_to_message.text
+                or message.reply_to_message.caption
+                or ""
+            ).strip()
+        if not src:
+            try:
+                from bot.handlers.group_parts.group_memory import get_context
+                ctx = get_context(chat.id, max_turns=6, for_prompt=False) or ""
+                for line in reversed([ln.strip() for ln in str(ctx).splitlines() if ln.strip()]):
+                    if len(line) > 40 and not TRANSLATE_RE.search(line):
+                        src = line
+                        break
+            except Exception:
+                pass
+        if src:
+            # اگر هدر شناسایی آهنگ دارد، همان بلوک متن را ترجیح بده
+            if "📝" in src or "متن" in src:
+                parts = re.split(r"📝\s*متن\s*:?", src, maxsplit=1)
+                if len(parts) == 2 and parts[1].strip():
+                    src = parts[1].strip()
+            prompt = (
+                "این متن را طبیعی و روان به فارسی ترجمه کن. "
+                "اگر شعر/ترانه است، حس و قافیه را تا حد ممکن حفظ کن. "
+                "فقط ترجمه را بده، توضیح اضافه نده:\n\n"
+                f"{src[:3500]}"
+            )
+            logger.info("group_reply translate-context len=%s", len(src))
+        else:
+            await message.reply_text(
+                "روی پیامی که می‌خواهی ترجمه‌اش کنم ریپلای کن و بگو «ترجمه فارسی»، "
+                "یا همان متن را بفرست."
+            )
+            return True
+
     # «جوابش بده / پاسخ بده» → موضوع را از ریپلای یا پیام قبلی گروه بگیر
     ANSWER_RE = re.compile(
         r"(?:جواب(?:ش)?|پاسخ(?:ش)?)\s*بده|جواب\s*اینو?\s*بده|بهش\s*جواب\s*بده|"
