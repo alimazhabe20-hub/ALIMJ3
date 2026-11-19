@@ -2094,28 +2094,56 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
 
 
 def _looks_like_shopping_request(text: str) -> bool:
-    t = str(text or "").lower()
-    # Do not treat every "قیمت ..." question as shopping (e.g. دلار/طلا/crypto).
+    """فقط درخواست واقعی خرید کالا — نه ادامه پاسخ، نه مشاوره، نه آهنگ."""
+    t = str(text or "").strip()
+    if not t:
+        return False
+
+    # پرامپت ادامه / متای داخلی هرگز خرید نیست
+    continue_markers = (
+        "ادامه بده دقیقاً",
+        "انتهای پاسخ قبلی",
+        "ادامه از اینجا",
+        "موضوع اصلی کاربر:",
+        "هیچ بخشی از متن قبلی",
+        "پاسخ قبلی قطع شد",
+        "[زمینه کوتاه گروه]",
+        "متن پیاده‌شده",
+        "متن پیاده شده",
+    )
+    if any(m in t for m in continue_markers):
+        return False
+
+    # پیام‌های خیلی بلند = معمولاً context، نه درخواست خرید کوتاه
+    if len(t) > 280:
+        return False
+
+    # آهنگ / آپدیت
+    if re.search(r"آهنگ|اهنگ|ترانه|موسیقی|lyrics|اپدیت|آپدیت", t, re.I):
+        return False
+
     product = (
         r"گوشی|موبایل|اسمارت\s*فون|iphone|آیفون|سامسونگ|شیائومی|پوکو|"
-        r"pixel|پیکسل|oneplus|honor|لپ.?تاپ|لپتاپ|کامپیوتر|تبلت|تلویزیون|"
-        r"مانیتور|هدفون|هندزفری|کفش|لباس|کتانی|ساعت|لوازم\s*(?:خانه|آشپزخانه|دیجیتال)?|"
-        r"محصول|کالا|وسیله|"
-        r"هودی|hoodie|سویشرت|کاپشن|کت|پالتو|شلوار|جین|تیشرت|تی\s*شرت|پیراهن|مانتو|"
-        r"کیف|کوله|چمدان|کلاه|دستکش|جوراب|لباس\s*ورزشی|"
-        r"مبل|میز|صندلی|فرش|پتو|قابلمه|زودپز"
+        r"pixel|پیکسل|لپ.?تاپ|لپتاپ|تبلت|تلویزیون|مانیتور|هدفون|هندزفری|"
+        r"کفش|کتانی|ساعت\s*هوشمند|لوازم\s*(?:خانه|آشپزخانه|دیجیتال)|"
+        r"هودی|سویشرت|کاپشن|شلوار|تیشرت|کیف|کوله|"
+        r"مبل|قابلمه|زودپز"
     )
     shopping_action = (
-        r"خرید|بخر|پیدا\s*کن|پیدا\s*برام|برام\s*پیدا|فروشگاه|فروشنده|لینک\s*خرید|"
-        r"ترب|دیجی.?کالا|تکنولایف|ایمالز|اسنپ.?شاپ|باسلام|"
-        r"amazon|آمازون|ebay|ایبی|aliexpress|علی.?اکسپرس|walmart|"
-        r"best\s*buy|etsy|newegg|noon|temu|shein|"
-        r"زیر\s*\d|تا\s*\d|حدود\s*\d|بودجه"
+        r"(?:^|[\s،,])(?:بخرم|بخر|بخرید|بخری)(?:[\s،,]|$)|"
+        r"می\s*خوام\s*بخرم|می‌خوام\s*بخرم|میخواهم\s*بخرم|"
+        r"برام\s*پیدا\s*کن|پیدا\s*کن\s*برام|لینک\s*خرید|"
+        r"از\s*دیجی\s*کالا|از\s*ترب|فروشگاه"
     )
+    has_product = bool(re.search(product, t, re.I))
+    has_action = bool(re.search(shopping_action, t, re.I))
+    has_find_product = bool(re.search(r"پیدا\s*کن", t, re.I) and has_product)
     return bool(
-        __import__("re").search(product, t, __import__("re").I)
-        or __import__("re").search(shopping_action, t, __import__("re").I)
+        has_action
+        or has_find_product
+        or (has_product and re.search(r"قیمت|چند|لینک|بخر", t, re.I) and len(t) < 80)
     )
+
 
 
 async def _live_shopping_prefetch(prompt: str) -> str:
