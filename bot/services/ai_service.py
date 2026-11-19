@@ -11,6 +11,7 @@ imports used by handlers stable across modular deployments.
 import asyncio
 import base64
 import os
+import re
 import time
 from collections import defaultdict, deque
 from typing import Deque, Dict, List, Optional, Tuple
@@ -1986,6 +1987,7 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
         prompt = prompt[:MAX_INPUT]
 
     original_prompt = prompt
+    errors: List[str] = []
     try:
         _extract_and_store_memory(user_id, original_prompt)
     except Exception:
@@ -1993,8 +1995,16 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
 
     # Shopping is an authoritative live-data path. Never let an LLM replace
     # a failed/real-time shopping lookup with remembered products or prices.
-    live_shopping = await _live_shopping_prefetch(original_prompt)
-    is_shop = _looks_like_shopping_request(original_prompt)
+    try:
+        live_shopping = await _live_shopping_prefetch(original_prompt)
+    except Exception as _shop_pre_exc:
+        logger.warning("live shopping prefetch outer failed: %s", _shop_pre_exc)
+        live_shopping = ""
+    try:
+        is_shop = _looks_like_shopping_request(original_prompt)
+    except Exception as _shop_det_exc:
+        logger.warning("shopping detect failed: %s", _shop_det_exc)
+        is_shop = False
     if is_shop:
         if live_shopping:
             logger.info("shopping request served by live engine; AI providers skipped")
@@ -2095,11 +2105,11 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
 
 def _looks_like_shopping_request(text: str) -> bool:
     """فقط درخواست واقعی خرید کالا — نه ادامه پاسخ، نه مشاوره، نه آهنگ."""
+    _re = __import__("re")
     t = str(text or "").strip()
     if not t:
         return False
 
-    # پرامپت ادامه / متای داخلی هرگز خرید نیست
     continue_markers = (
         "ادامه بده دقیقاً",
         "انتهای پاسخ قبلی",
@@ -2114,12 +2124,10 @@ def _looks_like_shopping_request(text: str) -> bool:
     if any(m in t for m in continue_markers):
         return False
 
-    # پیام‌های خیلی بلند = معمولاً context، نه درخواست خرید کوتاه
     if len(t) > 280:
         return False
 
-    # آهنگ / آپدیت
-    if re.search(r"آهنگ|اهنگ|ترانه|موسیقی|lyrics|اپدیت|آپدیت", t, re.I):
+    if _re.search(r"آهنگ|اهنگ|ترانه|موسیقی|lyrics|اپدیت|آپدیت", t, _re.I):
         return False
 
     product = (
@@ -2135,13 +2143,13 @@ def _looks_like_shopping_request(text: str) -> bool:
         r"برام\s*پیدا\s*کن|پیدا\s*کن\s*برام|لینک\s*خرید|"
         r"از\s*دیجی\s*کالا|از\s*ترب|فروشگاه"
     )
-    has_product = bool(re.search(product, t, re.I))
-    has_action = bool(re.search(shopping_action, t, re.I))
-    has_find_product = bool(re.search(r"پیدا\s*کن", t, re.I) and has_product)
+    has_product = bool(_re.search(product, t, _re.I))
+    has_action = bool(_re.search(shopping_action, t, _re.I))
+    has_find_product = bool(_re.search(r"پیدا\s*کن", t, _re.I) and has_product)
     return bool(
         has_action
         or has_find_product
-        or (has_product and re.search(r"قیمت|چند|لینک|بخر", t, re.I) and len(t) < 80)
+        or (has_product and _re.search(r"قیمت|چند|لینک|بخر", t, _re.I) and len(t) < 80)
     )
 
 
