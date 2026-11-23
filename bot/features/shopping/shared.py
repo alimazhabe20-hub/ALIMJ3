@@ -126,6 +126,7 @@ class ProductResult:
 IRAN_SITES = {
     "torob.com": "ترب",
     "digikala.com": "دیجی‌کالا",
+    "shopino.app": "شاپینو",
     "technolife.ir": "تکنولایف",
     "snappshop.ir": "اسنپ‌شاپ",
     "emalls.ir": "ایمالز",
@@ -170,6 +171,9 @@ IRAN_ALIASES = {
     "dk": "digikala.com",
     "ترب": "torob.com",
     "torob": "torob.com",
+    "شاپینو": "shopino.app",
+    "شاپی نو": "shopino.app",
+    "shopino": "shopino.app",
     "تکنولایف": "technolife.ir",
     "technolife": "technolife.ir",
     "اسنپ شاپ": "snappshop.ir",
@@ -188,6 +192,7 @@ IRAN_ALIASES = {
 TRUST = {
     "دیجی‌کالا": 100,
     "ترب": 96,
+    "شاپینو": 90,
     "تکنولایف": 94,
     "ایمالز": 92,
     "اسنپ‌شاپ": 91,
@@ -204,6 +209,7 @@ TRUST = {
 SOURCES = {
     "digikala": {"label": "دیجی‌کالا", "domains": ["digikala.com"]},
     "torob": {"label": "ترب", "domains": ["torob.com"]},
+    "shopino": {"label": "شاپینو", "domains": ["shopino.app"]},
     "snappshop": {"label": "اسنپ‌شاپ", "domains": ["snappshop.ir"]},
     "emalls": {"label": "ایمالز", "domains": ["emalls.ir"]},
     "basalam": {"label": "باسلام", "domains": ["basalam.com"]},
@@ -219,6 +225,7 @@ SOURCES = {
 }
 
 _SOURCE_SEARCH_URLS = {
+    "shopino.app": "https://shopino.app/search?q={q}",
     "technolife.ir": "https://www.technolife.ir/search?search={q}",
     "snappshop.ir": "https://snappshop.ir/search/{q}",
     "emalls.ir": "https://emalls.ir/Search.aspx?search={q}",
@@ -529,7 +536,7 @@ def _clean_query(text: str) -> str:
     )
     q = re.sub(r"(?:سایت|فروشگاه)\s+(?:خارجی|های خارجی|های ایرانی|ایرانی)", " ", q, flags=re.I)
     q = re.sub(
-        r"(?:فقط\s*)?(?:از\s*)?(?:تو\s*|در\s*|روی\s*|داخل\s*)?(?:دیجی\s*کالا|دیجی‌کالا|دیجیکالا|digikala|ترب|torob|تکنولایف|اسنپ\s*شاپ|ایمالز)",
+        r"(?:فقط\s*)?(?:از\s*)?(?:تو\s*|در\s*|روی\s*|داخل\s*)?(?:دیجی\s*کالا|دیجی‌کالا|دیجیکالا|digikala|ترب|torob|شاپینو|shopino|تکنولایف|اسنپ\s*شاپ|ایمالز)",
         " ",
         q,
         flags=re.I,
@@ -652,9 +659,9 @@ def _exclusive_store(text: str) -> bool:
         re.search(
             r"فقط\s*(?:از|تو|در|روی|داخل)?\s*(?:دیجی|ترب|تکنولایف|اسنپ)|"
             r"فقط\s*دیجی|"
-            r"(?:از|تو|در|روی|داخل)\s*(?:دیجی\s*کالا|دیجی‌کالا|دیجیکالا|digikala|ترب|torob|تکنولایف)|"
+            r"(?:از|تو|در|روی|داخل)\s*(?:دیجی\s*کالا|دیجی‌کالا|دیجیکالا|digikala|ترب|torob|شاپینو|shopino|تکنولایف)|"
             r"از\s*همان\s*دیجی|همون\s*دیجی|"
-            r"only\s*digikala|only\s*torob",
+            r"only\s*digikala|only\s*torob|only\s*shopino",
             q,
             re.I,
         )
@@ -1951,11 +1958,12 @@ async def _search_rows_for_compare(query: str, user_id: int = 0) -> list:
         budget = _budget(query) or 0
         intent = _shopping_intent(query)
         # جستجوی مستقیم منابع اصلی
-        digi, torob = await asyncio.gather(
+        digi, torob, shopino = await asyncio.gather(
             _direct_digikala(query, budget or 0, 5),
             _direct_torob(query, budget or 0, 5),
+            _direct_shopino(query, budget or 0, 5),
         )
-        rows = list(digi or []) + list(torob or [])
+        rows = list(digi or []) + list(torob or []) + list(shopino or [])
         # نرمال‌سازی کلیدها
         out = []
         for r in rows:
@@ -2056,9 +2064,10 @@ async def search_shopping(
             direct_tasks = []
             want_dk = (not domain) or domain in ("digikala.com",)
             want_tb = (not domain) or domain in ("torob.com",)
-            # اگر فروشگاه انحصاری غیر از این دو باشد، API عمومی نزن
-            if domain and domain not in ("digikala.com", "torob.com"):
-                want_dk = want_tb = False
+            want_sh = (not domain) or domain in ("shopino.app",)
+            # فروشگاه انحصاری غیر از پروایدرهای مستقیم → API عمومی نزن
+            if domain and domain not in ("digikala.com", "torob.com", "shopino.app"):
+                want_dk = want_tb = want_sh = False
             # اگر دیجی‌کالا circuit باز است، از اول ترب را هم بگیر تا خالی نماند
             if domain == "digikala.com" and _circuit_is_open("digikala"):
                 want_tb = True
@@ -2067,6 +2076,8 @@ async def search_shopping(
                     direct_tasks.append(_direct_digikala(v, max_price, max(8, max_results)))
                 if want_tb:
                     direct_tasks.append(_direct_torob(v, max_price, max(8, max_results)))
+                if want_sh:
+                    direct_tasks.append(_direct_shopino(v, max_price, max(8, max_results)))
             if direct_tasks:
                 direct_batches = await asyncio.gather(*direct_tasks, return_exceptions=True)
                 # اول نتایج دیجی‌کالا، بعد ترب و بقیه
@@ -2536,6 +2547,11 @@ async def _direct_digikala(query: str, max_price: int, limit: int):
 
 async def _direct_torob(query: str, max_price: int, limit: int):
     from bot.features.shopping.providers.torob import _direct_torob as _impl
+    return await _impl(query, max_price, limit)
+
+
+async def _direct_shopino(query: str, max_price: int, limit: int):
+    from bot.features.shopping.providers.shopino import _direct_shopino as _impl
     return await _impl(query, max_price, limit)
 
 async def _digikala_html_fallback(query: str, max_price: int, limit: int):

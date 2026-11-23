@@ -4,6 +4,7 @@ Implementation is split across:
   - shared.py (orchestration, ranking, history)
   - providers/digikala.py
   - providers/torob.py
+  - providers/shopino.py
 """
 from bot.features.shopping.shared import *  # noqa: F401,F403
 from bot.features.shopping.shared import (  # noqa: F401
@@ -22,4 +23,5 @@ from bot.features.shopping.shared import (  # noqa: F401
     _explicit_domain,
     _direct_digikala,
     _direct_torob,
+    _direct_shopino,
 )
