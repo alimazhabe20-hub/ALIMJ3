@@ -201,6 +201,7 @@ async def handle_group_media(update, context, *, source_message=None, prompt: st
                             filename=filename,
                             mime=mime,
                             want_lyrics=True,
+                            chat_id=getattr(getattr(update, "effective_chat", None), "id", None),
                         )
                         # فقط ترجمه فارسی متن آهنگ (بدون lyrics انگلیسی در خروجی)
                         if result and "📝 متن:" in str(result):
