@@ -11,7 +11,6 @@ imports used by handlers stable across modular deployments.
 import asyncio
 import base64
 import os
-import re
 import time
 from collections import defaultdict, deque
 from typing import Deque, Dict, List, Optional, Tuple
@@ -1987,7 +1986,6 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
         prompt = prompt[:MAX_INPUT]
 
     original_prompt = prompt
-    errors: List[str] = []
     try:
         _extract_and_store_memory(user_id, original_prompt)
     except Exception:
@@ -1995,16 +1993,8 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
 
     # Shopping is an authoritative live-data path. Never let an LLM replace
     # a failed/real-time shopping lookup with remembered products or prices.
-    try:
-        live_shopping = await _live_shopping_prefetch(original_prompt)
-    except Exception as _shop_pre_exc:
-        logger.warning("live shopping prefetch outer failed: %s", _shop_pre_exc)
-        live_shopping = ""
-    try:
-        is_shop = _looks_like_shopping_request(original_prompt)
-    except Exception as _shop_det_exc:
-        logger.warning("shopping detect failed: %s", _shop_det_exc)
-        is_shop = False
+    live_shopping = await _live_shopping_prefetch(original_prompt)
+    is_shop = _looks_like_shopping_request(original_prompt)
     if is_shop:
         if live_shopping:
             logger.info("shopping request served by live engine; AI providers skipped")
@@ -2022,6 +2012,8 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
             f"🔎 <a href=\"https://torob.com/search/?query={qsafe}\">ترب</a>"
             f"  ·  "
             f"🛍 <a href=\"https://www.digikala.com/search/?q={qsafe}\">دیجی‌کالا</a>"
+            f"  ·  "
+            f"🛒 <a href=\"https://shopino.app/search?q={qsafe}\">شاپینو</a>"
         )
         logger.warning("shopping request but live engine empty; returning link fallback")
         _save_turn(user_id, original_prompt, fallback)
@@ -2104,53 +2096,49 @@ async def ask_ai(user_id: int, prompt: str) -> tuple[str, str]:
 
 
 def _looks_like_shopping_request(text: str) -> bool:
-    """فقط درخواست واقعی خرید کالا — نه ادامه پاسخ، نه مشاوره، نه آهنگ."""
-    _re = __import__("re")
-    t = str(text or "").strip()
-    if not t:
-        return False
-
-    continue_markers = (
-        "ادامه بده دقیقاً",
-        "انتهای پاسخ قبلی",
-        "ادامه از اینجا",
-        "موضوع اصلی کاربر:",
-        "هیچ بخشی از متن قبلی",
-        "پاسخ قبلی قطع شد",
-        "[زمینه کوتاه گروه]",
-        "متن پیاده‌شده",
-        "متن پیاده شده",
-    )
-    if any(m in t for m in continue_markers):
-        return False
-
-    if len(t) > 280:
-        return False
-
-    if _re.search(r"آهنگ|اهنگ|ترانه|موسیقی|lyrics|اپدیت|آپدیت", t, _re.I):
-        return False
-
+    """تشخیص درخواست خرید واقعی — بدون رد شدن عطر/شاپینو/دنبال."""
+    import re
+    t = str(text or "").lower().replace("ي", "ی").replace("ك", "ک")
+    # سوالات قیمت بازار (دلار/طلا/کریپتو) خرید کالا نیستند
+    if re.search(r"قیمت\s*(?:دلار|یورو|طلا|سکه|بیت\s*کوین|بیتکوین|btc|eth|تتر)", t, re.I):
+        if not re.search(r"عطر|گوشی|لباس|کفش|لپ\s*تاپ|خرید|بخر|فروشگاه", t, re.I):
+            return False
     product = (
         r"گوشی|موبایل|اسمارت\s*فون|iphone|آیفون|سامسونگ|شیائومی|پوکو|"
-        r"pixel|پیکسل|لپ.?تاپ|لپتاپ|تبلت|تلویزیون|مانیتور|هدفون|هندزفری|"
-        r"کفش|کتانی|ساعت\s*هوشمند|لوازم\s*(?:خانه|آشپزخانه|دیجیتال)|"
-        r"هودی|سویشرت|کاپشن|شلوار|تیشرت|کیف|کوله|"
-        r"مبل|قابلمه|زودپز"
+        r"pixel|پیکسل|oneplus|honor|لپ.?تاپ|لپتاپ|کامپیوتر|تبلت|تلویزیون|"
+        r"مانیتور|هدفون|هندزفری|کفش|لباس|کتانی|ساعت|لوازم\s*(?:خانه|آشپزخانه|دیجیتال)?|"
+        r"محصول|کالا|وسیله|"
+        r"عطر|ادکلن|perfume|cologne|اسانس|"
+        r"هودی|hoodie|سویشرت|کاپشن|کت|پالتو|شلوار|جین|تیشرت|تی\s*شرت|پیراهن|مانتو|"
+        r"کیف|کوله|چمدان|کلاه|دستکش|جوراب|لباس\s*ورزشی|"
+        r"مبل|میز|صندلی|فرش|پتو|قابلمه|زودپز"
     )
     shopping_action = (
-        r"(?:^|[\s،,])(?:بخرم|بخر|بخرید|بخری)(?:[\s،,]|$)|"
-        r"می\s*خوام\s*بخرم|می‌خوام\s*بخرم|میخواهم\s*بخرم|"
-        r"برام\s*پیدا\s*کن|پیدا\s*کن\s*برام|لینک\s*خرید|"
-        r"از\s*دیجی\s*کالا|از\s*ترب|فروشگاه"
+        r"خرید|بخر|پیدا\s*کن|پیدا\s*برام|برام\s*پیدا|فروشگاه|فروشنده|لینک\s*خرید|"
+        r"دنبال|بگرد|بگردون|جستجو|سرچ|"
+        r"ترب|دیجی.?کالا|تکنولایف|ایمالز|اسنپ.?شاپ|باسلام|شاپینو|shopino|"
+        r"amazon|آمازون|ebay|ایبی|aliexpress|علی.?اکسپرس|walmart|"
+        r"best\s*buy|etsy|newegg|noon|temu|shein|"
+        r"زیر\s*\d|تا\s*\d|حدود\s*\d|بودجه"
     )
-    has_product = bool(_re.search(product, t, _re.I))
-    has_action = bool(_re.search(shopping_action, t, _re.I))
-    has_find_product = bool(_re.search(r"پیدا\s*کن", t, _re.I) and has_product)
-    return bool(
-        has_action
-        or has_find_product
-        or (has_product and _re.search(r"قیمت|چند|لینک|بخر", t, _re.I) and len(t) < 80)
+    has_product = bool(re.search(product, t, re.I))
+    has_action = bool(re.search(shopping_action, t, re.I))
+    has_budget = bool(
+        re.search(
+            r"(?:زیر|تا|بودجه|حداکثر)\s*\d+[\d,٬]*\s*(?:هزار|میلیون|م|تومان|تومن)?",
+            t,
+            re.I,
+        )
     )
+    if has_product and (has_action or has_budget):
+        return True
+    if has_action and has_budget:
+        return True
+    if re.search(r"شاپینو|shopino|دیجی.?کالا|ترب", t, re.I) and (
+        has_product or has_budget or has_action
+    ):
+        return True
+    return False
 
 
 
