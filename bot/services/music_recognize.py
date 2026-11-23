@@ -210,11 +210,14 @@ def fetch_lyrics_lrclib(artist: str, title: str) -> Optional[str]:
                     body = item.get("plainLyrics") or item.get("syncedLyrics") or ""
                     if str(body).strip():
                         return str(body).strip()
-        # fallback: بهترین نتیجه حتی بدون match هنرمند (با برچسب)
-        for score, best in ranked[:1]:
-            body = best.get("plainLyrics") or best.get("syncedLyrics")
-            if body and str(body).strip():
-                return str(body).strip()
+        # بدون تطبیق هنرمند → متن برنگردان (جلوگیری از lyrics اشتباه مثل Mraz روی Saur)
+        if artist and ranked and ranked[0][0] < 2:
+            logger.info(
+                "lrclib skip mismatched artist audd=%r best=%r",
+                artist,
+                (ranked[0][1].get("artistName") if ranked else None),
+            )
+            return None
     except Exception as exp:
         logger.warning("lrclib failed: %s", exp)
     return None
@@ -274,18 +277,23 @@ def fetch_lyrics(artist: str, title: str) -> Optional[str]:
     lyrics = fetch_lyrics_lrclib(artist, title)
     if lyrics:
         return lyrics
-    lyrics = fetch_lyrics_ovh(artist, title)
-    if lyrics:
-        return lyrics
-    # بدون artist هم یک‌بار lrclib
     if artist:
+        lyrics = fetch_lyrics_ovh(artist, title)
+        if lyrics:
+            return lyrics
+    # بدون هنرمند فقط اگر عنوان خیلی خاص باشد (نه I'm Yours و مشابه)
+    common = {
+        "i'm yours", "im yours", "i am yours", "hello", "stay", "sorry",
+        "perfect", "someone like you", "shape of you", "believer",
+    }
+    if not artist and title.lower().strip() not in common:
         lyrics = fetch_lyrics_lrclib("", title)
         if lyrics:
             return lyrics
         lyrics = fetch_lyrics_ovh("", title)
         if lyrics:
             return lyrics
-    fetch_lyrics_genius(artist, title)  # فقط برای لاگ/آینده
+    fetch_lyrics_genius(artist, title)
     return None
 
 
@@ -443,10 +451,11 @@ def format_song_card(meta: dict, lyrics: Optional[str] = None) -> str:
         lines.append(body)
     else:
         lines.append("────────────")
-        lines.append("📝 متن ترانه در منابع آزاد پیدا نشد.")
+        lines.append("📝 متن مطمئن برای این هنرمند+عنوان پیدا نشد.")
         lines.append(
-            "می‌تونی نام دقیق‌تر خواننده و آهنگ را بفرستی "
-            "مثلاً: «خواننده Isabel LaRosa آهنگ I'm Yours»"
+            "اگر خواننده اشتباه است (رایج برای عنوان‌های پرتکرار)، بنویس:\n"
+            "خواننده Jason Mraz آهنگ I'm Yours\n"
+            "یا: خواننده Isabel LaRosa آهنگ I'm Yours"
         )
     return "\n".join(lines)
 
