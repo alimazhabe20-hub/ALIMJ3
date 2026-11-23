@@ -2316,6 +2316,36 @@ async def search_shopping(
         if rows:
             _save_history_rows(rows)
 
+    # اگر کاربر صریحاً یک فروشگاه خواسته، نتایج فروشگاه‌های دیگر را دور بریز
+    if domain and rows:
+        allowed_label = IRAN_SITES.get(domain) or IRAN_SITES.get(domain.lower())
+        filtered = []
+        for r in rows:
+            src = str(r.get("source") or "")
+            url = str(r.get("url") or "").lower()
+            if allowed_label and src == allowed_label:
+                filtered.append(r)
+            elif domain in url:
+                r = dict(r)
+                r["source"] = allowed_label or r.get("source") or domain
+                filtered.append(r)
+        rows = filtered
+
+    # فیلتر نویز: اسانس/نمونه ۱ میل وقتی کاربر «عطر» با بودجه معقول خواسته
+    if rows and max_price and max_price >= 200_000:
+        qlow = (clean or raw or "").lower()
+        if re.search(r"عطر|ادکلن|perfume|cologne", qlow):
+            cleaned_rows = []
+            for r in rows:
+                t = str(r.get("title") or "")
+                if re.search(r"(?:اسانس|نمونه|دکانت|decant|\b1\s*میل\b|۱\s*میل|1ml|\b2\s*میل\b|۲\s*میل)", t, re.I):
+                    # حجم خیلی کم در عنوان → رد
+                    continue
+                cleaned_rows.append(r)
+            # فقط اگر چیزی باقی ماند جایگزین کن
+            if cleaned_rows:
+                rows = cleaned_rows
+
     if not rows:
         _STATS["empty"] += 1
         from urllib.parse import quote as _quote
@@ -2339,10 +2369,17 @@ async def search_shopping(
                 f"🔗 جستجو:\nhttps://www.google.com/search?q={_quote('site:' + domain + ' ' + q_for_link)}"
             )
         scope = f"مخصوص «{domain_label}» " if domain_label else ""
+        note = ""
+        if domain == "shopino.app":
+            note = (
+                "\n\nℹ️ شاپینو ممکن است از سرور ربات در دسترس نباشد (محدودیت شبکه). "
+                "از لینک زیر مستقیم در مرورگر خودت سرچ کن."
+            )
         return (
             f"⚠️ برای «{q_for_link}»{budget_txt} {scope}"
             "نتیجه قابل‌اعتماد از منابع زنده پیدا نشد؛ قیمت حدسی ارائه نمی‌کنم.\n\n"
             + "\n\n".join(links)
+            + note
             + "\n\nاگه برند یا مدل دقیق‌تری بگی، دوباره می‌گردم."
         )
 
