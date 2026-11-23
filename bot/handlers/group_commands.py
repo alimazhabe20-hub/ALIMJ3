@@ -105,6 +105,7 @@ async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     try:
 
+
         if data.startswith("gmusic:tr:"):
             key = data.split(":", 2)[-1].strip()
             try:
@@ -112,7 +113,10 @@ async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
             except Exception:
                 pass
             try:
-                from bot.services.music_recognize import pop_lyrics_for_translate
+                from bot.services.music_recognize import (
+                    pop_lyrics_for_translate,
+                    split_telegram_messages,
+                )
                 packed = pop_lyrics_for_translate(key)
             except Exception as exc:
                 logger.warning("gmusic cache: %s", exc)
@@ -123,21 +127,32 @@ async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
                 except Exception:
                     pass
                 return
-            card_text, lyrics_en = packed
+            lyrics_en = str(packed.get("lyrics") or "")
+            header = str(packed.get("header") or "")
+            msg_ids = list(packed.get("msg_ids") or [])
+            chat_id = packed.get("chat_id")
+            if not lyrics_en:
+                # سازگاری قدیمی
+                if isinstance(packed, tuple):
+                    pass
+                try:
+                    await q.answer("متن آهنگ در کش نبود.", show_alert=True)
+                except Exception:
+                    pass
+                return
             try:
                 from bot.services.ai_service import ask_ai
                 import re as _re
                 uid = user.id if user else 0
                 prompt = (
-                    "تو مترجم ترانه هستی. این lyrics را به فارسی محاوره‌ای، طبیعی و آهنگین ترجمه کن.\n"
+                    "تو مترجم ترانه هستی. این lyrics را کامل به فارسی محاوره‌ای، طبیعی و آهنگین ترجمه کن.\n"
                     "قوانین سخت:\n"
                     "1) کلمه به کلمه ممنوع — حس عاشقانه ترانه را حفظ کن\n"
                     "2) Baby, I'm yours = «عزیزم، مال توام» یا «بیبی، مال توام» — هرگز «بچه» نگو\n"
                     "3) You're so pretty, it hurts = «آن‌قدر زیبایی که درد داره»\n"
-                    "4) Nervous, trip over my words = «عصبی‌ام، کلمات توی دهنم می‌لنگن»\n"
-                    "5) ساختار بندها را حفظ کن\n"
-                    "6) فقط فارسی ترجمه؛ بدون عنوان و انگلیسی\n\n"
-                    "متن آهنگ:\n" + lyrics_en[:3000]
+                    "4) ساختار بندها و تکرارها را کامل حفظ کن — هیچ بخشی را حذف نکن\n"
+                    "5) فقط فارسی ترجمه؛ بدون عنوان و انگلیسی\n\n"
+                    "متن آهنگ:\n" + lyrics_en[:8000]
                 )
                 tr = await ask_ai(uid, prompt)
                 if isinstance(tr, tuple):
@@ -158,61 +173,90 @@ async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
                 if not fa or len(fa) < 15:
                     await q.answer("ترجمه در دسترس نبود.", show_alert=True)
                     return
-                if len(fa) > 2800:
-                    fa = fa[:2800] + "\n…"
-                cur = ""
-                if q.message:
+                # هدر بدون متن انگلیسی
+                if not header and q.message:
                     cur = q.message.text or q.message.caption or ""
-                if "🇮🇷" in cur:
-                    cur = cur.split("🇮🇷")[0].rstrip()
-                import re as _re2
-                m = _re2.search(
-                    r"(.*?)(?:📝\s*متن(?:\s*/\s*زیرنویس)?\s*:?)\s*",
-                    cur,
-                    flags=_re2.S,
+                    if "📝" in cur:
+                        header = cur.split("📝")[0].rstrip()
+                    else:
+                        header = cur
+                # ساخت پیام‌های فارسی (کامل، چندتایی اگر لازم)
+                fa_parts = split_telegram_messages(
+                    header,
+                    fa,
+                    limit=3900,
                 )
-                if m:
-                    header = m.group(1).rstrip()
-                else:
-                    lines = cur.splitlines()
-                    header_lines = []
-                    for ln in lines:
-                        if ln.strip().startswith("📝"):
-                            break
-                        if len(ln) > 45 and _re2.search(r"[A-Za-z]{4,}", ln):
-                            break
-                        header_lines.append(ln)
-                    header = "\n".join(header_lines).rstrip()
-                if not header:
-                    header = cur.split("📝")[0].rstrip() if "📝" in cur else cur[:400]
-                new_text = (
-                    header
-                    + "\n────────────\n"
-                    + "📝 متن فارسی:\n"
-                    + fa
-                )[:4090]
+                # برچسب متن فارسی به‌جای «متن / زیرنویس»
+                fa_parts = [
+                    p.replace("📝 متن / زیرنویس:", "📝 متن فارسی:", 1).replace(
+                        "📝 ادامه متن:", "📝 ادامه متن فارسی:", 1
+                    )
+                    for p in fa_parts
+                ]
                 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                 done_kb = InlineKeyboardMarkup(
                     [[InlineKeyboardButton("✅ ترجمه‌شده", callback_data="gmusic:done")]]
                 )
-                try:
+                bot = context.bot
+                # ویرایش پیام‌های قبلی
+                edited = 0
+                for idx, mid in enumerate(msg_ids):
+                    try:
+                        part = fa_parts[idx] if idx < len(fa_parts) else ""
+                        if not part:
+                            # پیام اضافه انگلیسی → پاک یا کوتاه کن
+                            try:
+                                await bot.edit_message_text(
+                                    chat_id=chat_id or q.message.chat_id,
+                                    message_id=mid,
+                                    text="…",
+                                    reply_markup=None,
+                                )
+                            except Exception:
+                                pass
+                            continue
+                        is_last = idx == len(msg_ids) - 1 and idx == len(fa_parts) - 1
+                        # اگر fa_parts بیشتر است، last در پیام آخر msg_ids نیست
+                        is_last = (idx == len(msg_ids) - 1) and (len(fa_parts) <= len(msg_ids))
+                        await bot.edit_message_text(
+                            chat_id=chat_id or (q.message.chat_id if q.message else None),
+                            message_id=mid,
+                            text=part[:4090],
+                            disable_web_page_preview=True,
+                            reply_markup=(done_kb if is_last else None),
+                        )
+                        edited += 1
+                    except Exception as e_one:
+                        logger.warning("gmusic edit one failed mid=%s: %s", mid, e_one)
+                # اگر ترجمه از پیام‌های اصلی بیشتر شد → پیام جدید
+                if len(fa_parts) > max(1, len(msg_ids)):
+                    start_i = len(msg_ids)
+                    for idx in range(start_i, len(fa_parts)):
+                        is_last = idx == len(fa_parts) - 1
+                        await bot.send_message(
+                            chat_id=chat_id or (q.message.chat_id if q.message else None),
+                            text=fa_parts[idx][:4090],
+                            disable_web_page_preview=True,
+                            reply_markup=(done_kb if is_last else None),
+                        )
+                elif not msg_ids and q.message:
+                    # فقط یک پیام callback
                     await q.edit_message_text(
-                        new_text,
+                        fa_parts[0][:4090],
                         disable_web_page_preview=True,
                         reply_markup=done_kb,
                     )
-                except Exception:
-                    try:
-                        await q.edit_message_caption(
-                            caption=new_text[:1024],
-                            reply_markup=done_kb,
-                        )
-                    except Exception as e2:
-                        logger.warning("gmusic edit failed: %s", e2)
+                    for extra in fa_parts[1:]:
                         await q.message.reply_text(
-                            "🇮🇷 متن فارسی:\n" + fa[:3500],
+                            extra[:4090],
                             disable_web_page_preview=True,
+                            reply_markup=(done_kb if extra == fa_parts[-1] else None),
                         )
+                if edited or fa_parts:
+                    try:
+                        await q.answer("ترجمه شد")
+                    except Exception:
+                        pass
             except Exception as exc:
                 logger.warning("gmusic translate failed: %s", exc)
                 try:
