@@ -317,20 +317,27 @@ def is_live_product_request(text: str, user_id: int | None = None) -> bool:
     # بودجه + برند/کالا (حتی بدون فعل خرید)
     has_budget = bool(
         re.search(
-            r"(?:تا|زیر|بودجه|حداکثر)\s*[0-9۰-۹]+\s*(?:میلیون|م|تومان|تومن)?|"
-            r"[0-9۰-۹]+\s*میلیون",
+            r"(?:تا|زیر|بودجه|حداکثر|حدود)\s*[0-9۰-۹]+(?:[.,٬]?[0-9۰-۹]+)?\s*"
+            r"(?:هزار|میلیون|میلیارد|م|تومان|تومن)?|"
+            r"[0-9۰-۹]+(?:[.,٬]?[0-9۰-۹]+)?\s*(?:هزار|میلیون|میلیارد)\s*(?:تومان|تومن)?",
             s,
             re.I,
         )
     )
     has_link = bool(re.search(r"https?://\S+", s, re.I))
     if has_link and (
-        re.search(r"digikala|torob|technolife|amazon|دیجی\s*کالا|ترب", s, re.I)
+        re.search(r"digikala|torob|technolife|amazon|shopino|دیجی\s*کالا|ترب|شاپینو", s, re.I)
         or _PRODUCT_STRONG_RE.search(s)
     ):
         return True
     if has_budget and _PRODUCT_STRONG_RE.search(s):
         return True
+
+
+    # فروشگاه صریح + کالا/بودجه
+    if re.search(r"شاپینو|shopino|دیجی\s*کالا|digikala|ترب|torob|اسنپ\s*شاپ", s, re.I):
+        if has_budget or _PRODUCT_STRONG_RE.search(s) or _ACTION_RE.search(s):
+            return True
 
     score, _info = _score_product_request(s)
     return score >= 45.0
