@@ -81,24 +81,21 @@ def detect_fast_intent(text: str) -> Optional[str]:
     # هوا
     if re.search(r"هوا|آب\s*و\s*هوا|دما|باران", t, re.I):
         return "weather"
-    # خرید فقط با درخواست واضح کالا — نه «آهنگ پیدا کنه» / چت عادی
-    if len(t) > 120:
-        return None
-    if any(x in t for x in (
-        "دستیار:", "زمینه گروه", "متن پیاده‌شده", "متن پیاده شده",
-        "digikala.com", "torob.com", "آهنگ", "ترانه", "موسیقی", "lyrics",
-        "اپدیت", "آپدیت", "ربات",
-    )):
-        return None
-    # خرید صریح
-    if re.search(r"(?:برام\s*بخر|میخوام\s*بخرم|لینک(?:ش)?\s*(?:بده|بفرست))", t, re.I):
+    # خرید فقط با درخواست واضح — نه فقط نام کالا
+    if re.search(r"(?:پیدا\s*کن|برام\s*بخر|میخوام\s*بخرم|لینک\s*بده)", t, re.I):
         return "shop"
-    # «پیدا کن» فقط وقتی کالای فیزیکی محتمل است
-    if re.search(r"پیدا\s*کن", t, re.I) and re.search(
-        r"(?:باتری|باطری|شارژر|گوشی|لپ\s*تاپ|هدفون|هندزفری|کفش|لباس|ساعت)", t, re.I
+    if re.search(r"(?:باتری|باطری|شارژر|گوشی)", t, re.I) and re.search(r"(?:پیدا|بخر|قیمت|چند|میخوام)", t, re.I):
+        return "shop"
+    # دنبال + کالا/بودجه/فروشگاه
+    if re.search(r"(?:دنبال|بگرد|جستجو|سرچ)", t, re.I) and re.search(
+        r"(?:عطر|ادکلن|گوشی|لپ\s*تاپ|کفش|لباس|زیر\s*\d+|تا\s*\d+|شاپینو|shopino|دیجی|ترب)",
+        t,
+        re.I,
     ):
         return "shop"
-    if re.search(r"(?:باتری|باطری|شارژر|گوشی)", t, re.I) and re.search(r"(?:بخر|قیمت|چند|میخوام)", t, re.I):
+    if re.search(r"شاپینو|shopino", t, re.I) and re.search(
+        r"(?:عطر|ادکلن|قیمت|زیر|تا|بخر|پیدا|دنبال)", t, re.I
+    ):
         return "shop"
     return None
 
@@ -303,18 +300,6 @@ async def run_fast_path(text: str) -> Optional[str]:
                 q_clean,
             )
             q_clean = " ".join(q_clean.split()) or (text or "").strip()
-            # جلوگیری از جستجوی خرید با پیام آلوده/مبهم
-            if (
-                len(q_clean) < 3
-                or len(q_clean) > 80
-                or q_clean in {"الس؟", "الس", "؟", "?", "چیه", "چی"}
-                or any(x in q_clean for x in (
-                    "دستیار:", "زمینه گروه", "متن پیاده", "digikala", "torob",
-                    "آهنگ", "ترانه", "موسیقی", "اپدیت", "آپدیت", "ربات",
-                ))
-                or q_clean.count("موسیقی") >= 2
-            ):
-                return None
             try:
                 from bot.features.market import shopping as _sh
                 if hasattr(_sh, "_CIRCUIT"):
