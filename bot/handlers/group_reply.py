@@ -480,12 +480,21 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
                     mime = getattr(audio_src, "mime_type", None) or (
                         "audio/ogg" if getattr(rm, "voice", None) else "audio/mpeg"
                     )
+                    transcript_hint = ""
+                    try:
+                        from bot.services.ai_service import speech_to_text
+                        transcript_hint = (
+                            await speech_to_text(data, filename="voice.ogg", mime=mime) or ""
+                        ).strip()[:800]
+                    except Exception as _stt:
+                        logger.debug("lyrics STT skip: %s", _stt)
                     result = identify_and_lyrics(
                         data,
                         filename=_P(path).name if path else "audio.ogg",
                         mime=mime,
                         want_lyrics=True,
                         chat_id=chat.id,
+                        transcript_hint=transcript_hint,
                     )
                     await message.reply_text(str(result)[:4000])
                     return True
