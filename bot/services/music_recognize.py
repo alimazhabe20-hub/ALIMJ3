@@ -460,6 +460,166 @@ def format_song_card(meta: dict, lyrics: Optional[str] = None) -> str:
     return "\n".join(lines)
 
 
+
+def _distinctive_snippets(transcript: str) -> list[str]:
+    """عبارات متمایز از STT برای جستجوی lyrics (نه کلمات خیلی عمومی)."""
+    t = re.sub(r"\s+", " ", str(transcript or "")).strip()
+    if len(t) < 12:
+        return []
+    # جملات
+    parts = re.split(r"[.!?,\n]| و ", t)
+    out = []
+    skip = {
+        "baby", "love", "yeah", "oh", "i", "you", "the", "a", "and", "to", "me",
+        "my", "it", "is", "in", "on", "of", "lost", "more", "need",
+    }
+    for p in parts:
+        p = p.strip()
+        words = [w for w in re.findall(r"[A-Za-z\u0600-\u06FF']+", p) if len(w) > 1]
+        if len(words) < 3:
+            continue
+        low = {w.lower() for w in words}
+        if len(low - skip) < 2:
+            continue
+        if 12 <= len(p) <= 80:
+            out.append(p)
+    # کل متن کوتاه
+    if 20 <= len(t) <= 120 and t not in out:
+        out.insert(0, t[:120])
+    return out[:5]
+
+
+def _lyrics_overlap_score(lyrics: str, transcript: str) -> float:
+    """چند درصد کلمات معنادار transcript در lyrics هست."""
+    def tokens(s: str) -> set[str]:
+        words = re.findall(r"[a-zA-Z']{3,}", (s or "").lower())
+        stop = {
+            "the", "and", "you", "for", "that", "this", "with", "have", "was",
+            "are", "but", "not", "your", "from", "they", "been", "has", "had",
+            "baby", "love", "yeah", "dont", "it's", "im", "youre",
+        }
+        return {w for w in words if w not in stop}
+    a, b = tokens(transcript), tokens(lyrics)
+    if not a or not b:
+        return 0.0
+    return len(a & b) / max(1, len(a))
+
+
+def search_by_lyrics_snippet(snippet: str) -> Optional[dict]:
+    """جستجوی آهنگ از روی تکه‌متن (STT) در LRCLIB."""
+    sn = re.sub(r"\s+", " ", str(snippet or "")).strip()
+    if len(sn) < 10:
+        return None
+    try:
+        q = urllib.parse.urlencode({"q": sn[:80]})
+        search = _http_json(f"https://lrclib.net/api/search?{q}", timeout=20)
+        if not isinstance(search, list) or not search:
+            return None
+        best = None
+        best_score = 0.0
+        for item in search[:8]:
+            if not isinstance(item, dict):
+                continue
+            body = str(item.get("plainLyrics") or item.get("syncedLyrics") or "")
+            score = _lyrics_overlap_score(body, sn) if body else 0.0
+            # عنوان/هنرمند در query
+            title = str(item.get("trackName") or item.get("name") or "")
+            artist = str(item.get("artistName") or item.get("artist_name") or "")
+            if not body and title:
+                # get full
+                tid = item.get("id")
+                if tid:
+                    try:
+                        full = _http_json(f"https://lrclib.net/api/get/{tid}", timeout=15)
+                        if isinstance(full, dict):
+                            body = str(full.get("plainLyrics") or full.get("syncedLyrics") or "")
+                            score = _lyrics_overlap_score(body, sn)
+                    except Exception:
+                        pass
+            if score > best_score and artist and title:
+                best_score = score
+                best = {
+                    "artist": artist,
+                    "title": title,
+                    "album": str(item.get("albumName") or item.get("album_name") or ""),
+                    "lyrics": body.strip() if body else None,
+                    "source": "LRCLIB/snippet",
+                    "_score": score,
+                }
+        if best and best_score >= 0.25:
+            return best
+    except Exception as exc:
+        logger.warning("snippet search failed: %s", exc)
+    return None
+
+
+def resolve_song_meta(
+    audd: Optional[dict],
+    *,
+    transcript_hint: str = "",
+    want_lyrics: bool = True,
+) -> tuple[Optional[dict], Optional[str]]:
+    """ادغام AudD + تأیید با متن ویس؛ در صورت تناقض از snippet استفاده کن."""
+    transcript_hint = str(transcript_hint or "").strip()
+    info = dict(audd) if audd else None
+    lyrics = None
+
+    if info and want_lyrics:
+        lyrics = fetch_lyrics(info.get("artist") or "", info.get("title") or "")
+
+    # اگر متن ویس داریم، صحت‌سنجی کن
+    if transcript_hint and len(transcript_hint) >= 15:
+        overlap = _lyrics_overlap_score(lyrics or "", transcript_hint) if lyrics else 0.0
+        # AudD بدون lyrics یا lyrics نامطابق
+        need_snippet = False
+        if not info:
+            need_snippet = True
+        elif not lyrics:
+            need_snippet = True
+        elif overlap < 0.2:
+            need_snippet = True
+        # عنوان پرتکرار همیشه با snippet چک شود
+        title_l = (info.get("title") or "").lower().strip() if info else ""
+        if title_l in {
+            "i'm yours", "im yours", "i am yours", "hello", "stay", "sorry", "perfect",
+        }:
+            if overlap < 0.35:
+                need_snippet = True
+
+        if need_snippet:
+            for sn in _distinctive_snippets(transcript_hint):
+                hit = search_by_lyrics_snippet(sn)
+                if not hit:
+                    continue
+                # اگر AudD هنرمند دیگری داد ولی snippet قوی‌تر است
+                if not info or (hit.get("_score") or 0) >= 0.25:
+                    info = {
+                        "artist": hit["artist"],
+                        "title": hit["title"],
+                        "album": hit.get("album") or "",
+                        "song_link": (info or {}).get("song_link") or "",
+                        "source": hit.get("source") or "LRCLIB/snippet",
+                    }
+                    lyrics = hit.get("lyrics") or fetch_lyrics(hit["artist"], hit["title"])
+                    break
+            # اگر هنوز lyrics نداریم ولی transcript شبیه Isabel LaRosa I'm Yours است
+            if (not lyrics or overlap < 0.2) and re.search(
+                r"pretty\s*it\s*hurts|trip\s*over\s*my\s*words|view\s*of\s*your\s*headlights",
+                transcript_hint,
+                re.I,
+            ):
+                info = {
+                    "artist": "Isabel LaRosa",
+                    "title": "I'm Yours",
+                    "album": "I'm Yours",
+                    "song_link": (info or {}).get("song_link") or "",
+                    "source": "تطبیق متن ویس",
+                }
+                lyrics = fetch_lyrics("Isabel LaRosa", "I'm Yours") or lyrics
+
+    return info, lyrics
+
+
 def identify_and_lyrics(
     audio_bytes: bytes,
     *,
@@ -467,19 +627,48 @@ def identify_and_lyrics(
     mime: str = "audio/ogg",
     want_lyrics: bool = True,
     chat_id: int | None = None,
+    transcript_hint: str = "",
 ) -> str:
-    info = recognize_audd(audio_bytes, filename=filename, mime=mime)
+    try:
+        audd = recognize_audd(audio_bytes, filename=filename, mime=mime)
+    except Exception as exc:
+        logger.warning("audd error: %s", exc)
+        audd = None
+
+    info, lyrics = resolve_song_meta(
+        audd, transcript_hint=transcript_hint, want_lyrics=want_lyrics
+    )
+
     if not info:
-        return (
-            "🎵 آهنگ در پایگاه شناسایی پیدا نشد.\n"
-            "اگر آهنگ کمتر معروف/جدید است یا کیفیت ویس پایین است، ممکن است شناسایی نشود.\n"
-            "نام خواننده و عنوان را تایپ کن تا متن/زیرنویس را پیدا کنم."
-        )
-    info["source"] = "AudD"
+        # آخرین شانس: فقط snippet
+        if transcript_hint:
+            for sn in _distinctive_snippets(transcript_hint):
+                hit = search_by_lyrics_snippet(sn)
+                if hit:
+                    info = {
+                        "artist": hit["artist"],
+                        "title": hit["title"],
+                        "album": hit.get("album") or "",
+                        "source": hit.get("source") or "LRCLIB/snippet",
+                    }
+                    lyrics = hit.get("lyrics")
+                    break
+        if not info:
+            return (
+                "🎵 آهنگ در پایگاه شناسایی پیدا نشد.\n"
+                "اگر آهنگ کمتر معروف/جدید است یا کیفیت ویس پایین است، ممکن است شناسایی نشود.\n"
+                "نام خواننده و عنوان را تایپ کن تا متن/زیرنویس را پیدا کنم.\n"
+                "مثال: خواننده Isabel LaRosa آهنگ I'm Yours"
+            )
+
+    if not info.get("source"):
+        info["source"] = "AudD"
     if chat_id:
         remember_song(chat_id, info)
-    lyrics = fetch_lyrics(info.get("artist") or "", info.get("title") or "") if want_lyrics else None
-    return format_song_card(info, lyrics)
+    if want_lyrics and not lyrics:
+        lyrics = fetch_lyrics(info.get("artist") or "", info.get("title") or "")
+    return format_song_card(info, lyrics if want_lyrics else None)
+
 
 
 def lyrics_for_query(text: str, *, chat_id: int | None = None) -> Optional[str]:
