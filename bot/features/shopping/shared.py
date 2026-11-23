@@ -2319,12 +2319,31 @@ async def search_shopping(
     if not rows:
         _STATS["empty"] += 1
         from urllib.parse import quote as _quote
-        qlink = _quote(str(clean or raw or "")[:80])
+        q_for_link = str(clean or raw or "").strip() or "محصول"
+        qlink = _quote(q_for_link[:80])
+        budget_txt = f" زیر {max_price:,} تومان" if max_price else ""
+        domain_label = {
+            "shopino.app": "شاپینو",
+            "digikala.com": "دیجی‌کالا",
+            "torob.com": "ترب",
+        }.get(domain or "", "")
+        links = []
+        if domain == "shopino.app" or not domain:
+            links.append(f"🛍 شاپینو:\nhttps://shopino.app/search?q={qlink}")
+        if domain == "digikala.com" or not domain:
+            links.append(f"🛍 دیجی‌کالا:\nhttps://www.digikala.com/search/?q={qlink}")
+        if domain == "torob.com" or not domain:
+            links.append(f"🔎 ترب:\nhttps://torob.com/search/?query={qlink}")
+        if domain and domain not in ("shopino.app", "digikala.com", "torob.com"):
+            links.append(
+                f"🔗 جستجو:\nhttps://www.google.com/search?q={_quote('site:' + domain + ' ' + q_for_link)}"
+            )
+        scope = f"مخصوص «{domain_label}» " if domain_label else ""
         return (
-            f"⚠️ برای «{clean}» با این مشخصات نتیجه قابل‌اعتماد و داخل بودجه "
-            "از منابع زنده پیدا نشد؛ قیمت حدسی ارائه نمی‌کنم.\n\n"
-            f"🛍 دیجی‌کالا:\nhttps://www.digikala.com/search/?q={qlink}\n\n"
-            f"🔎 ترب:\nhttps://torob.com/search/?query={qlink}"
+            f"⚠️ برای «{q_for_link}»{budget_txt} {scope}"
+            "نتیجه قابل‌اعتماد از منابع زنده پیدا نشد؛ قیمت حدسی ارائه نمی‌کنم.\n\n"
+            + "\n\n".join(links)
+            + "\n\nاگه برند یا مدل دقیق‌تری بگی، دوباره می‌گردم."
         )
 
     priced = [x for x in rows if x.get("price")]
