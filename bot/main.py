@@ -500,7 +500,7 @@ def main():
     # Otherwise button_handler answers gset:/group_/gquick: and group toggles never run.
     try:
         from bot.handlers.group_commands import group_callback_handler, group_quick_callback
-        app.add_handler(CallbackQueryHandler(group_callback_handler, pattern=r"^(group_|gset:)"))
+        app.add_handler(CallbackQueryHandler(group_callback_handler, pattern=r"^(group_|gset:|gmusic:)"))
         app.add_handler(CallbackQueryHandler(group_quick_callback, pattern=r"^gquick:"))
         app.add_handler(CallbackQueryHandler(group_callback_handler, pattern=r"^group_dismiss$"))
     except Exception as _gcb:
