@@ -176,6 +176,7 @@ async def handle_group_media(update, context, *, source_message=None, prompt: st
             wants_analysis = _wants_voice_analysis(caption) or _wants_voice_analysis(prompt)
             cap_all = f"{caption or ''} {prompt or ''}"
             result = None
+            _music_tr_key = ""
 
             # ── شناسایی آهنگ + lyrics ─────────────────────────────
             try:
@@ -204,56 +205,20 @@ async def handle_group_media(update, context, *, source_message=None, prompt: st
                             chat_id=getattr(getattr(update, "effective_chat", None), "id", None),
                             transcript_hint=(transcript or "")[:800],
                         )
-                        # فقط ترجمه فارسی متن آهنگ (بدون lyrics انگلیسی در خروجی)
-                        if result and "📝 متن:" in str(result):
-                            try:
-                                from bot.services.music_recognize import extract_lyrics_block
-                                lyrics_en = extract_lyrics_block(str(result))
-                                # هدر شناسایی بدون بلوک متن انگلیسی
-                                header = str(result).split("📝 متن:")[0].rstrip()
-                                if lyrics_en and len(lyrics_en) > 20:
-                                    lyrics_for_tr = lyrics_en[:3000]
-                                    tr_prompt = (
-                                        "تو یک مترجم حرفه‌ای ترانه و شعر هستی.\n"
-                                        "متن زیر lyrics یک آهنگ است. آن را به فارسی "
-                                        "محاوره‌ای، دلنشین و نزدیک به حس ترانه برگردان.\n\n"
-                                        "حتماً رعایت کن:\n"
-                                        "1) ترجمه کلمه به کلمه ممنوع — مفهوم و حس را منتقل کن\n"
-                                        "2) مثل زیرنویس رسمی آهنگ‌های خارجی در ایران بنویس\n"
-                                        "3) جمله‌های شکسته یا بی‌معنی نساز\n"
-                                        "4) اگر تکرار کورس هست، همان را هم با همان حس تکرار کن\n"
-                                        "5) لحن غم/دلتنگی/عشق را حفظ کن\n"
-                                        "6) فقط متن فارسی ترجمه را بده؛ بدون عنوان، بدون توضیح، بدون انگلیسی\n\n"
-                                        "متن آهنگ:\n"
-                                        + lyrics_for_tr
-                                    )
-                                    fa = await ask_ai(user_id, tr_prompt)
-                                    if isinstance(fa, tuple):
-                                        fa = fa[0]
-                                    fa = str(fa or "").strip()
-                                    fa = re.sub(
-                                        r"^(?:ترجمه(?:\s*فارسی)?|persian\s*translation)\s*:?\s*",
-                                        "",
-                                        fa,
-                                        flags=re.I,
-                                    ).strip()
-                                    # حذف خطوط انگلیسی باقی‌مانده
-                                    fa_lines = []
-                                    for ln in fa.splitlines():
-                                        if re.search(r"[A-Za-z]{4,}", ln) and not re.search(r"[\u0600-\u06FF]{2,}", ln):
-                                            continue
-                                        fa_lines.append(ln)
-                                    fa = "\n".join(fa_lines).strip()
-                                    if fa and "digikala" not in fa and len(fa) > 15:
-                                        if len(fa) > 3200:
-                                            fa = fa[:3200] + "\n…"
-                                        result = header + "\n\n🇮🇷 متن فارسی:\n" + fa
-                                    else:
-                                        result = header + "\n\n⚠️ ترجمه فارسی متن در دسترس نبود."
-                                else:
-                                    result = header
-                            except Exception as tr_exc:
-                                logger.warning("lyrics FA translate failed: %s", tr_exc)
+                        # ترجمه فارسی با دکمه اینلاین (نه خودکار)
+                        try:
+                            from bot.services.music_recognize import (
+                                extract_lyrics_block,
+                                store_lyrics_for_translate,
+                            )
+                            lyrics_en = extract_lyrics_block(str(result))
+                            if lyrics_en and len(lyrics_en) > 20:
+                                _music_tr_key = store_lyrics_for_translate(str(result), lyrics_en)
+                            else:
+                                _music_tr_key = ""
+                        except Exception as _sk:
+                            logger.debug("music tr key store: %s", _sk)
+                            _music_tr_key = ""
 
                     except RuntimeError as rexc:
                         if "AUDD" in str(rexc).upper() and music_req:
@@ -364,7 +329,26 @@ async def handle_group_media(update, context, *, source_message=None, prompt: st
         add_turn(chat.id, "bot", answer, user_id=None, speaker="روز زیبا", message_id=None)
         # Telegram messages are limited to 4096 chars.
         prefix = f"🤖 پاسخ به {speaker}:\n"
-        await message.reply_text(prefix + answer[:3900], disable_web_page_preview=True)
+        body = (prefix + answer)[:4090]
+        markup = None
+        try:
+            if locals().get("_music_tr_key"):
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                markup = InlineKeyboardMarkup(
+                    [[
+                        InlineKeyboardButton(
+                            "🇮🇷 ترجمه فارسی",
+                            callback_data=f"gmusic:tr:{_music_tr_key}",
+                        )
+                    ]]
+                )
+        except Exception:
+            markup = None
+        await message.reply_text(
+            body,
+            disable_web_page_preview=True,
+            reply_markup=markup,
+        )
         return True
     except Exception as exc:
         logger.warning("group media processing failed chat=%s user=%s: %s", chat.id, user_id, exc)
