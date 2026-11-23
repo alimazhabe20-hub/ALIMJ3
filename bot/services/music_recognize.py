@@ -143,34 +143,80 @@ def recognize_audd(
     }
 
 
+def _artist_close(a: str, b: str) -> bool:
+    """تشخیص شباهت ساده نام هنرمند."""
+    def norm(x: str) -> str:
+        x = (x or "").lower()
+        x = re.sub(r"[^a-z0-9\u0600-\u06ff\s]", " ", x)
+        x = re.sub(r"\s+", " ", x).strip()
+        return x
+    na, nb = norm(a), norm(b)
+    if not na or not nb:
+        return True  # اگر یکی خالی است سخت نگیر
+    if na == nb or na in nb or nb in na:
+        return True
+    # overlap کلمات
+    wa, wb = set(na.split()), set(nb.split())
+    if not wa or not wb:
+        return True
+    return len(wa & wb) / max(1, min(len(wa), len(wb))) >= 0.5
+
+
 def fetch_lyrics_lrclib(artist: str, title: str) -> Optional[str]:
     try:
-        q = urllib.parse.urlencode({"q": f"{artist} {title}".strip()})
-        search = _http_json(f"https://lrclib.net/api/search?{q}", timeout=20)
-        if not isinstance(search, list) or not search:
-            # مستقیم get
+        # اول get دقیق با artist+title
+        if artist and title:
             params = urllib.parse.urlencode(
                 {"artist_name": artist, "track_name": title}
             )
-            item = _http_json(f"https://lrclib.net/api/get?{params}", timeout=20)
-            if isinstance(item, dict):
-                body = item.get("plainLyrics") or item.get("syncedLyrics") or ""
-                return str(body).strip() or None
+            try:
+                item = _http_json(f"https://lrclib.net/api/get?{params}", timeout=20)
+                if isinstance(item, dict):
+                    body = item.get("plainLyrics") or item.get("syncedLyrics") or ""
+                    if str(body).strip():
+                        return str(body).strip()
+            except Exception:
+                pass
+
+        q = urllib.parse.urlencode({"q": f"{artist} {title}".strip()})
+        search = _http_json(f"https://lrclib.net/api/search?{q}", timeout=20)
+        if not isinstance(search, list) or not search:
             return None
-        best = search[0]
-        if not isinstance(best, dict):
-            return None
-        body = best.get("plainLyrics") or best.get("syncedLyrics")
-        if body:
-            return str(body).strip() or None
-        tid = best.get("id")
-        if tid:
-            item = _http_json(f"https://lrclib.net/api/get/{tid}", timeout=20)
-            if isinstance(item, dict):
-                body = item.get("plainLyrics") or item.get("syncedLyrics") or ""
-                return str(body).strip() or None
-    except Exception as exc:
-        logger.warning("lrclib failed: %s", exc)
+
+        # ترجیح نتیجه با هنرمند هم‌خوان
+        ranked = []
+        for item in search:
+            if not isinstance(item, dict):
+                continue
+            a = str(item.get("artistName") or item.get("artist_name") or "")
+            score = 2 if _artist_close(artist, a) else 0
+            if str(item.get("trackName") or item.get("name") or "").lower().find(
+                (title or "").lower()[:12]
+            ) >= 0:
+                score += 1
+            ranked.append((score, item))
+        ranked.sort(key=lambda x: -x[0])
+        for score, best in ranked:
+            if artist and score < 2:
+                # هنرمند مشخص بوده ولی هیچ نتیجه‌ای match نکرد
+                continue
+            body = best.get("plainLyrics") or best.get("syncedLyrics")
+            if body and str(body).strip():
+                return str(body).strip()
+            tid = best.get("id")
+            if tid:
+                item = _http_json(f"https://lrclib.net/api/get/{tid}", timeout=20)
+                if isinstance(item, dict):
+                    body = item.get("plainLyrics") or item.get("syncedLyrics") or ""
+                    if str(body).strip():
+                        return str(body).strip()
+        # fallback: بهترین نتیجه حتی بدون match هنرمند (با برچسب)
+        for score, best in ranked[:1]:
+            body = best.get("plainLyrics") or best.get("syncedLyrics")
+            if body and str(body).strip():
+                return str(body).strip()
+    except Exception as exp:
+        logger.warning("lrclib failed: %s", exp)
     return None
 
 
@@ -350,6 +396,17 @@ def parse_artist_title(text: str) -> Optional[tuple[str, str]]:
     return None
 
 
+
+def _common_title_warning(artist: str, title: str) -> str:
+    t = (title or "").lower().strip()
+    common = {"i'm yours", "im yours", "i am yours", "hello", "stay", "sorry", "perfect"}
+    if t in common:
+        return (
+            "\n⚠️ عنوان پرتکرار است؛ ممکن است AudD نسخه/کاور دیگری را گرفته باشد.\n"
+            "اگر خواننده اشتباه است بنویس: خواننده … آهنگ …"
+        )
+    return ""
+
 def format_song_card(meta: dict, lyrics: Optional[str] = None) -> str:
     artist = str(meta.get("artist") or "—")
     title = str(meta.get("title") or "—")
@@ -374,6 +431,9 @@ def format_song_card(meta: dict, lyrics: Optional[str] = None) -> str:
         lines.append(f"🛠 منبع: {meta['source']}")
     else:
         lines.append("🛠 منبع شناسایی: AudD")
+    warn = _common_title_warning(artist, title)
+    if warn:
+        lines.append(warn)
     if lyrics:
         body = lyrics.strip()
         if len(body) > 3500:
