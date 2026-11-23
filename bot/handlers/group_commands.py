@@ -129,11 +129,14 @@ async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
                 import re as _re
                 uid = user.id if user else 0
                 prompt = (
-                    "متن زیر lyrics یک آهنگ است. آن را به فارسی محاوره‌ای و روان ترجمه کن.\n"
-                    "قوانین:\n"
-                    "1) ترجمه کلمه به کلمه ممنوع — حس و مفهوم را منتقل کن\n"
-                    "2) مثل زیرنویس رسمی آهنگ بنویس\n"
-                    "3) فقط متن فارسی؛ بدون عنوان و توضیح و انگلیسی\n\n"
+                    "تو مترجم ترانه هستی. این lyrics را به فارسی محاوره‌ای، طبیعی و آهنگین ترجمه کن.\n"
+                    "قوانین سخت:\n"
+                    "1) کلمه به کلمه ممنوع — حس عاشقانه ترانه را حفظ کن\n"
+                    "2) Baby, I'm yours = «عزیزم، مال توام» یا «بیبی، مال توام» — هرگز «بچه» نگو\n"
+                    "3) You're so pretty, it hurts = «آن‌قدر زیبایی که درد داره»\n"
+                    "4) Nervous, trip over my words = «عصبی‌ام، کلمات توی دهنم می‌لنگن»\n"
+                    "5) ساختار بندها را حفظ کن\n"
+                    "6) فقط فارسی ترجمه؛ بدون عنوان و انگلیسی\n\n"
                     "متن آهنگ:\n" + lyrics_en[:3000]
                 )
                 tr = await ask_ai(uid, prompt)
@@ -160,9 +163,34 @@ async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
                 cur = ""
                 if q.message:
                     cur = q.message.text or q.message.caption or ""
-                if "🇮🇷 متن فارسی" in cur:
-                    cur = cur.split("🇮🇷 متن فارسی")[0].rstrip()
-                new_text = (cur + "\n\n🇮🇷 متن فارسی:\n" + fa)[:4090]
+                if "🇮🇷" in cur:
+                    cur = cur.split("🇮🇷")[0].rstrip()
+                import re as _re2
+                m = _re2.search(
+                    r"(.*?)(?:📝\s*متن(?:\s*/\s*زیرنویس)?\s*:?)\s*",
+                    cur,
+                    flags=_re2.S,
+                )
+                if m:
+                    header = m.group(1).rstrip()
+                else:
+                    lines = cur.splitlines()
+                    header_lines = []
+                    for ln in lines:
+                        if ln.strip().startswith("📝"):
+                            break
+                        if len(ln) > 45 and _re2.search(r"[A-Za-z]{4,}", ln):
+                            break
+                        header_lines.append(ln)
+                    header = "\n".join(header_lines).rstrip()
+                if not header:
+                    header = cur.split("📝")[0].rstrip() if "📝" in cur else cur[:400]
+                new_text = (
+                    header
+                    + "\n────────────\n"
+                    + "📝 متن فارسی:\n"
+                    + fa
+                )[:4090]
                 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                 done_kb = InlineKeyboardMarkup(
                     [[InlineKeyboardButton("✅ ترجمه‌شده", callback_data="gmusic:done")]]
