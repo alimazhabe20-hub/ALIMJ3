@@ -104,6 +104,102 @@ async def group_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
     user = update.effective_user
 
     try:
+
+        if data.startswith("gmusic:tr:"):
+            key = data.split(":", 2)[-1].strip()
+            try:
+                await q.answer("در حال ترجمه…")
+            except Exception:
+                pass
+            try:
+                from bot.services.music_recognize import pop_lyrics_for_translate
+                packed = pop_lyrics_for_translate(key)
+            except Exception as exc:
+                logger.warning("gmusic cache: %s", exc)
+                packed = None
+            if not packed:
+                try:
+                    await q.answer("مهلت ترجمه تمام شده؛ دوباره «ربات آهنگ» بزن.", show_alert=True)
+                except Exception:
+                    pass
+                return
+            card_text, lyrics_en = packed
+            try:
+                from bot.services.ai_service import ask_ai
+                import re as _re
+                uid = user.id if user else 0
+                prompt = (
+                    "متن زیر lyrics یک آهنگ است. آن را به فارسی محاوره‌ای و روان ترجمه کن.\n"
+                    "قوانین:\n"
+                    "1) ترجمه کلمه به کلمه ممنوع — حس و مفهوم را منتقل کن\n"
+                    "2) مثل زیرنویس رسمی آهنگ بنویس\n"
+                    "3) فقط متن فارسی؛ بدون عنوان و توضیح و انگلیسی\n\n"
+                    "متن آهنگ:\n" + lyrics_en[:3000]
+                )
+                tr = await ask_ai(uid, prompt)
+                if isinstance(tr, tuple):
+                    tr = tr[0]
+                fa = str(tr or "").strip()
+                fa = _re.sub(
+                    r"^(?:ترجمه(?:\s*فارسی)?|persian\s*translation)\s*:?\s*",
+                    "",
+                    fa,
+                    flags=_re.I,
+                ).strip()
+                fa_lines = []
+                for ln in fa.splitlines():
+                    if _re.search(r"[A-Za-z]{4,}", ln) and not _re.search(r"[\u0600-\u06FF]{2,}", ln):
+                        continue
+                    fa_lines.append(ln)
+                fa = "\n".join(fa_lines).strip()
+                if not fa or len(fa) < 15:
+                    await q.answer("ترجمه در دسترس نبود.", show_alert=True)
+                    return
+                if len(fa) > 2800:
+                    fa = fa[:2800] + "\n…"
+                cur = ""
+                if q.message:
+                    cur = q.message.text or q.message.caption or ""
+                if "🇮🇷 متن فارسی" in cur:
+                    cur = cur.split("🇮🇷 متن فارسی")[0].rstrip()
+                new_text = (cur + "\n\n🇮🇷 متن فارسی:\n" + fa)[:4090]
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                done_kb = InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("✅ ترجمه‌شده", callback_data="gmusic:done")]]
+                )
+                try:
+                    await q.edit_message_text(
+                        new_text,
+                        disable_web_page_preview=True,
+                        reply_markup=done_kb,
+                    )
+                except Exception:
+                    try:
+                        await q.edit_message_caption(
+                            caption=new_text[:1024],
+                            reply_markup=done_kb,
+                        )
+                    except Exception as e2:
+                        logger.warning("gmusic edit failed: %s", e2)
+                        await q.message.reply_text(
+                            "🇮🇷 متن فارسی:\n" + fa[:3500],
+                            disable_web_page_preview=True,
+                        )
+            except Exception as exc:
+                logger.warning("gmusic translate failed: %s", exc)
+                try:
+                    await q.answer("ترجمه ناموفق بود.", show_alert=True)
+                except Exception:
+                    pass
+            return
+
+        if data == "gmusic:done":
+            try:
+                await q.answer("قبلاً ترجمه شده")
+            except Exception:
+                pass
+            return
+
         if data == "group_dismiss":
             await q.answer("حذف شد")
             try:

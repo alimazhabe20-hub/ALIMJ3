@@ -123,6 +123,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data.startswith("gset:")
         or data.startswith("group_")
         or data.startswith("gquick:")
+        or data.startswith("gmusic:")
         or data.startswith("ga:")
         or data.startswith("gh:")
         or data.startswith("gfb:")

@@ -503,7 +503,27 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             # ب) جستجوی متنی با نام خواننده/آهنگ یا آخرین آهنگ چت
             card = lyrics_for_query(_pl, chat_id=chat.id)
             if card:
-                await message.reply_text(str(card)[:4000])
+                markup = None
+                try:
+                    from bot.services.music_recognize import (
+                        extract_lyrics_block,
+                        store_lyrics_for_translate,
+                    )
+                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                    ly = extract_lyrics_block(str(card))
+                    key = store_lyrics_for_translate(str(card), ly) if ly else ""
+                    if key:
+                        markup = InlineKeyboardMarkup(
+                            [[
+                                InlineKeyboardButton(
+                                    "🇮🇷 ترجمه فارسی",
+                                    callback_data=f"gmusic:tr:{key}",
+                                )
+                            ]]
+                        )
+                except Exception:
+                    markup = None
+                await message.reply_text(str(card)[:4000], reply_markup=markup)
                 return True
             # ج) اگر فقط «زیرنویسش» بود و حافظه خالی
             if _want_ly and not audio_src:
