@@ -329,26 +329,66 @@ async def handle_group_media(update, context, *, source_message=None, prompt: st
         add_turn(chat.id, "bot", answer, user_id=None, speaker="روز زیبا", message_id=None)
         # Telegram messages are limited to 4096 chars.
         prefix = f"🤖 پاسخ به {speaker}:\n"
-        body = (prefix + answer)[:4090]
-        markup = None
+        body = (prefix + answer).strip()
         try:
             if locals().get("_music_tr_key"):
                 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                markup = InlineKeyboardMarkup(
-                    [[
-                        InlineKeyboardButton(
-                            "🇮🇷 ترجمه فارسی",
-                            callback_data=f"gmusic:tr:{_music_tr_key}",
-                        )
-                    ]]
+                from bot.services.music_recognize import (
+                    extract_lyrics_block,
+                    split_telegram_messages,
+                    bind_lyrics_messages,
+                    store_lyrics_for_translate,
                 )
-        except Exception:
-            markup = None
-        await message.reply_text(
-            body,
-            disable_web_page_preview=True,
-            reply_markup=markup,
-        )
+                import re as _re_h
+                lyrics_en = extract_lyrics_block(str(answer))
+                hm = _re_h.search(
+                    r"(.*?)(?:📝\s*متن(?:\s*/\s*زیرنویس)?\s*:?)\s*",
+                    str(answer),
+                    flags=_re_h.S,
+                )
+                header_core = hm.group(1).rstrip() if hm else str(answer).split("📝")[0]
+                header_only = (prefix + header_core).strip()
+                if lyrics_en and len(lyrics_en) > 20:
+                    _music_tr_key = store_lyrics_for_translate(
+                        str(answer), lyrics_en, header=header_only
+                    ) or _music_tr_key
+                    parts = split_telegram_messages(header_only, lyrics_en, limit=3900)
+                else:
+                    parts = [body[:4090]]
+                kb = None
+                if _music_tr_key:
+                    kb = InlineKeyboardMarkup(
+                        [[
+                            InlineKeyboardButton(
+                                "🇮🇷 ترجمه فارسی",
+                                callback_data=f"gmusic:tr:{_music_tr_key}",
+                            )
+                        ]]
+                    )
+                msg_ids = []
+                for idx, part in enumerate(parts):
+                    is_last = idx == len(parts) - 1
+                    sent = await message.reply_text(
+                        part[:4090],
+                        disable_web_page_preview=True,
+                        reply_markup=(kb if is_last else None),
+                    )
+                    if sent and getattr(sent, "message_id", None):
+                        msg_ids.append(int(sent.message_id))
+                if _music_tr_key and msg_ids:
+                    bind_lyrics_messages(
+                        _music_tr_key,
+                        getattr(chat, "id", None) or 0,
+                        msg_ids,
+                    )
+            else:
+                await message.reply_text(body[:4090], disable_web_page_preview=True)
+        except Exception as send_exc:
+            logger.warning("music multi-send failed: %s", send_exc)
+            try:
+                await message.reply_text(body[:4090], disable_web_page_preview=True)
+            except Exception:
+                pass
         return True
     except Exception as exc:
         logger.warning("group media processing failed chat=%s user=%s: %s", chat.id, user_id, exc)
