@@ -30,6 +30,38 @@ from bot.logger import logger
 _LAST_SONG: dict[int, tuple[float, dict]] = {}
 _LAST_SONG_TTL = 30 * 60  # 30 دقیقه
 
+# کش کوتاه متن انگلیسی برای دکمه «ترجمه فارسی»
+_LYRICS_CACHE: dict[str, tuple[float, str, str]] = {}
+_LYRICS_CACHE_TTL = 45 * 60
+
+
+def store_lyrics_for_translate(card_text: str, lyrics_en: str) -> str:
+    import hashlib
+    body = (lyrics_en or "").strip()
+    if not body or len(body) < 15:
+        return ""
+    key = hashlib.sha1(f"{card_text[:200]}|{body[:120]}".encode("utf-8")).hexdigest()[:12]
+    _LYRICS_CACHE[key] = (time.time(), str(card_text or ""), body)
+    if len(_LYRICS_CACHE) > 2000:
+        cutoff = time.time() - _LYRICS_CACHE_TTL
+        for k, (ts, _, _) in list(_LYRICS_CACHE.items()):
+            if ts < cutoff:
+                _LYRICS_CACHE.pop(k, None)
+    return key
+
+
+def pop_lyrics_for_translate(key: str) -> tuple[str, str] | None:
+    item = _LYRICS_CACHE.get(str(key or ""))
+    if not item:
+        return None
+    ts, card, ly = item
+    if time.time() - ts > _LYRICS_CACHE_TTL:
+        _LYRICS_CACHE.pop(str(key), None)
+        return None
+    return card, ly
+
+
+
 
 def remember_song(chat_id: int, meta: dict) -> None:
     try:
@@ -439,9 +471,11 @@ def format_song_card(meta: dict, lyrics: Optional[str] = None) -> str:
         lines.append(f"🛠 منبع: {meta['source']}")
     else:
         lines.append("🛠 منبع شناسایی: AudD")
-    warn = _common_title_warning(artist, title)
-    if warn:
-        lines.append(warn)
+    # اگر خودمان عنوان را اصلاح کردیم، هشدار گمراه‌کننده نشان نده
+    if not meta.get("_corrected"):
+        warn = _common_title_warning(artist, title)
+        if warn:
+            lines.append(warn)
     if lyrics:
         body = lyrics.strip()
         if len(body) > 3500:
@@ -660,12 +694,13 @@ def resolve_song_meta(
                     info = {
                         "artist": alt_artist,
                         "title": alt_title,
-                        "album": info.get("album") or alt_title,
-                        "song_link": info.get("song_link") or "",
-                        "release_date": info.get("release_date") or "",
-                        "label": info.get("label") or "",
-                        "timecode": info.get("timecode") or "",
+                        "album": alt_title,
+                        "song_link": "",
+                        "release_date": "",
+                        "label": "",
+                        "timecode": "",
                         "source": f"AudD+اصلاح عنوان ({alt_artist})",
+                        "_corrected": True,
                     }
                     lyrics = ly
                     logger.info(
