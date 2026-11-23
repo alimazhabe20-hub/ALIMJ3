@@ -35,30 +35,109 @@ _LYRICS_CACHE: dict[str, tuple[float, str, str]] = {}
 _LYRICS_CACHE_TTL = 45 * 60
 
 
-def store_lyrics_for_translate(card_text: str, lyrics_en: str) -> str:
+def store_lyrics_for_translate(card_text: str, lyrics_en: str, *, header: str = "") -> str:
+    """ذخیره هدر + lyrics کامل برای دکمه ترجمه. برمی‌گرداند key."""
     import hashlib
     body = (lyrics_en or "").strip()
     if not body or len(body) < 15:
         return ""
-    key = hashlib.sha1(f"{card_text[:200]}|{body[:120]}".encode("utf-8")).hexdigest()[:12]
-    _LYRICS_CACHE[key] = (time.time(), str(card_text or ""), body)
+    key = hashlib.sha1(f"{card_text[:200]}|{body[:160]}".encode("utf-8")).hexdigest()[:12]
+    _LYRICS_CACHE[key] = {
+        "ts": time.time(),
+        "card": str(card_text or ""),
+        "header": str(header or ""),
+        "lyrics": body,
+        "msg_ids": [],
+        "chat_id": None,
+    }
     if len(_LYRICS_CACHE) > 2000:
         cutoff = time.time() - _LYRICS_CACHE_TTL
-        for k, (ts, _, _) in list(_LYRICS_CACHE.items()):
-            if ts < cutoff:
+        for k, v in list(_LYRICS_CACHE.items()):
+            if isinstance(v, dict) and v.get("ts", 0) < cutoff:
+                _LYRICS_CACHE.pop(k, None)
+            elif isinstance(v, tuple) and v[0] < cutoff:
                 _LYRICS_CACHE.pop(k, None)
     return key
 
 
-def pop_lyrics_for_translate(key: str) -> tuple[str, str] | None:
+def bind_lyrics_messages(key: str, chat_id: int, message_ids: list[int]) -> None:
+    item = _LYRICS_CACHE.get(str(key or ""))
+    if not isinstance(item, dict):
+        return
+    item["chat_id"] = int(chat_id) if chat_id else None
+    item["msg_ids"] = [int(x) for x in (message_ids or []) if x]
+    _LYRICS_CACHE[str(key)] = item
+
+
+def pop_lyrics_for_translate(key: str) -> dict | None:
+    """dict با keys: header, lyrics, card, msg_ids, chat_id"""
     item = _LYRICS_CACHE.get(str(key or ""))
     if not item:
         return None
-    ts, card, ly = item
-    if time.time() - ts > _LYRICS_CACHE_TTL:
+    # سازگاری با فرمت قدیمی tuple
+    if isinstance(item, tuple):
+        ts, card, ly = item
+        if time.time() - ts > _LYRICS_CACHE_TTL:
+            _LYRICS_CACHE.pop(str(key), None)
+            return None
+        return {"header": "", "lyrics": ly, "card": card, "msg_ids": [], "chat_id": None}
+    if not isinstance(item, dict):
+        return None
+    if time.time() - float(item.get("ts") or 0) > _LYRICS_CACHE_TTL:
         _LYRICS_CACHE.pop(str(key), None)
         return None
-    return card, ly
+    return item
+
+
+def split_telegram_messages(header: str, lyrics: str, *, limit: int = 3900) -> list[str]:
+    """تقسیم به چند پیام تلگرام؛ هدر فقط روی پیام اول."""
+    header = (header or "").rstrip()
+    lyrics = (lyrics or "").strip()
+    if not lyrics:
+        return [header[:limit]] if header else []
+    first_budget = limit - len(header) - 40
+    if first_budget < 200:
+        # هدر جدا، lyrics جدا
+        parts = []
+        if header:
+            parts.append(header[:limit])
+        chunks = _chunk_text(lyrics, limit)
+        parts.extend(chunks)
+        return parts
+    # lyrics روی چند پیام؛ اول با هدر
+    if len(header) + 2 + len(lyrics) <= limit:
+        return [header + "\n────────────\n📝 متن / زیرنویس:\n" + lyrics]
+    chunks = _chunk_text(lyrics, max(500, first_budget))
+    out = [header + "\n────────────\n📝 متن / زیرنویس:\n" + chunks[0]]
+    for c in chunks[1:]:
+        out.append("📝 ادامه متن:\n" + c)
+    return out
+
+
+def _chunk_text(text: str, limit: int) -> list[str]:
+    text = text.strip()
+    if len(text) <= limit:
+        return [text]
+    lines = text.splitlines(keepends=True)
+    chunks, buf = [], ""
+    for ln in lines:
+        if len(buf) + len(ln) <= limit:
+            buf += ln
+        else:
+            if buf.strip():
+                chunks.append(buf.rstrip())
+            if len(ln) > limit:
+                # خط خیلی بلند
+                s = ln
+                while len(s) > limit:
+                    chunks.append(s[:limit])
+                    s = s[limit:]
+                buf = s
+            else:
+                buf = ln
+    if buf.strip():
+        chunks.append(buf.rstrip())
+    return chunks or [text[:limit]]
 
 
 
@@ -478,8 +557,6 @@ def format_song_card(meta: dict, lyrics: Optional[str] = None) -> str:
             lines.append(warn)
     if lyrics:
         body = lyrics.strip()
-        if len(body) > 3500:
-            body = body[:3500] + "\n…"
         lines.append("────────────")
         lines.append("📝 متن / زیرنویس:")
         lines.append(body)
