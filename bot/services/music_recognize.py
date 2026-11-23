@@ -553,13 +553,31 @@ def search_by_lyrics_snippet(snippet: str) -> Optional[dict]:
     return None
 
 
+
+# وقتی AudD کاور اشتباه می‌دهد، برای عنوان‌های معروف جایگزین‌های محتمل
+_COMMON_TITLE_ALTERNATES: dict[str, list[tuple[str, str]]] = {
+    "i'm yours": [
+        ("Isabel LaRosa", "I'm Yours"),
+        ("Jason Mraz", "I'm Yours"),
+    ],
+    "im yours": [
+        ("Isabel LaRosa", "I'm Yours"),
+        ("Jason Mraz", "I'm Yours"),
+    ],
+    "i am yours": [
+        ("Isabel LaRosa", "I'm Yours"),
+        ("Jason Mraz", "I'm Yours"),
+    ],
+}
+
+
 def resolve_song_meta(
     audd: Optional[dict],
     *,
     transcript_hint: str = "",
     want_lyrics: bool = True,
 ) -> tuple[Optional[dict], Optional[str]]:
-    """ادغام AudD + تأیید با متن ویس؛ در صورت تناقض از snippet استفاده کن."""
+    """ادغام AudD + تأیید با متن ویس + جایگزین عنوان‌های پرتکرار."""
     transcript_hint = str(transcript_hint or "").strip()
     info = dict(audd) if audd else None
     lyrics = None
@@ -567,32 +585,22 @@ def resolve_song_meta(
     if info and want_lyrics:
         lyrics = fetch_lyrics(info.get("artist") or "", info.get("title") or "")
 
-    # اگر متن ویس داریم، صحت‌سنجی کن
-    if transcript_hint and len(transcript_hint) >= 15:
+    title_l = (info.get("title") or "").lower().strip() if info else ""
+    artist_l = (info.get("artist") or "").lower().strip() if info else ""
+
+    # --- تأیید / اصلاح با STT ---
+    if transcript_hint and len(transcript_hint) >= 12:
         overlap = _lyrics_overlap_score(lyrics or "", transcript_hint) if lyrics else 0.0
-        # AudD بدون lyrics یا lyrics نامطابق
-        need_snippet = False
-        if not info:
+        need_snippet = (not info) or (not lyrics) or (overlap < 0.2)
+        if title_l in _COMMON_TITLE_ALTERNATES and overlap < 0.35:
             need_snippet = True
-        elif not lyrics:
-            need_snippet = True
-        elif overlap < 0.2:
-            need_snippet = True
-        # عنوان پرتکرار همیشه با snippet چک شود
-        title_l = (info.get("title") or "").lower().strip() if info else ""
-        if title_l in {
-            "i'm yours", "im yours", "i am yours", "hello", "stay", "sorry", "perfect",
-        }:
-            if overlap < 0.35:
-                need_snippet = True
 
         if need_snippet:
             for sn in _distinctive_snippets(transcript_hint):
                 hit = search_by_lyrics_snippet(sn)
                 if not hit:
                     continue
-                # اگر AudD هنرمند دیگری داد ولی snippet قوی‌تر است
-                if not info or (hit.get("_score") or 0) >= 0.25:
+                if (hit.get("_score") or 0) >= 0.22:
                     info = {
                         "artist": hit["artist"],
                         "title": hit["title"],
@@ -600,11 +608,23 @@ def resolve_song_meta(
                         "song_link": (info or {}).get("song_link") or "",
                         "source": hit.get("source") or "LRCLIB/snippet",
                     }
-                    lyrics = hit.get("lyrics") or fetch_lyrics(hit["artist"], hit["title"])
+                    lyrics = hit.get("lyrics") or fetch_lyrics(
+                        hit["artist"], hit["title"]
+                    )
+                    title_l = (info.get("title") or "").lower().strip()
+                    artist_l = (info.get("artist") or "").lower().strip()
+                    logger.info(
+                        "song corrected via snippet -> %s - %s (score=%.2f)",
+                        info["artist"],
+                        info["title"],
+                        hit.get("_score") or 0,
+                    )
                     break
-            # اگر هنوز lyrics نداریم ولی transcript شبیه Isabel LaRosa I'm Yours است
-            if (not lyrics or overlap < 0.2) and re.search(
-                r"pretty\s*it\s*hurts|trip\s*over\s*my\s*words|view\s*of\s*your\s*headlights",
+
+            # نشانه‌های قوی Isabel LaRosa - I'm Yours
+            if re.search(
+                r"pretty\s*,?\s*it\s*hurts|trip\s*over\s*my\s*words|"
+                r"view\s*of\s*your\s*headlights|pray\s*to\s*the\s*lord",
                 transcript_hint,
                 re.I,
             ):
@@ -616,8 +636,48 @@ def resolve_song_meta(
                     "source": "تطبیق متن ویس",
                 }
                 lyrics = fetch_lyrics("Isabel LaRosa", "I'm Yours") or lyrics
+                logger.info("song forced Isabel LaRosa via transcript markers")
+
+    # --- بدون STT: عنوان پرتکرار + lyrics ناموفق برای هنرمند AudD ---
+    if info and want_lyrics and title_l in _COMMON_TITLE_ALTERNATES:
+        need_alt = not lyrics
+        # اگر lyrics آمده ولی هنرمند AudD جزو جایگزین‌ها نیست، مشکوک است
+        alts = _COMMON_TITLE_ALTERNATES[title_l]
+        alt_artists = {a.lower() for a, _ in alts}
+        if artist_l and artist_l not in alt_artists and not lyrics:
+            need_alt = True
+        if artist_l and artist_l not in alt_artists and lyrics:
+            # lyrics ممکن است مال هنرمند دیگری باشد که با عنوان match شده
+            need_alt = True
+            lyrics = None
+
+        if need_alt:
+            for alt_artist, alt_title in alts:
+                if artist_l and artist_l == alt_artist.lower():
+                    continue
+                ly = fetch_lyrics(alt_artist, alt_title)
+                if ly and len(ly) > 40:
+                    info = {
+                        "artist": alt_artist,
+                        "title": alt_title,
+                        "album": info.get("album") or alt_title,
+                        "song_link": info.get("song_link") or "",
+                        "release_date": info.get("release_date") or "",
+                        "label": info.get("label") or "",
+                        "timecode": info.get("timecode") or "",
+                        "source": f"AudD+اصلاح عنوان ({alt_artist})",
+                    }
+                    lyrics = ly
+                    logger.info(
+                        "common-title alternate applied: %s - %s (was %s)",
+                        alt_artist,
+                        alt_title,
+                        artist_l,
+                    )
+                    break
 
     return info, lyrics
+
 
 
 def identify_and_lyrics(
