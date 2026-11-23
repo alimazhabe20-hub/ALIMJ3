@@ -1,40 +1,90 @@
-"""شناسایی آهنگ از صدا + دریافت lyrics.
+"""شناسایی آهنگ از صدا + دریافت lyrics / زیرنویس.
 
-جریان:
+جریان شناسایی از صدا:
   1) AudD  → artist / title
-  2) LRCLIB → متن ترانه (بدون کلید)
-  3) (اختیاری) Genius اگر GENIUS_ACCESS_TOKEN باشد
+  2) LRCLIB → متن ترانه
+  3) lyrics.ovh → متن
+  4) Genius (اگر GENIUS_ACCESS_TOKEN باشد)
+
+جریان متنی:
+  - «زیرنویس / متن آهنگ Isabel LaRosa I'm Yours»
+  - ریپلای به ویس: «زیرنویسش» / «متن آهنگ بالایی»
 
 Env:
-  AUDD_API_TOKEN   — الزامی برای شناسایی
-  GENIUS_ACCESS_TOKEN — اختیاری
+  AUDD_API_TOKEN
+  GENIUS_ACCESS_TOKEN  (اختیاری)
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import time
 import urllib.parse
 import urllib.request
 from typing import Optional
 
 from bot.logger import logger
 
+# آخرین آهنگ شناسایی‌شده در هر چت (برای «زیرنویسش» / «متن بالایی»)
+_LAST_SONG: dict[int, tuple[float, dict]] = {}
+_LAST_SONG_TTL = 30 * 60  # 30 دقیقه
 
-def _http_json(url: str, *, data: bytes | None = None, headers: dict | None = None, method: str = "GET", timeout: int = 30) -> dict:
+
+def remember_song(chat_id: int, meta: dict) -> None:
+    try:
+        _LAST_SONG[int(chat_id)] = (time.time(), dict(meta or {}))
+        if len(_LAST_SONG) > 3000:
+            cutoff = time.time() - _LAST_SONG_TTL
+            for k, (ts, _) in list(_LAST_SONG.items()):
+                if ts < cutoff:
+                    _LAST_SONG.pop(k, None)
+    except Exception:
+        pass
+
+
+def get_last_song(chat_id: int) -> Optional[dict]:
+    item = _LAST_SONG.get(int(chat_id or 0))
+    if not item:
+        return None
+    ts, meta = item
+    if time.time() - ts > _LAST_SONG_TTL:
+        _LAST_SONG.pop(int(chat_id), None)
+        return None
+    return meta
+
+
+def _http_json(
+    url: str,
+    *,
+    data: bytes | None = None,
+    headers: dict | None = None,
+    method: str = "GET",
+    timeout: int = 30,
+) -> dict:
     req = urllib.request.Request(url, data=data, headers=headers or {}, method=method)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8", errors="replace")
     return json.loads(raw) if raw else {}
 
 
-def recognize_audd(audio_bytes: bytes, *, filename: str = "voice.ogg", mime: str = "audio/ogg") -> Optional[dict]:
-    """شناسایی با AudD. خروجی: {artist, title, album, song_link} یا None."""
+def _http_text(url: str, *, timeout: int = 25) -> str:
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "alimj3-bot/1.0", "Accept": "application/json,text/plain"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
+def recognize_audd(
+    audio_bytes: bytes, *, filename: str = "voice.ogg", mime: str = "audio/ogg"
+) -> Optional[dict]:
+    """شناسایی با AudD. خروجی: {artist, title, album, song_link, release_date, label, timecode}."""
     token = (os.getenv("AUDD_API_TOKEN") or os.getenv("AUDD_TOKEN") or "").strip()
     if not token:
         raise RuntimeError("AUDD_API_TOKEN ست نشده")
 
-    # multipart ساده
     boundary = "----alimj3AudDBoundary"
     parts: list[bytes] = []
 
@@ -49,7 +99,6 @@ def recognize_audd(audio_bytes: bytes, *, filename: str = "voice.ogg", mime: str
 
     add_field("api_token", token)
     add_field("return", "apple_music,spotify")
-    # فایل
     parts.append(
         (
             f"--{boundary}\r\n"
@@ -64,7 +113,10 @@ def recognize_audd(audio_bytes: bytes, *, filename: str = "voice.ogg", mime: str
     req = urllib.request.Request(
         "https://api.audd.io/",
         data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}", "User-Agent": "alimj3-bot/1.0"},
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "User-Agent": "alimj3-bot/1.0",
+        },
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=45) as resp:
@@ -74,183 +126,139 @@ def recognize_audd(audio_bytes: bytes, *, filename: str = "voice.ogg", mime: str
         logger.warning("audd non-success: %s", str(data)[:300])
         return None
     result = data.get("result")
-    if not result or not isinstance(result, dict):
+    if not isinstance(result, dict):
         return None
-    artist = (result.get("artist") or "").strip()
-    title = (result.get("title") or "").strip()
+    artist = str(result.get("artist") or "").strip()
+    title = str(result.get("title") or "").strip()
     if not artist and not title:
         return None
-    release = (result.get("release_date") or result.get("release") or "").strip()
-    label = (result.get("label") or "").strip()
-    isrc = (result.get("isrc") or "").strip()
-    score = result.get("score") or result.get("timecode")
-    # لینک‌های جانبی
-    spotify = ""
-    apple = ""
-    try:
-        sp = result.get("spotify") or {}
-        if isinstance(sp, dict):
-            spotify = (sp.get("external_urls") or {}).get("spotify") or ""
-            if not spotify and sp.get("id"):
-                spotify = f"https://open.spotify.com/track/{sp['id']}"
-    except Exception:
-        pass
-    try:
-        am = result.get("apple_music") or {}
-        if isinstance(am, dict):
-            apple = am.get("url") or am.get("trackViewUrl") or ""
-    except Exception:
-        pass
     return {
         "artist": artist,
         "title": title,
-        "album": (result.get("album") or "").strip(),
-        "song_link": (result.get("song_link") or "").strip(),
-        "release_date": release,
-        "label": label,
-        "isrc": isrc,
-        "score": score,
-        "spotify": spotify,
-        "apple_music": apple,
-        "raw": result,
+        "album": str(result.get("album") or "").strip(),
+        "song_link": str(result.get("song_link") or "").strip(),
+        "release_date": str(result.get("release_date") or "").strip(),
+        "label": str(result.get("label") or "").strip(),
+        "timecode": str(result.get("timecode") or "").strip(),
     }
 
 
 def fetch_lyrics_lrclib(artist: str, title: str) -> Optional[str]:
-    """متن از LRCLIB — رایگان، بدون کلید."""
     try:
         q = urllib.parse.urlencode({"q": f"{artist} {title}".strip()})
         search = _http_json(f"https://lrclib.net/api/search?{q}", timeout=20)
         if not isinstance(search, list) or not search:
-            # fallback get
+            # مستقیم get
             params = urllib.parse.urlencode(
                 {"artist_name": artist, "track_name": title}
             )
             item = _http_json(f"https://lrclib.net/api/get?{params}", timeout=20)
-            plain = (item.get("plainLyrics") or item.get("syncedLyrics") or "").strip()
-            return plain or None
-
+            if isinstance(item, dict):
+                body = item.get("plainLyrics") or item.get("syncedLyrics") or ""
+                return str(body).strip() or None
+            return None
         best = search[0]
-        plain = (best.get("plainLyrics") or "").strip()
-        if plain:
-            return plain
-        # گاهی فقط id دارد
+        if not isinstance(best, dict):
+            return None
+        body = best.get("plainLyrics") or best.get("syncedLyrics")
+        if body:
+            return str(body).strip() or None
         tid = best.get("id")
         if tid:
             item = _http_json(f"https://lrclib.net/api/get/{tid}", timeout=20)
-            plain = (item.get("plainLyrics") or item.get("syncedLyrics") or "").strip()
-            return plain or None
+            if isinstance(item, dict):
+                body = item.get("plainLyrics") or item.get("syncedLyrics") or ""
+                return str(body).strip() or None
     except Exception as exc:
         logger.warning("lrclib failed: %s", exc)
     return None
 
 
+def fetch_lyrics_ovh(artist: str, title: str) -> Optional[str]:
+    """lyrics.ovh — رایگان، بدون کلید."""
+    try:
+        a = urllib.parse.quote(artist.strip())
+        t = urllib.parse.quote(title.strip())
+        raw = _http_text(f"https://api.lyrics.ovh/v1/{a}/{t}", timeout=20)
+        data = json.loads(raw) if raw else {}
+        body = str(data.get("lyrics") or "").strip()
+        if body and len(body) > 20:
+            # حذف هدر رایج
+            body = re.sub(r"^Paroles de la chanson.*?\n+", "", body, flags=re.I)
+            return body.strip() or None
+    except Exception as exc:
+        logger.warning("lyrics.ovh failed: %s", exc)
+    return None
+
+
 def fetch_lyrics_genius(artist: str, title: str) -> Optional[str]:
-    """اختیاری — اگر GENIUS_ACCESS_TOKEN باشد."""
-    token = (os.getenv("GENIUS_ACCESS_TOKEN") or "").strip()
+    token = (os.getenv("GENIUS_ACCESS_TOKEN") or os.getenv("GENIUS_TOKEN") or "").strip()
     if not token:
         return None
     try:
-        q = urllib.parse.urlencode({"q": f"{artist} {title}"})
-        req = urllib.request.Request(
+        q = urllib.parse.urlencode({"q": f"{artist} {title}".strip()})
+        data = _http_json(
             f"https://api.genius.com/search?{q}",
-            headers={"Authorization": f"Bearer {token}", "User-Agent": "alimj3-bot/1.0"},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=20,
         )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
-        hits = ((data.get("response") or {}).get("hits")) or []
+        hits = (data.get("response") or {}).get("hits") or []
         if not hits:
             return None
-        # Genius API متن کامل نمی‌دهد بدون scrape — فقط لینک
-        url = (hits[0].get("result") or {}).get("url") or ""
-        if url:
-            return f"(متن کامل در Genius)\n{url}"
+        # Genius API متن کامل نمی‌دهد؛ فقط لینک — برای متن کامل به scrape نیاز است
+        # اینجا فقط اگر preview در نتیجه باشد
+        for h in hits[:3]:
+            res = (h or {}).get("result") or {}
+            url = res.get("url") or ""
+            if url:
+                # بدون scrape فقط لینک را به‌عنوان راهنما برمی‌گردانیم نه lyrics
+                logger.info("genius hit: %s", url)
+                break
+        return None
     except Exception as exc:
         logger.warning("genius failed: %s", exc)
     return None
 
 
-def identify_and_lyrics(audio_bytes: bytes, *, filename: str = "voice.ogg", mime: str = "audio/ogg", want_lyrics: bool = True) -> str:
-    """خروجی آماده برای ارسال در تلگرام."""
-    info = recognize_audd(audio_bytes, filename=filename, mime=mime)
-    if not info:
-        return (
-            "🎵 آهنگ در پایگاه شناسایی پیدا نشد.\n"
-            "اگر آهنگ کمتر معروف/جدید است یا کیفیت ویس پایین است، ممکن است شناسایی نشود."
-        )
-
-    artist = info["artist"]
-    title = info["title"]
-    album = info.get("album") or ""
-    link = info.get("song_link") or ""
-
-    lines = [
-        "🎵 آهنگ شناسایی شد",
-        "────────────",
-        f"🎤 هنرمند: {artist}",
-        f"🎧 عنوان: {title}",
-    ]
-    if album:
-        lines.append(f"💿 آلبوم: {album}")
-    release = info.get("release_date") or ""
-    if release:
-        lines.append(f"📅 انتشار: {release}")
-    label = info.get("label") or ""
-    if label:
-        lines.append(f"🏷 ناشر: {label}")
-    isrc = info.get("isrc") or ""
-    if isrc:
-        lines.append(f"🆔 ISRC: {isrc}")
-    score = info.get("score")
-    if score not in (None, ""):
-        lines.append(f"📊 تطبیق: {score}")
-    lines.append("────────────")
-    if link:
-        lines.append(f"🔗 {link}")
-    sp = info.get("spotify") or ""
-    if sp:
-        lines.append(f"🟢 Spotify: {sp}")
-    am = info.get("apple_music") or ""
-    if am:
-        lines.append(f"🍎 Apple Music: {am}")
-    lines.append("🛠 منبع شناسایی: AudD")
-
-    if want_lyrics:
-        lyrics = fetch_lyrics_lrclib(artist, title)
-        if not lyrics:
-            lyrics = fetch_lyrics_genius(artist, title)
+def fetch_lyrics(artist: str, title: str) -> Optional[str]:
+    artist = (artist or "").strip()
+    title = (title or "").strip()
+    if not title:
+        return None
+    lyrics = fetch_lyrics_lrclib(artist, title)
+    if lyrics:
+        return lyrics
+    lyrics = fetch_lyrics_ovh(artist, title)
+    if lyrics:
+        return lyrics
+    # بدون artist هم یک‌بار lrclib
+    if artist:
+        lyrics = fetch_lyrics_lrclib("", title)
         if lyrics:
-            # محدودیت طول تلگرام
-            body = lyrics.strip()
-            if len(body) > 2800:
-                body = body[:2800] + "\n…"
-            lines.append("────────────")
-            lines.append("📝 متن:")
-            lines.append(body)
-        else:
-            lines.append("────────────")
-            lines.append("📝 متن ترانه در منابع آزاد پیدا نشد.")
-
-    return "\n".join(lines)
+            return lyrics
+        lyrics = fetch_lyrics_ovh("", title)
+        if lyrics:
+            return lyrics
+    fetch_lyrics_genius(artist, title)  # فقط برای لاگ/آینده
+    return None
 
 
 def _norm_fa_music(text: str) -> str:
-    """یکسان‌سازی املای رایج: اهنگ → آهنگ، ي → ی، ك → ک."""
-    t = (text or "").strip()
-    t = t.replace("ي", "ی").replace("ك", "ک")
+    t = str(text or "").strip().replace("ي", "ی").replace("ك", "ک")
     t = t.replace("اهنگ", "آهنگ")
+    t = t.replace("زیر نویس", "زیرنویس")
+    t = t.replace("زیر‌نویس", "زیرنویس")
     return t
 
 
 def wants_music_id(text: str) -> bool:
-    t = _norm_fa_music(text or "")
-    t = re.sub(r"^(?:ربات|هوشمند|!)\s*", "", t, flags=re.I).strip()
+    t = _norm_fa_music(text)
     if re.fullmatch(r"آهنگ|music|song|shazam", t, re.I):
         return True
     return bool(
         re.search(
             r"(?:چه\s*آهنگ|اسم\s*آهنگ|این\s*آهنگ|آهنگ\s*چیه|شناسایی\s*آهنگ|"
-            r"آهنگ|ترانه|متن\s*آهنگ|lyrics|lyric|shazam|چه\s*تصنیف)",
+            r"آهنگ|ترانه|شازم|shazam|چه\s*تصنیف)",
             t,
             re.I,
         )
@@ -258,16 +266,192 @@ def wants_music_id(text: str) -> bool:
 
 
 def wants_lyrics(text: str) -> bool:
-    t = _norm_fa_music(text or "")
-    return bool(re.search(r"(?:متن\s*آهنگ|متن\s*ترانه|ترانه|lyrics|lyric)", t, re.I))
+    t = _norm_fa_music(text)
+    return bool(
+        re.search(
+            r"(?:"
+            r"متن\s*آهنگ|متن\s*ترانه|ترانه|"
+            r"زیرنویس|زیر\s*نویس|subtitle|captions?|"
+            r"lyrics|lyric|"
+            r"متنشو|متن\s*شو|زیرنویسشو|زیرنویسش|"
+            r"lyric\s*این|متن\s*این\s*آهنگ"
+            r")",
+            t,
+            re.I,
+        )
+    )
+
+
+def wants_previous_lyrics(text: str) -> bool:
+    """درخواست متن/زیرنویس برای آهنگ قبلی یا پیام بالایی."""
+    t = _norm_fa_music(text)
+    return bool(
+        re.search(
+            r"(?:"
+            r"زیرنویس(?:ش|شو)?|"
+            r"متن(?:ش|شو)?|"
+            r"(?:آهنگ|ویس|صدا|پیام)\s*(?:بالا|قبلی|همین)|"
+            r"بالایی|قبلی"
+            r").*"
+            r"(?:آهنگ|ترانه|زیرنویس|متن|lyric)|"
+            r"(?:متن|زیرنویس|lyric).*"
+            r"(?:بالا|قبلی|همین|آهنگ)"
+            r")",
+            t,
+            re.I,
+        )
+    ) or (
+        wants_lyrics(t)
+        and bool(re.search(r"بالا|قبلی|همین|شو\b|ش\b", t, re.I))
+    )
+
+
+def parse_artist_title(text: str) -> Optional[tuple[str, str]]:
+    """استخراج (artist, title) از متن کاربر."""
+    t = _norm_fa_music(text)
+    t = re.sub(
+        r"(?:ربات|بات|لطفاً|لطفا|میخوام|می‌خوام|بده|بفرست|پیدا\s*کن)",
+        " ",
+        t,
+        flags=re.I,
+    )
+    t = re.sub(
+        r"(?:متن|زیرنویس|lyrics|lyric|آهنگ|ترانه)\s*",
+        " ",
+        t,
+        flags=re.I,
+    )
+    t = re.sub(r"\s+", " ", t).strip(" :-–—|")
+
+    # خواننده X آهنگ Y
+    m = re.search(
+        r"(?:خواننده|خواننده‌اش|artist|singer)\s*[:\-]?\s*(.+?)\s+"
+        r"(?:آهنگ|ترانه|عنوان|title|song)\s*[:\-]?\s*(.+)$",
+        t,
+        re.I,
+    )
+    if m:
+        return m.group(1).strip(' :-'), m.group(2).strip(' :-')
+
+    # X - Y  یا  X – Y
+    m = re.search(r"^(.{2,40}?)\s*[-–—]\s*(.{2,60})$", t)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+
+    # by Artist
+    m = re.search(r"^(.+?)\s+by\s+(.+)$", t, re.I)
+    if m:
+        return m.group(2).strip(), m.group(1).strip()
+
+    # فقط عنوان اگر کوتاه است
+    if 2 <= len(t) <= 60 and not re.search(r"[؟?]", t):
+        # بدون artist
+        return "", t
+    return None
+
+
+def format_song_card(meta: dict, lyrics: Optional[str] = None) -> str:
+    artist = str(meta.get("artist") or "—")
+    title = str(meta.get("title") or "—")
+    lines = [
+        "🎵 آهنگ شناسایی شد",
+        "────────────",
+        f"🎤 هنرمند: {artist}",
+        f"🎧 عنوان: {title}",
+    ]
+    if meta.get("album"):
+        lines.append(f"💿 آلبوم: {meta['album']}")
+    if meta.get("release_date"):
+        lines.append(f"📅 انتشار: {meta['release_date']}")
+    if meta.get("label"):
+        lines.append(f"🏷 ناشر: {meta['label']}")
+    if meta.get("timecode"):
+        lines.append(f"📊 تطبیق: {meta['timecode']}")
+    lines.append("────────────")
+    if meta.get("song_link"):
+        lines.append(f"🔗 {meta['song_link']}")
+    if meta.get("source"):
+        lines.append(f"🛠 منبع: {meta['source']}")
+    else:
+        lines.append("🛠 منبع شناسایی: AudD")
+    if lyrics:
+        body = lyrics.strip()
+        if len(body) > 3500:
+            body = body[:3500] + "\n…"
+        lines.append("────────────")
+        lines.append("📝 متن / زیرنویس:")
+        lines.append(body)
+    else:
+        lines.append("────────────")
+        lines.append("📝 متن ترانه در منابع آزاد پیدا نشد.")
+        lines.append(
+            "می‌تونی نام دقیق‌تر خواننده و آهنگ را بفرستی "
+            "مثلاً: «خواننده Isabel LaRosa آهنگ I'm Yours»"
+        )
+    return "\n".join(lines)
+
+
+def identify_and_lyrics(
+    audio_bytes: bytes,
+    *,
+    filename: str = "voice.ogg",
+    mime: str = "audio/ogg",
+    want_lyrics: bool = True,
+    chat_id: int | None = None,
+) -> str:
+    info = recognize_audd(audio_bytes, filename=filename, mime=mime)
+    if not info:
+        return (
+            "🎵 آهنگ در پایگاه شناسایی پیدا نشد.\n"
+            "اگر آهنگ کمتر معروف/جدید است یا کیفیت ویس پایین است، ممکن است شناسایی نشود.\n"
+            "نام خواننده و عنوان را تایپ کن تا متن/زیرنویس را پیدا کنم."
+        )
+    info["source"] = "AudD"
+    if chat_id:
+        remember_song(chat_id, info)
+    lyrics = fetch_lyrics(info.get("artist") or "", info.get("title") or "") if want_lyrics else None
+    return format_song_card(info, lyrics)
+
+
+def lyrics_for_query(text: str, *, chat_id: int | None = None) -> Optional[str]:
+    """جستجوی متن با نام خواننده/آهنگ یا آخرین آهنگ چت."""
+    t = _norm_fa_music(text)
+
+    # اول: artist/title در متن
+    parsed = parse_artist_title(t)
+    if parsed:
+        artist, title = parsed
+        if title:
+            lyrics = fetch_lyrics(artist, title)
+            meta = {
+                "artist": artist or "—",
+                "title": title,
+                "source": "جستجوی متنی",
+            }
+            if chat_id:
+                remember_song(chat_id, meta)
+            return format_song_card(meta, lyrics)
+
+    # دوم: آخرین آهنگ همین چت
+    if chat_id and wants_lyrics(t):
+        last = get_last_song(chat_id)
+        if last and last.get("title"):
+            lyrics = fetch_lyrics(last.get("artist") or "", last.get("title") or "")
+            return format_song_card(last, lyrics)
+
+    return None
 
 
 def extract_lyrics_block(message_text: str) -> str:
-    """استخراج بخش متن ترانه از خروجی identify_and_lyrics."""
+    """استخراج بخش متن ترانه از خروجی identify_and_lyrics / format_song_card."""
     s = str(message_text or "")
-    if "📝 متن:" in s:
-        part = s.split("📝 متن:", 1)[1]
-        # قطع کردن اگر بخش دیگری آمد
-        part = re.split(r"\n🇮🇷|\n────────────", part)[0]
-        return part.strip()
+    m = re.search(
+        r"(?:📝\s*متن(?:\s*/\s*زیرنویس)?\s*:?\s*)([\s\S]+)$",
+        s,
+    )
+    if m:
+        body = m.group(1).strip()
+        if "پیدا نشد" in body:
+            return ""
+        return body
     return ""
