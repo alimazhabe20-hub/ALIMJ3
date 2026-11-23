@@ -97,7 +97,7 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             reply_msg
             and any(
                 getattr(reply_msg, n, None)
-                for n in ("photo", "video", "video_note", "document", "sticker")
+                for n in ("photo", "video", "video_note", "document", "sticker", "voice", "audio")
             )
         )
         bot_id = getattr(getattr(context, "bot", None), "id", None)
@@ -396,7 +396,6 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
 
 
     # 0) دانلودر واقعی برای لینک‌های سوشال/ویدیو
-    # اولویت: insta-cascade (مثل insta-downloader-bot) → بعد مسیر عمومی v70
     try:
         has_url = bool(re.search(r"https?://|www\.", prompt, re.I))
         social = bool(re.search(
@@ -406,34 +405,24 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         ))
         if has_url and social:
             logger.info("group_reply downloader url=%r", prompt[:140])
+            handled = False
+            try:
+                from bot.handlers.v70_handlers import handle_downloader_url
+                handled = await handle_downloader_url(update, context, prompt)
+            except Exception as exc:
+                logger.warning("group v70 downloader failed: %s", exc)
+            if handled:
+                return True
             try:
                 from bot.services.downloader import extract_url
                 from bot.services.insta_downloader import is_social_url
                 from bot.handlers.v71_handlers import _download_social_direct
-
                 url = extract_url(prompt) or prompt.strip()
-                # اگر متن چندخطی است (لینک + «دانلود کن»)، فقط URL را بردار
-                if url and not str(url).startswith("http"):
-                    m = re.search(r"https?://\S+", prompt)
-                    url = m.group(0).strip() if m else url
-                if url:
-                    url = str(url).split()[0].rstrip(").,，。،]")
-
                 if url and is_social_url(url):
                     await _download_social_direct(update, context, url)
                     return True
             except Exception as exc:
-                logger.warning("group social download failed: %s", exc)
-
-            # fallback: مسیر عمومی v70
-            try:
-                from bot.handlers.v70_handlers import handle_downloader_url
-                handled = await handle_downloader_url(update, context, prompt)
-                if handled:
-                    return True
-            except Exception as exc:
-                logger.warning("group v70 downloader failed: %s", exc)
-
+                logger.warning("group v71 social download failed: %s", exc)
             try:
                 await message.reply_text(
                     "⚠️ دانلود این لینک الان ممکن نشد. دوباره بفرست یا در پیوی امتحان کن."
@@ -443,95 +432,6 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             return True
     except Exception as exc:
         logger.warning("group_reply download branch error: %s", exc)
-
-    # «ترجمه / به فارسی» روی ریپلای یا آخرین جواب ربات (مثلاً متن آهنگ)
-    TRANSLATE_RE = re.compile(
-        r"(?:ترجمه(?:\s*کن)?|به\s*فارسی|فارسی\s*کن|translate)",
-        re.I,
-    )
-    if TRANSLATE_RE.search(prompt or ""):
-        src = ""
-        if message.reply_to_message:
-            src = (
-                message.reply_to_message.text
-                or message.reply_to_message.caption
-                or ""
-            ).strip()
-        if not src:
-            try:
-                from bot.handlers.group_parts.group_memory import get_context
-                ctx = get_context(chat.id, max_turns=6, for_prompt=False) or ""
-                for line in reversed([ln.strip() for ln in str(ctx).splitlines() if ln.strip()]):
-                    if len(line) > 40 and not TRANSLATE_RE.search(line):
-                        src = line
-                        break
-            except Exception:
-                pass
-        if src:
-            # اگر هدر شناسایی آهنگ دارد، همان بلوک متن را ترجیح بده
-            if "📝" in src or "متن" in src:
-                parts = re.split(r"📝\s*متن\s*:?", src, maxsplit=1)
-                if len(parts) == 2 and parts[1].strip():
-                    src = parts[1].strip()
-            prompt = (
-                "این متن را طبیعی و روان به فارسی ترجمه کن. "
-                "اگر شعر/ترانه است، حس و قافیه را تا حد ممکن حفظ کن. "
-                "فقط ترجمه را بده، توضیح اضافه نده:\n\n"
-                f"{src[:3500]}"
-            )
-            logger.info("group_reply translate-context len=%s", len(src))
-        else:
-            await message.reply_text(
-                "روی پیامی که می‌خواهی ترجمه‌اش کنم ریپلای کن و بگو «ترجمه فارسی»، "
-                "یا همان متن را بفرست."
-            )
-            return True
-
-    # «جوابش بده / پاسخ بده» → موضوع را از ریپلای یا پیام قبلی گروه بگیر
-    ANSWER_RE = re.compile(
-        r"(?:جواب(?:ش)?|پاسخ(?:ش)?)\s*بده|جواب\s*اینو?\s*بده|بهش\s*جواب\s*بده|"
-        r"جواب\s*(?:این|اون)\s*(?:پیام|متن)?\s*رو?\s*بده",
-        re.I,
-    )
-    if ANSWER_RE.search(prompt or ""):
-        target_text = ""
-        if message.reply_to_message:
-            target_text = (
-                message.reply_to_message.text
-                or message.reply_to_message.caption
-                or ""
-            ).strip()
-        if not target_text:
-            try:
-                from bot.handlers.group_parts.group_memory import get_context
-                ctx = get_context(chat.id, max_turns=8, for_prompt=False) or ""
-                skip_bits = ("جواب", "پاسخ بده", "خجالت", "دستیار:", "زمینه گروه")
-                for line in reversed([ln.strip() for ln in str(ctx).splitlines() if ln.strip()]):
-                    # حذف پیشوند نقش اگر باشد
-                    t = re.sub(r"^(?:کاربر|ربات|bot|user|روز زیبا)\s*[:：]\s*", "", line, flags=re.I).strip()
-                    if not t or len(t) < 12:
-                        continue
-                    if any(s in t for s in skip_bits) and len(t) < 50:
-                        continue
-                    if "digikala.com" in t or "torob.com" in t:
-                        continue
-                    target_text = t
-                    break
-            except Exception as exc:
-                logger.debug("answer-context memory lookup failed: %s", exc)
-        if target_text:
-            prompt = (
-                "به این پیام کاربر در گروه کوتاه، مفید و دوستانه جواب بده. "
-                "اگر پیشنهاد قرار/مکان است نظر بده و اگر سؤال است مستقیم پاسخ بده:\n"
-                f"«{target_text[:1500]}»"
-            )
-            logger.info("group_reply answer-context attached len=%s", len(target_text))
-        else:
-            await message.reply_text(
-                "روی پیامی که باید جوابش را بدهم ریپلای کن و بگو «ربات جوابش بده»، "
-                "یا همان متن را دوباره بفرست."
-            )
-            return True
 
     # درخواست مبهم («تحلیل کن») بدون ریپلای → موضوع را بپرس به‌جای حدس روی تاریخچه
     if VAGUE_RE.match(prompt or "") and not message.reply_to_message:
@@ -545,19 +445,68 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         if replied_text:
             prompt = f"این پیام را کوتاه و دقیق تحلیل کن:\n«{replied_text[:1500]}»"
 
-    # پیام خیلی کوتاه / مبهم غیرتحلیلی → مستقیم AI، نه فروشگاه
-    _pstrip = (prompt or "").strip()
-    if len(_pstrip) <= 4 or _pstrip in {"الس؟", "الس", "؟", "?", "چیه", "چی", "خب", "اه"}:
-        # اگر ریپلای دارد همان را موضوع کن
-        if message.reply_to_message:
-            rt = (message.reply_to_message.text or message.reply_to_message.caption or "").strip()
-            if rt:
-                prompt = (
-                    f"کاربر نوشته «{_pstrip}». با توجه به این پیام کوتاه و مفید جواب بده:\n"
-                    f"«{rt[:1200]}»"
+    # 0) متن/زیرنویس آهنگ (متنی یا ارجاع به ویس/آهنگ قبلی)
+    try:
+        from bot.services.music_recognize import (
+            wants_lyrics,
+            wants_previous_lyrics,
+            wants_music_id,
+            lyrics_for_query,
+            identify_and_lyrics,
+            remember_song,
+        )
+        _pl = (prompt or text or "").strip()
+        _want_ly = wants_lyrics(_pl) or wants_previous_lyrics(_pl)
+        if _want_ly or wants_music_id(_pl):
+            # الف) ریپلای به ویس/آهنگ → شناسایی + متن
+            rm = message.reply_to_message
+            audio_src = None
+            if rm is not None:
+                audio_src = getattr(rm, "voice", None) or getattr(rm, "audio", None)
+            if audio_src is not None and _want_ly:
+                try:
+                    tg_file = await context.bot.get_file(audio_src.file_id)
+                    import tempfile, os as _os
+                    from pathlib import Path as _P
+                    suffix = ".ogg" if getattr(rm, "voice", None) else ".mp3"
+                    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                        path = tmp.name
+                    await tg_file.download_to_drive(path)
+                    data = _P(path).read_bytes()
+                    try:
+                        _os.unlink(path)
+                    except Exception:
+                        pass
+                    mime = getattr(audio_src, "mime_type", None) or (
+                        "audio/ogg" if getattr(rm, "voice", None) else "audio/mpeg"
+                    )
+                    result = identify_and_lyrics(
+                        data,
+                        filename=_P(path).name if path else "audio.ogg",
+                        mime=mime,
+                        want_lyrics=True,
+                        chat_id=chat.id,
+                    )
+                    await message.reply_text(str(result)[:4000])
+                    return True
+                except Exception as _mx:
+                    logger.warning("reply-voice lyrics failed: %s", _mx)
+            # ب) جستجوی متنی با نام خواننده/آهنگ یا آخرین آهنگ چت
+            card = lyrics_for_query(_pl, chat_id=chat.id)
+            if card:
+                await message.reply_text(str(card)[:4000])
+                return True
+            # ج) اگر فقط «زیرنویسش» بود و حافظه خالی
+            if _want_ly and not audio_src:
+                await message.reply_text(
+                    "🎵 برای زیرنویس/متن آهنگ یکی از این‌ها را بفرست:\n"
+                    "• ریپلای به ویس/آهنگ + «زیرنویسش»\n"
+                    "• یا بنویس: خواننده … آهنگ …\n"
+                    "مثال: خواننده Isabel LaRosa آهنگ I'm Yours"
                 )
-        # fast_path خرید را برای این پیام‌ها اجرا نکن
-        pass
+                return True
+    except Exception as _ly_exc:
+        logger.warning("lyrics path error: %s", _ly_exc)
 
     # 1) Fast-path
     try:
@@ -567,13 +516,7 @@ async def try_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             return True
         if group_fast_path_enabled(chat.id):
             from bot.handlers.group_parts.fast_path import run_fast_path
-            # هرگز پرامپت آلوده را به fast_path نده
-            fp_prompt = prompt or ""
-            if any(x in fp_prompt for x in ("دستیار:", "زمینه گروه", "متن پیاده‌شده", "متن پیاده شده")):
-                fp_prompt = re.split(r"دستیار:|زمینه گروه|متن پیاده", fp_prompt, maxsplit=1)[0].strip()
-            if len(fp_prompt) > 160:
-                fp_prompt = fp_prompt[:160]
-            fp = await run_fast_path(fp_prompt)
+            fp = await run_fast_path(prompt)
             logger.info("group_reply fast_path result=%s", "HIT" if fp else "MISS")
             if fp:
                 markup = None
